@@ -25,11 +25,15 @@ internal static class SmokeHarness
         data.Profiles[0].Rules.Add(new() { Name = "OpenAI / ChatGPT", Values = ["openai.com", "chatgpt.com", "oaistatic.com", "oaiusercontent.com"] });
         data.Profiles[0].Rules.Add(new() { Name = "Claude / Anthropic", Values = ["claude.ai", "anthropic.com"] });
         data.Profiles[0].Rules.Add(new() { Name = "Telegram", Kind = RuleKind.Application, Values = ["Telegram.exe"] });
-        store.Save(data); return new(store);
+        data.Settings.TunnelMode = TunnelMode.Proxy;
+        store.Save(data);
+        var vm = new MainViewModel(store);
+        if (vm.Settings.TunnelMode != TunnelMode.Tun) throw new InvalidOperationException("Startup must select TUN even after a prior proxy session.");
+        return vm;
     }
     public static async Task RunAsync(MainWindow window, MainViewModel vm)
     {
-        await Task.Delay(400); var report = new List<string>();
+        await Task.Delay(400); var report = new List<string> { "Startup selects TUN after a saved proxy session." };
         foreach (var page in new[] { "Home", "Servers", "Rules", "Subscriptions", "Settings" })
         {
             vm.Go(page); await Task.Delay(300); window.UpdateLayout();

@@ -2,6 +2,24 @@ param([string]$OwnerAccount, [string]$OwnerSid, [switch]$EnableStartup)
 $ErrorActionPreference = 'Stop'
 $principal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'Run this script once as administrator to register the service.' }
+function Set-ProtectedHelperAcl([IO.FileSystemInfo]$Item) {
+    $admins = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')
+    if ($Item.PSIsContainer) {
+        $acl = [Security.AccessControl.DirectorySecurity]::new()
+        $inherit = [Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
+    } else {
+        $acl = [Security.AccessControl.FileSecurity]::new()
+        $inherit = [Security.AccessControl.InheritanceFlags]::None
+    }
+    $acl.SetAccessRuleProtection($true, $false)
+    $acl.SetOwner($admins)
+    foreach ($sid in @('S-1-5-18', 'S-1-5-32-544', 'S-1-5-32-545')) {
+        $rights = if ($sid -eq 'S-1-5-32-545') { [Security.AccessControl.FileSystemRights]::ReadAndExecute } else { [Security.AccessControl.FileSystemRights]::FullControl }
+        $rule = [Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new($sid), $rights, $inherit, [Security.AccessControl.PropagationFlags]::None, [Security.AccessControl.AccessControlType]::Allow)
+        $acl.AddAccessRule($rule)
+    }
+    Set-Acl -LiteralPath $Item.FullName -AclObject $acl
+}
 $installRoot = Split-Path -Parent $PSScriptRoot
 $exe = Join-Path $installRoot 'Bebekon.Service.exe'
 if (-not (Test-Path -LiteralPath $exe)) { throw 'Service executable is missing.' }
@@ -9,9 +27,16 @@ $programFilesRoot = [IO.Path]::GetFullPath($env:ProgramFiles).TrimEnd('\') + '\'
 if (-not [IO.Path]::GetFullPath($installRoot).StartsWith($programFilesRoot,[StringComparison]::OrdinalIgnoreCase)) {
     # A LocalSystem executable cannot remain in a user-writable portable directory.
     $protectedRoot = Join-Path $env:ProgramFiles 'Bebekon VPN Portable Helper'
+    if (-not [IO.Path]::GetFullPath($protectedRoot).StartsWith($programFilesRoot,[StringComparison]::OrdinalIgnoreCase)) { throw 'Invalid helper destination.' }
     New-Item -ItemType Directory -Path $protectedRoot -Force | Out-Null
     if ((Get-Item -LiteralPath $protectedRoot).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Reparse helper directory is forbidden.' }
+    foreach ($root in @($installRoot, $protectedRoot)) {
+        if ((Get-Item -LiteralPath $root).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Reparse package directory is forbidden.' }
+        if (Get-ChildItem -LiteralPath $root -Recurse -Force | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint }) { throw 'Reparse package files are forbidden.' }
+    }
+    Set-ProtectedHelperAcl (Get-Item -LiteralPath $protectedRoot)
     Get-ChildItem -LiteralPath $installRoot | Copy-Item -Destination $protectedRoot -Recurse -Force
+    Get-ChildItem -LiteralPath $protectedRoot -Recurse -Force | ForEach-Object { Set-ProtectedHelperAcl $_ }
     $exe = Join-Path $protectedRoot 'Bebekon.Service.exe'
 }
 if (-not $OwnerSid) {

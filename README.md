@@ -17,7 +17,11 @@ No .NET runtime is needed on the destination PC. Build needs internet for NuGet 
 
 Setup installs into Program Files, registers a demand-start LocalSystem helper, assigns its pipe and service-start rights to the chosen Windows account, and creates shortcuts. If UAC uses a different administrator account, enter the ordinary user's Windows account on the owner page. Only installation/uninstallation needs elevation; connecting from the UI does not. Upgrades preserve %LOCALAPPDATA% data.
 
-Portable still needs a privileged helper for TUN: extract the ZIP, run scripts/install-service.ps1 **once as administrator**, then launch Bebekon.App.exe normally. The script copies the helper/runtime to a protected Program Files directory before service registration; a LocalSystem binary never remains in the user-writable portable folder. Use -OwnerAccount 'COMPUTER\username' if elevating with another account. scripts/uninstall-service.ps1 removes the service and its protected copy. Portable means no app installer, not an unprivileged TUN driver.
+The launch executable is **artifacts/release/Bebekon.App.exe** after building, or **Bebekon.App.exe** in the extracted portable ZIP. Keep its adjacent runtime, scripts and core folders together.
+
+TUN is selected automatically at each launch. Proxy can still be selected manually for the current session. If the service is missing, the first connection automatically opens Windows' UAC prompt and installs the helper; confirm that prompt once. The UI waits for installation, then continues connecting. Cancelling UAC produces a clear error and does not show Connected. With Setup, the helper is already installed, so connections need no elevation.
+
+The portable helper/runtime is copied to a protected Program Files directory before service registration; its owner and ACL permit writes only to Administrators/SYSTEM. The original UI user's SID is passed before elevation, including when UAC uses a different administrator account. Manual fallback: run scripts/install-service.ps1 **once as administrator**, with -OwnerAccount 'COMPUTER\username' when elevating with another account. scripts/uninstall-service.ps1 removes the service and its protected copy. Portable means no app installer, not an unprivileged TUN driver.
 
 ## Development
 
@@ -68,7 +72,7 @@ Measured on Windows 11 x64, Release self-contained, without Working Set trimming
 
 The desired ≤90MB UI target is **not met**. No process is hidden or trimmed. CPU is normalized to the whole machine. Screenshot rendering allocates extra surfaces and is excluded from idle measurements. Real provider/TUN combined memory is unmeasured.
 
-46 automated tests cover parsing, models, DPAPI, priority, generated config checks, actual loopback VLESS traffic, HTTP Host sniffing, helper/core crash detection and job cleanup. Measured results and remaining manual checks are in docs/VALIDATION.md. A passing build and local VLESS fixture are **not** proof of the Ultima/TUN/browser acceptance scenario.
+49 automated tests cover parsing, models, DPAPI, priority, generated config checks, actual loopback VLESS traffic, HTTP Host sniffing, helper/core crash detection, job cleanup and elevation command boundaries. Measured results and remaining manual checks are in docs/VALIDATION.md. A passing build and local VLESS fixture are **not** proof of the Ultima/TUN/browser acceptance scenario.
 
 Known limits:
 

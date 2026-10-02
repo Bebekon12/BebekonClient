@@ -1,11 +1,12 @@
-# Validation record — 2026-10-02
+# Validation record — 2026-10-03
 
 Environment: Windows 11 x64, .NET SDK 10.0.300, runtime 10.0.8, sing-box 1.14.2.
 
 ## Executed
 
 - Release solution compilation.
-- 46 parser/model/storage/config and real-core tests, including the helper crash suite.
+- 49 parser/model/storage/config and real-core tests, including the helper crash suite and elevation command boundaries.
+- WPF smoke harness checks that startup selects TUN even after a saved Proxy session. Elevated registration uses the original user's SID and literal argument list; partial packages are rejected before elevation. Actual UAC acceptance/cancellation and protected service installation remain manual checks.
 - Official `sing-box check` accepted generated TCP, Reality, gRPC, WebSocket, HTTPUpgrade configurations.
 - Real local VLESS fixture confirmed: selected domain exits via VLESS; unmatched domain Direct; Entire PC default VPN; authenticated forced VPN probe; HTTP Host sniffing routes an IP-addressed request by its hostname.
 - Helper detects core crash on the next status snapshot; killing the helper kills its child core through a Windows job object.
@@ -29,6 +30,6 @@ No Ultima subscription was supplied. This session is not elevated. Do not label 
 7. Kill sing-box: error status, no surviving child/network state. Local helper job/crash behavior is automated; privileged TUN cleanup is pending.
 8. Sleep/wake, Wi-Fi loss/reconnect, Wi-Fi→Ethernet and new Wi-Fi network. Check actual egress and reconnect status.
 9. Record connected UI + service + core Working Sets and CPU (all processes included). Target ≤150–180MB is **unmeasured**.
-10. Installer upgrade preserves state; uninstall stops helper/core and offers data removal. Portable helper registration/unregistration.
+10. Installer upgrade preserves state; uninstall stops helper/core and offers data removal. Portable first connection automatically requests UAC once; cancellation produces an error; acceptance registers the protected helper, even with a different administrator account. No further UAC on subsequent connections; ordinary user cannot write helper binaries. Portable helper unregistration.
 
 `scripts/measure-memory.ps1` measures real processes without trimming memory. Save output with the relevant connection state and test duration.

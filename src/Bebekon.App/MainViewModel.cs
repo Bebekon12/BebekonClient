@@ -110,6 +110,7 @@ public sealed class MainViewModel : Observable, IDisposable
     public MainViewModel(StateStore? storage = null)
     {
         store = storage ?? new(); Data = store.Load();
+        Settings.TunnelMode = TunnelMode.Tun;
         if (storage is null) Settings.StartWithWindows = AutoStart.IsEnabled;
         activeProfile = Data.Profiles.FirstOrDefault(p => p.Id == Data.SelectedProfileId) ?? Data.Profiles[0];
         selectedServer = Settings.RestoreServer ? Data.Servers.FirstOrDefault(s => s.Id == Data.SelectedServerId) : null;
@@ -139,7 +140,7 @@ public sealed class MainViewModel : Observable, IDisposable
         ChangeTunnelMode = new Command(p => { if ((string)p! == "DNS") { Go("Settings"); return; } Settings.TunnelMode = (string)p! == "TUN" ? TunnelMode.Tun : TunnelMode.Proxy; Save(); Notify(nameof(Settings)); QueueApply(); NotifyStatus(); });
         OpenLogs = Async(async _ => { try { var reply = await service.SendAsync(new("GetLogs")); if (reply.Ok && reply.Message is not null) new SafeLog(Paths.Logs, "service").Write(reply.Message); } catch { } OpenFolder(Paths.Logs); });
         OpenConfig = new Command(_ => OpenFolder(store.Root));
-        RestartService = Async(async _ => { var reconnect = Connected; if (reconnect) await DisconnectAsync(); try { await service.SendAsync(new("Shutdown")); await Task.Delay(350); } catch { } var reply = await service.SendAsync(new("GetStatus"), true); if (!reply.Ok) throw new UserError(reply.Message ?? "Service unavailable."); if (reconnect) await ConnectAsync(); Banner = T("Служба перезапущена", "Service restarted"); });
+        RestartService = Async(async _ => { await EnsureServiceAsync(); var reconnect = Connected; if (reconnect) await DisconnectAsync(); try { await service.SendAsync(new("Shutdown")); await Task.Delay(350); } catch { } var reply = await service.SendAsync(new("GetStatus"), true); if (!reply.Ok) throw new UserError(reply.Message ?? "Service unavailable."); if (reconnect) await ConnectAsync(); Banner = T("Служба перезапущена", "Service restarted"); });
         DismissBanner = new Command(_ => Banner = null);
         I18n.Set(Settings.Language);
         SystemEvents.PowerModeChanged += OnPower; NetworkChange.NetworkAvailabilityChanged += OnNetwork; NetworkChange.NetworkAddressChanged += OnAddress;
@@ -210,6 +211,7 @@ public sealed class MainViewModel : Observable, IDisposable
             spec = System.Text.Json.JsonSerializer.Deserialize<ConnectSpec>(System.Text.Json.JsonSerializer.Serialize(spec, Json.Options), Json.Options)!;
             var version = configurationVersion;
             store.SaveRuntime(ConfigGenerator.Generate(spec));
+            await EnsureServiceAsync();
             var reply = await service.SendAsync(new("StartCore", spec), true, lifetime.Token);
             if (!reply.Ok) throw new UserError(reply.Message ?? reply.Status.Error ?? "Не удалось подключиться.");
             using (var http = LatencyService.ProbeClient(spec)) { using var probe = await http.GetAsync("https://www.gstatic.com/generate_204", lifetime.Token); probe.EnsureSuccessStatusCode(); }
@@ -223,6 +225,13 @@ public sealed class MainViewModel : Observable, IDisposable
             try { await service.SendAsync(new("StopCore")); } catch { } SystemProxy.Restore(); State = ConnectionState.Error; throw;
         }
         finally { connectionGate.Release(); }
+    }
+    private async Task EnsureServiceAsync()
+    {
+        await ServiceInstaller.EnsureInstalledAsync(() => Banner = T(
+            "Подтвердите запрос Windows: установка службы TUN требуется один раз.",
+            "Approve the Windows prompt: the TUN helper needs to be installed once."), lifetime.Token);
+        Banner = null;
     }
     public async Task DisconnectAsync()
     {
