@@ -15,7 +15,7 @@ The script verifies the pinned core archive, restores packages, runs tests, publ
 
 No .NET runtime is needed on the destination PC. Build needs internet for NuGet and official downloads. Inno Setup 6.7.3 is bootstrapped per user into .tools when no compiler is installed. Override with -InnoCompiler PATH. -SkipInstaller produces only portable output.
 
-Version 0.1.2 fixes the collection-modified exception on repeated tray menu openings. Window buttons have larger icons, visible hover/pressed states, a red close hover and a changing maximize/restore icon. Version 0.1.1 unified the dark palette, controls and dialogs, with searchable settings categories. To publish while another build folder is in use, run `./build.ps1 -PublishFolder artifacts/release-fix`; normal builds still use artifacts/release.
+Version 0.1.3 imports Ultima's JSON Xray subscriptions directly from the provider URL, in addition to plain/Base64 VLESS links. It reads VLESS connection parameters from each configuration and keeps the application's own routing/DNS rules. Version 0.1.2 fixed repeated tray menu openings and improved window buttons; 0.1.1 unified the dark palette, controls and dialogs. To publish while another build folder is in use, run `./build.ps1 -PublishFolder artifacts/release-ultima`; normal builds still use artifacts/release.
 
 Setup installs into Program Files, registers a demand-start LocalSystem helper, assigns its pipe and service-start rights to the chosen Windows account, and creates shortcuts. If UAC uses a different administrator account, enter the ordinary user's Windows account on the owner page. Only installation/uninstallation needs elevation; connecting from the UI does not. Upgrades preserve %LOCALAPPDATA% data.
 
@@ -35,7 +35,7 @@ For a dev connection, install the published service first. `Bebekon.Service.exe 
 
 ## Using it
 
-1. Add Ultima's subscription URL (HTTPS recommended), direct VLESS link, or a URL returning plain/Base64 VLESS links.
+1. Add Ultima's subscription URL (HTTPS recommended), direct VLESS link, or a URL returning plain/Base64 VLESS links or JSON Xray configurations. The provider URL does not need to be converted to a different format.
 2. Choose a supported server. The client explicitly marks unsupported transports.
 3. Open Rules, leave **By rules**, add OpenAI / ChatGPT, Claude / Anthropic and Telegram.exe.
 4. Connect. A real HTTPS probe through the selected server must succeed before the UI shows Protected.
@@ -74,12 +74,12 @@ Measured on Windows 11 x64, version 0.1.0 Release self-contained, without Workin
 
 The desired ≤90MB UI target is **not met**. No process is hidden or trimmed. CPU is normalized to the whole machine. Screenshot rendering allocates extra surfaces and is excluded from idle measurements. Real provider/TUN combined memory is unmeasured.
 
-49 automated tests cover parsing, models, DPAPI, priority, generated config checks, actual loopback VLESS traffic, HTTP Host sniffing, helper/core crash detection, job cleanup and elevation command boundaries. Measured results and remaining manual checks are in docs/VALIDATION.md. A passing build and local VLESS fixture are **not** proof of the Ultima/TUN/browser acceptance scenario.
+75 automated tests cover plain/Base64/JSON Xray subscription parsing, models, DPAPI, priority, generated config checks, actual loopback VLESS traffic, HTTP Host sniffing, helper/core crash detection, job cleanup and elevation command boundaries. A supplied Ultima subscription was also imported live: nine supported nodes, nine configurations accepted by the official core, and a successful forced-VPN HTTPS probe through gRPC/Reality. This is **not** proof of the full TUN/browser acceptance scenario; remaining manual checks are in docs/VALIDATION.md.
 
 Known limits:
 
 - XHTTP, mKCP and unfamiliar VLESS extensions are shown as unsupported; current official stable transport support is followed.
-- Plain VLESS subscriptions only; JSON/YAML provider formats are rejected explicitly. Redirected subscription URLs are rejected to avoid leaking secret URLs.
+- Plain/Base64 VLESS and JSON Xray VLESS subscriptions are supported. JSON imports server settings, not provider listeners, routes or DNS. Unsupported connection options are marked on the affected node. YAML, sing-box provider JSON and other VPN protocols are not supported. Redirected subscription URLs are rejected to avoid leaking secret URLs.
 - TLS ECH hides SNI; encrypted names cannot be sniffed. Browser DoH plus ECH can prevent domain selection. No promise to infer names from arbitrary encrypted traffic.
 - Telegram presets cover websites; add Telegram.exe for its native/IP connections. Process DNS from the Windows DNS Client service cannot always be attributed to the original program; use TUN and domain rules alongside process rules where needed.
 - Domain-only routing does not cover hard-coded IPs without an observable hostname. Add IP/subnet or application rules.

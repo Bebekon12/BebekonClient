@@ -9,7 +9,7 @@ namespace Bebekon.Tests;
 public class CoreIntegrationTests
 {
     private static string CoreExe => Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,"..","..","..","..","..","core","sing-box.exe"));
-    [Theory] [InlineData("tcp","none")] [InlineData("grpc","tls")] [InlineData("ws","tls")] [InlineData("httpupgrade","tls")] [InlineData("tcp","reality")]
+    [Theory] [InlineData("tcp","none")] [InlineData("grpc","tls")] [InlineData("grpc","reality")] [InlineData("ws","tls")] [InlineData("httpupgrade","tls")] [InlineData("tcp","reality")]
     public async Task OfficialCoreAcceptsGeneratedSchema(string transport,string security)
     {
         var s=CoreTests.Node($"type={transport}&security={security}&sni=example.com&pbk={new string('A',43)}&sid=abcd");

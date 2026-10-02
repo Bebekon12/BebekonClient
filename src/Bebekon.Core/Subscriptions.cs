@@ -42,12 +42,14 @@ public static class VlessParser
     public static List<Server> ParseSubscription(string content)
     {
         if (content.Length > 4 * 1024 * 1024) throw new UserError("Подписка слишком большая.");
-        content = content.Trim().TrimStart('\uFEFF');
-        if (!content.StartsWith("vless://", StringComparison.OrdinalIgnoreCase))
+        content = content.Trim().TrimStart('\uFEFF').TrimStart();
+        if (!content.StartsWith("vless://", StringComparison.OrdinalIgnoreCase) && !IsJson(content))
         {
             try { var b = string.Concat(content.Where(c => !char.IsWhiteSpace(c))).Replace('-', '+').Replace('_', '/'); content = new UTF8Encoding(false, true).GetString(Convert.FromBase64String(b.PadRight((b.Length + 3) / 4 * 4, '='))); }
-            catch (Exception e) when (e is FormatException or DecoderFallbackException) { throw new UserError("Неизвестный формат подписки. Нужны ссылки VLESS или Base64 с ними."); }
+            catch (Exception e) when (e is FormatException or DecoderFallbackException) { throw new UserError("Неизвестный формат подписки. Поддерживаются VLESS, Base64 и JSON Xray."); }
         }
+        content = content.Trim().TrimStart('\uFEFF').TrimStart();
+        if (IsJson(content)) return XraySubscriptionParser.Parse(content);
         var lines = content.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         if (lines.Length == 0 || lines.Length > 5000) throw new UserError("Подписка пустая или содержит слишком много серверов.");
         var servers = new List<Server>();
@@ -59,12 +61,14 @@ public static class VlessParser
         }
         return servers.DistinctBy(s => s.Id).ToList();
     }
+    private static bool IsJson(string content) => content.StartsWith('{') || content.StartsWith('[');
 }
 public static class SubscriptionLoader
 {
     public static readonly HttpClient Http = new(new SocketsHttpHandler { UseProxy = false, AllowAutoRedirect = false, PooledConnectionLifetime = TimeSpan.FromMinutes(5) }) { Timeout = TimeSpan.FromSeconds(20) };
     public static async Task<List<Server>> LoadAsync(string source, CancellationToken ct = default)
     {
+        source = source.Trim();
         if (source.StartsWith("vless://", StringComparison.OrdinalIgnoreCase)) return [VlessParser.Parse(source)];
         if (!Uri.TryCreate(source, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https") || uri.UserInfo.Length > 0) throw new UserError("Укажите ссылку VLESS или URL подписки HTTP/HTTPS.");
         // Never redirect secret subscription paths to another server.
