@@ -63,6 +63,7 @@ public sealed class RoutingRule : Observable
 }
 public sealed class Profile : Observable
 {
+    public override string ToString() => Name;
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public string Name { get; set; } = "Основной";
     private RouteTarget defaultRoute = RouteTarget.Direct;

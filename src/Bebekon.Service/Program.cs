@@ -40,19 +40,32 @@ internal sealed class VpnService : ServiceBase
     {
         ServiceName = PipeProtocol.ServiceName; CanShutdown = true; AutoLog = false;
         owner = new(ownerSid); this.console = console;
-        root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "BebekonVPN");
+        root = console ? Path.Combine(Paths.UserRoot, "helper-test") : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "BebekonVPN");
         Directory.CreateDirectory(root);
+        if ((File.GetAttributes(root) & FileAttributes.ReparsePoint) != 0 || Directory.EnumerateFileSystemEntries(root).Any(p => (File.GetAttributes(p) & FileAttributes.ReparsePoint) != 0)) throw new InvalidOperationException("Reparse points are forbidden in service runtime storage.");
         var security = new DirectorySecurity(); security.SetAccessRuleProtection(true, false);
         foreach (var sid in new[] { new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null), new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null) }) security.AddAccessRule(new(sid, FileSystemRights.FullControl, InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
         if (console) security.AddAccessRule(new(owner, FileSystemRights.FullControl, InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
         new DirectoryInfo(root).SetAccessControl(security);
+        foreach (var file in Directory.EnumerateFiles(root))
+        {
+            var fileSecurity = new FileSecurity(); fileSecurity.SetAccessRuleProtection(true, false);
+            foreach (var sid in new[] { new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null), new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null) }) fileSecurity.AddAccessRule(new(sid, FileSystemRights.FullControl, AccessControlType.Allow));
+            if (console) fileSecurity.AddAccessRule(new(owner, FileSystemRights.FullControl, AccessControlType.Allow));
+            new FileInfo(file).SetAccessControl(fileSecurity);
+        }
         log = new(root, "service"); coreLog = new(root, "core");
     }
     protected override void OnStart(string[] args) { _ = ServeAsync(lifetime.Token); _ = IdleStopAsync(lifetime.Token); log.Write("Service started."); }
     public void RunConsole() { OnStart([]); Console.WriteLine("Bebekon helper; Ctrl+C to stop."); using var done = new ManualResetEventSlim(); Console.CancelKeyPress += (_, e) => { e.Cancel = true; done.Set(); }; done.Wait(); OnStop(); }
     protected override void OnStop() { lifetime.Cancel(); gate.Wait(); try { StopCore(); } finally { gate.Release(); } log.Write("Service stopped."); }
     protected override void OnShutdown() => OnStop();
-    private ServiceStatus Status() => new(state, error, connectedAt, core?.Pid);
+    private ServiceStatus Status()
+    {
+        // Exited notification can arrive after a status request. Check before snapshotting.
+        if (state == ConnectionState.Connected && core?.Running != true) { state = ConnectionState.Error; error = "Ядро VPN завершилось. Подключитесь заново."; connectedAt = null; File.Delete(Path.Combine(root, "sing-box.json")); }
+        return new(state, error, connectedAt, core?.Pid);
+    }
     private async Task ServeAsync(CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)
@@ -107,7 +120,8 @@ internal sealed class VpnService : ServiceBase
         state = ConnectionState.Connecting; error = null; core?.Dispose();
         var config = ConfigGenerator.Generate(spec); var path = Path.Combine(root, "sing-box.json");
         await File.WriteAllTextAsync(path, config, ct); core = NewCore();
-        core.Exited += () => { if (state is ConnectionState.Connected or ConnectionState.Connecting) { state = ConnectionState.Error; error = "Ядро VPN завершилось. Подключитесь заново."; connectedAt = null; log.Write("Core exited unexpectedly."); File.Delete(path); } };
+        var launchedCore = core;
+        core.Exited += () => { if (ReferenceEquals(core, launchedCore) && state is ConnectionState.Connected or ConnectionState.Connecting) { state = ConnectionState.Error; error = "Ядро VPN завершилось. Подключитесь заново."; connectedAt = null; log.Write("Core exited unexpectedly."); File.Delete(path); } };
         await core.StartAsync(path, ct); last = spec; connectedAt = DateTimeOffset.UtcNow; state = ConnectionState.Connected;
     }
     private void StopCore()

@@ -7,6 +7,7 @@ using Microsoft.Win32;
 namespace Bebekon.App;
 public static class AutoStart
 {
+    public static bool IsEnabled { get { using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run"); return key?.GetValue("BebekonVPN") is not null; } }
     public static void Set(bool enabled)
     {
         using var key = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run");
@@ -50,7 +51,7 @@ public static class ApplicationDiscovery
         var apps = new Dictionary<string, ApplicationEntry>(StringComparer.OrdinalIgnoreCase);
         foreach (var p in Process.GetProcesses())
         {
-            using (p) try { var path = p.MainModule?.FileName; if (path is not null && p.MainWindowHandle != IntPtr.Zero) apps[path] = new(p.MainWindowTitle.Length > 0 ? p.MainWindowTitle : p.ProcessName, path, "Запущенные"); } catch { }
+            using (p) try { if (p.MainWindowHandle == IntPtr.Zero) continue; var name = p.ProcessName; string path; try { path = p.MainModule?.FileName ?? name + ".exe"; } catch { path = name + ".exe"; } apps[path] = new(name, path, "Запущенные"); } catch { }
         }
         foreach (var hive in new[] { Registry.CurrentUser, Registry.LocalMachine })
         foreach (var registryPath in new[] { @"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths", @"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths" })

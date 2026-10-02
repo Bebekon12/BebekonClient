@@ -50,7 +50,7 @@ public sealed class LatencyService(string executable)
         }
         finally { Directory.Delete(root, true); }
     }
-    public static HttpClient ProbeClient(ConnectSpec spec) => new(new SocketsHttpHandler { Proxy = new WebProxy("http://127.0.0.1:" + spec.ProbePort) { Credentials = new NetworkCredential("bebekon", spec.ProbePassword) }, UseProxy = true, AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(4) };
+    public static HttpClient ProbeClient(ConnectSpec spec) => new(new SocketsHttpHandler { Proxy = new WebProxy("socks5://127.0.0.1:" + spec.ProbePort) { Credentials = new NetworkCredential("bebekon", spec.ProbePassword) }, UseProxy = true, AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(4) };
     public static async Task<string> VpnIpAsync(ConnectSpec spec, CancellationToken ct)
     {
         using var http = ProbeClient(spec); var text = (await http.GetStringAsync("https://api.ipify.org", ct)).Trim();

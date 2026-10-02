@@ -18,7 +18,6 @@ public sealed class MainViewModel : Observable, IDisposable
     private readonly CancellationTokenSource lifetime = new();
     private CancellationTokenSource? scan;
     private CancellationTokenSource? applyDelay;
-    private bool suppressChanges;
     public AppState Data { get; }
     public Settings Settings => Data.Settings;
     public ObservableCollection<ServerRow> ServerRows { get; } = [];
@@ -54,6 +53,8 @@ public sealed class MainViewModel : Observable, IDisposable
     public string Session { get => session; private set => Set(ref session, value); }
     private DateTimeOffset? started;
     private ConnectSpec? spec;
+    private int monitorId;
+    private int configurationVersion;
     private string? banner;
     public string? Banner { get => banner; set { if (Set(ref banner, value)) Notify(nameof(BannerVisibility)); } }
     public Visibility BannerVisibility => string.IsNullOrWhiteSpace(Banner) ? Visibility.Collapsed : Visibility.Visible;
@@ -63,7 +64,7 @@ public sealed class MainViewModel : Observable, IDisposable
     private int sortIndex;
     public int SortIndex { get => sortIndex; set { if (Set(ref sortIndex, value)) RefreshServers(); } }
     private int latencyIndex;
-    public int LatencyIndex { get => latencyIndex; set { if (Set(ref latencyIndex, value)) { foreach (var s in Data.Servers) { s.Latency = "—"; s.LatencyMs = null; } RefreshServers(); } } }
+    public int LatencyIndex { get => latencyIndex; set { if (Set(ref latencyIndex, value)) { scan?.Cancel(); foreach (var s in Data.Servers) { s.Latency = "—"; s.LatencyMs = null; } RefreshServers(); if (PageName == "Servers") _ = ScanSafelyAsync(); } } }
     private bool listMode;
     public bool ListMode { get => listMode; set { if (Set(ref listMode, value)) { Notify(nameof(SecondColumn)); RefreshServers(); } } }
     public GridLength SecondColumn => new(ListMode ? 0 : 1, GridUnitType.Star);
@@ -106,6 +107,7 @@ public sealed class MainViewModel : Observable, IDisposable
     public MainViewModel(StateStore? storage = null)
     {
         store = storage ?? new(); Data = store.Load();
+        if (storage is null) Settings.StartWithWindows = AutoStart.IsEnabled;
         activeProfile = Data.Profiles.FirstOrDefault(p => p.Id == Data.SelectedProfileId) ?? Data.Profiles[0];
         selectedServer = Settings.RestoreServer ? Data.Servers.FirstOrDefault(s => s.Id == Data.SelectedServerId) : null;
         page = new HomePage(this);
@@ -152,11 +154,11 @@ public sealed class MainViewModel : Observable, IDisposable
         scan?.Cancel(); PageName = name; Page = name switch { "Servers" => new ServersPage(this), "Rules" => new RulesPage(this), "Subscriptions" => new SubscriptionsPage(this), "Settings" => new SettingsPage(this), _ => new HomePage(this) };
         if (name == "Servers" && Data.Servers.Count > 0) _ = ScanSafelyAsync();
     }
-    private async Task ScanSafelyAsync() { try { await ScanAsync(false); } catch (Exception e) when (e is not OperationCanceledException) { Report(e); } }
+    private async Task ScanSafelyAsync() { try { while (Scanning && !lifetime.IsCancellationRequested) await Task.Delay(50, lifetime.Token); if (PageName == "Servers") await ScanAsync(false); } catch (OperationCanceledException) { } catch (Exception e) { Report(e); } }
     private async Task ScanAsync(bool force)
     {
         if (Scanning) return; Scanning = true; scan?.Dispose(); scan = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token); var token = scan.Token; var mode = LatencyIndex == 0 ? LatencyMode.Fast : LatencyMode.Exact;
-        try { await Task.WhenAll(Data.Servers.ToArray().Select(async s => { var result = await latency.MeasureAsync(s, mode, force, token); if (mode == LatencyMode.Exact && !s.Supported) s.Latency = "—"; else s.Latency = result.Milliseconds is { } ms ? ms + " ms" : T("Недоступен", "Unavailable"); s.LatencyMs = result.Milliseconds; })); RefreshServers(); }
+        try { await Task.WhenAll(Data.Servers.ToArray().Select(async s => { var result = await latency.MeasureAsync(s, mode, force, token); token.ThrowIfCancellationRequested(); if (mode != (LatencyIndex == 0 ? LatencyMode.Fast : LatencyMode.Exact)) return; if (mode == LatencyMode.Exact && !s.Supported) s.Latency = "—"; else s.Latency = result.Milliseconds is { } ms ? ms + " ms" : T("Недоступен", "Unavailable"); s.LatencyMs = result.Milliseconds; })); RefreshServers(); }
         catch (OperationCanceledException) { }
         finally { Scanning = false; }
     }
@@ -183,7 +185,8 @@ public sealed class MainViewModel : Observable, IDisposable
     public void Reorder(RoutingRule source, RoutingRule target) { var a = ActiveProfile.Rules.IndexOf(source); var b = ActiveProfile.Rules.IndexOf(target); if (a < 0 || b < 0 || a == b) return; ActiveProfile.Rules.Move(a, b); RulesChanged(); }
     private void QueueApply()
     {
-        if (!Connected || suppressChanges) return; applyDelay?.Cancel(); applyDelay?.Dispose(); applyDelay = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token); _ = ApplyLaterAsync(applyDelay.Token);
+        configurationVersion++;
+        if (!Connected) return; applyDelay?.Cancel(); applyDelay?.Dispose(); applyDelay = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token); _ = ApplyLaterAsync(applyDelay.Token);
     }
     private async Task ApplyLaterAsync(CancellationToken token)
     {
@@ -201,6 +204,8 @@ public sealed class MainViewModel : Observable, IDisposable
             if (!SelectedServer.Supported) throw new UserError(SelectedServer.UnsupportedReason!);
             State = ConnectionState.Connecting; Banner = null; VpnIp = "—";
             spec = new(SelectedServer, ActiveProfile, Settings, LatencyService.FreePort(), Convert.ToHexString(RandomNumberGenerator.GetBytes(24)));
+            spec = System.Text.Json.JsonSerializer.Deserialize<ConnectSpec>(System.Text.Json.JsonSerializer.Serialize(spec, Json.Options), Json.Options)!;
+            var version = configurationVersion;
             store.SaveRuntime(ConfigGenerator.Generate(spec));
             var reply = await service.SendAsync(new("StartCore", spec), true, lifetime.Token);
             if (!reply.Ok) throw new UserError(reply.Message ?? reply.Status.Error ?? "Не удалось подключиться.");
@@ -208,6 +213,7 @@ public sealed class MainViewModel : Observable, IDisposable
             if (Settings.TunnelMode == TunnelMode.Proxy) SystemProxy.Enable();
             ApplyStatus(reply.Status); _ = MonitorAsync();
             try { VpnIp = await LatencyService.VpnIpAsync(spec, lifetime.Token); } catch { VpnIp = "—"; }
+            if (version != configurationVersion) QueueApply();
         }
         catch
         {
@@ -218,13 +224,15 @@ public sealed class MainViewModel : Observable, IDisposable
     public async Task DisconnectAsync()
     {
         await connectionGate.WaitAsync();
-        try { State = ConnectionState.Disconnecting; var reply = await service.SendAsync(new("StopCore"), ct: lifetime.Token); if (!reply.Ok) throw new UserError(reply.Message ?? "Не удалось остановить VPN."); ApplyStatus(reply.Status); VpnIp = "—"; Session = "—"; }
+        try { monitorId++; State = ConnectionState.Disconnecting; var reply = await service.SendAsync(new("StopCore"), ct: lifetime.Token); if (!reply.Ok) throw new UserError(reply.Message ?? "Не удалось остановить VPN."); ApplyStatus(reply.Status); VpnIp = "—"; Session = "—"; }
+        catch { State = ConnectionState.Error; throw; }
         finally { SystemProxy.Restore(); connectionGate.Release(); }
     }
     private async Task MonitorAsync()
     {
-        try { while (Connected && !lifetime.IsCancellationRequested) { await Task.Delay(1000, lifetime.Token); if (!Connected) break; var response = await service.SendAsync(new("GetStatus"), ct: lifetime.Token); ApplyStatus(response.Status); if (started is { } time) Session = (DateTimeOffset.UtcNow - time).ToString(@"hh\:mm\:ss"); if (!Connected) SystemProxy.Restore(); } }
-        catch (OperationCanceledException) { } catch (Exception e) { SystemProxy.Restore(); State = ConnectionState.Error; Report(e); }
+        var id = ++monitorId;
+        try { while (id == monitorId && Connected && !lifetime.IsCancellationRequested) { await Task.Delay(1000, lifetime.Token); if (id != monitorId || !Connected) break; var response = await service.SendAsync(new("GetStatus"), ct: lifetime.Token); if (id != monitorId) break; ApplyStatus(response.Status); if (started is { } time) Session = (DateTimeOffset.UtcNow - time).ToString(@"hh\:mm\:ss"); if (!Connected) SystemProxy.Restore(); } }
+        catch (OperationCanceledException) { } catch (Exception e) { if (id == monitorId) { SystemProxy.Restore(); State = ConnectionState.Error; Report(e); } }
     }
     private void ApplyStatus(ServiceStatus s) { State = s.State; started = s.ConnectedAt; if (s.Error is not null) Banner = s.Error; }
     private void NotifyStatus() { foreach (var n in new[] { nameof(Connected), nameof(ConnectionBusy), nameof(ConnectLabel), nameof(StatusLabel), nameof(StatusDetail), nameof(FooterLabel), nameof(FooterMode) }) Notify(n); StatusChanged?.Invoke(); }
