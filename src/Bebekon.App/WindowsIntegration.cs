@@ -67,7 +67,7 @@ public static class ApplicationDiscovery
             try
             {
                 foreach (var folder in new[] { Environment.GetFolderPath(Environment.SpecialFolder.StartMenu), Environment.GetFolderPath(Environment.SpecialFolder.CommonStartMenu) })
-                foreach (var link in Directory.EnumerateFiles(folder, "*.lnk", SearchOption.AllDirectories).Take(600))
+                foreach (var link in Directory.EnumerateFiles(folder, "*.lnk", new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true, AttributesToSkip = FileAttributes.ReparsePoint }).Take(600))
                 {
                     object? shortcut = null;
                     try { shortcut = shell.CreateShortcut(link); string target = ((dynamic)shortcut).TargetPath; if (target.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) && File.Exists(target)) apps.TryAdd(target, new(System.IO.Path.GetFileNameWithoutExtension(link), target, "Установленные")); } catch { }

@@ -13,8 +13,9 @@ Environment: Windows 11 x64, .NET SDK 10.0.300, runtime 10.0.8, sing-box 1.14.2.
 - Published self-contained helper responds over the ACL-protected Named Pipe (35.3MB Working Set / 8.3MB private, 0.00% idle CPU over 5s).
 - All five WPF pages rendered at 100/125/150/175% pixel scale. These are render checks, not physical per-monitor DPI switch tests.
 - 503-rule UI fixture realized only 3 list containers (recycling virtualization).
-- Ordinary framework-dependent Release UI idle: 145.7 MB Working Set, 109.3 MB private, 0.174% machine-normalized CPU over 3 seconds.
-- Published self-contained Release UI idle: 146.1MB Working Set, 108.1MB private, 0.03% CPU over 5 seconds. **90MB target missed**. UI screenshot harness peak is higher and is not an idle measurement.
+- Version 0.1.1: Settings categories, search across categories, empty results, scrolling and TUN/Proxy exclusivity are exercised by the WPF harness. All pages also render at 860×660, settings in English, and five native dialogs at 100/175% scale. Dialog application discovery skips inaccessible/reparse Start Menu folders. Smoke and console helper instances are isolated from the user's open app and installed service.
+- Version 0.1.0 ordinary framework-dependent Release UI idle: 145.7 MB Working Set, 109.3 MB private, 0.174% machine-normalized CPU over 3 seconds.
+- Version 0.1.0 published self-contained Release UI idle: 146.1MB Working Set, 108.1MB private, 0.03% CPU over 5 seconds. **90MB target missed**. Version 0.1.1 screenshot harness peak is higher and is not an idle measurement; a new ordinary idle benchmark is pending.
 - Self-contained app launches without using an installed runtime; service runtime merging preserves WPF assemblies. Installer compilation and portable ZIP generation succeed; privileged installation itself is pending.
 
 ## Required manual acceptance — pending

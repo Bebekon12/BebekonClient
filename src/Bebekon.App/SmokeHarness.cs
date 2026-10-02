@@ -44,6 +44,47 @@ internal static class SmokeHarness
             }
             report.Add(page + " rendered at 100/125/150/175%.");
         }
+        vm.Go("Settings"); await Task.Delay(200); window.UpdateLayout();
+        var settings = Descendants(window).OfType<SettingsView>().Single();
+        var settingsSearch = (TextBox)settings.FindName("SettingsSearch");
+        settingsSearch.Text = "MTU"; window.UpdateLayout();
+        if (Descendants(settings).OfType<SettingRow>().Count(r => r.Visibility == Visibility.Visible) != 1) throw new InvalidOperationException("Settings search must find MTU across categories.");
+        settingsSearch.Text = "no-setting-has-this-name";
+        if (Descendants(settings).OfType<SettingRow>().Any(r => r.Visibility == Visibility.Visible)) throw new InvalidOperationException("Settings empty search result is inconsistent.");
+        settingsSearch.Clear();
+        var settingsScroll = (ScrollViewer)settings.FindName("SettingsScroll");
+        settingsScroll.ScrollToEnd(); window.UpdateLayout();
+        if (settingsScroll.ScrollableHeight > 0 && settingsScroll.VerticalOffset <= 0) throw new InvalidOperationException("Settings scrolling must reach the lower rows.");
+        settingsScroll.ScrollToTop(); window.UpdateLayout();
+        foreach (var category in new[] { "Network", "Appearance", "Behavior", "Advanced", "All" })
+        {
+            Descendants(settings).OfType<RadioButton>().Single(r => r.Tag as string == category).IsChecked = true;
+            window.UpdateLayout(); Capture(window, "Settings-" + category);
+        }
+        vm.IsProxyMode = true; if (vm.IsTunMode || !vm.IsProxyMode) throw new InvalidOperationException("TUN and Proxy cannot be active together.");
+        vm.IsTunMode = true; if (!vm.IsTunMode || vm.IsProxyMode) throw new InvalidOperationException("TUN must switch Proxy off.");
+        report.Add("Settings categories, cross-category search, empty results and TUN/Proxy exclusivity passed.");
+        window.Width = window.MinWidth; window.Height = window.MinHeight; window.UpdateLayout();
+        foreach (var page in new[] { "Home", "Servers", "Rules", "Subscriptions", "Settings" }) { vm.Go(page); await Task.Delay(150); window.UpdateLayout(); Capture(window, page + "-Minimum"); }
+        window.Width = 1000; window.Height = 740; window.UpdateLayout();
+        vm.Go("Settings"); await Task.Delay(150); I18n.Set("English"); window.UpdateLayout(); Capture(window, "Settings-English"); I18n.Set("Русский");
+        string dialogName = "Subscription"; Exception? renderFailure = null;
+        Dialogs.RenderObserver = dialog => dialog.Dispatcher.BeginInvoke(new Action(() =>
+        {
+            try { dialog.UpdateLayout(); Capture(dialog, "Dialog-" + dialogName); }
+            catch (Exception error) { renderFailure = error; }
+            finally { dialog.Close(); }
+        }));
+        try
+        {
+            Dialogs.Subscription(null); dialogName = "Rule"; Dialogs.Rule(null);
+            dialogName = "Preset"; Dialogs.Preset(vm.Presets);
+            dialogName = "Application"; await Dialogs.ApplicationAsync();
+            dialogName = "Confirm"; Dialogs.Confirm("Удалить правило?", "UI test fixture");
+        }
+        finally { Dialogs.RenderObserver = null; }
+        if (renderFailure is not null) throw renderFailure;
+        report.Add("Five native dialogs rendered with the shared theme.");
         vm.Go("Rules"); for (var i = 0; i < 500; i++) vm.ActiveProfile.Rules.Add(new() { Name = "Rule " + i, Values = [$"site{i}.example.com"] }); vm.RuleSearch = ""; vm.RuleSearch = "Rule"; await Task.Delay(200); window.UpdateLayout();
         vm.IsWholePc = true; window.UpdateLayout(); if (Descendants(window).OfType<RadioButton>().Count(r => r.IsChecked == true) != 1) throw new InvalidOperationException("Routing mode selection is inconsistent.");
         vm.IsWholePc = false; window.UpdateLayout(); if (Descendants(window).OfType<RadioButton>().Count(r => r.IsChecked == true) != 1) throw new InvalidOperationException("Selective mode selection is inconsistent.");
@@ -51,6 +92,15 @@ internal static class SmokeHarness
         var boxes = Descendants(window).OfType<ListBox>().ToArray(); var realized = boxes.Sum(b => Descendants(b).OfType<ListBoxItem>().Count()); report.Add($"503 rules, realized list containers: {realized} (virtualization).");
         vm.Go("Home"); await Task.Delay(1000); using var process = Process.GetCurrentProcess(); process.Refresh(); var before = process.TotalProcessorTime; await Task.Delay(3000); process.Refresh(); report.Add($"After rendering (not an idle benchmark): Working Set {process.WorkingSet64 / 1048576.0:F1} MB; private {process.PrivateMemorySize64 / 1048576.0:F1} MB; 3-second CPU {(process.TotalProcessorTime - before).TotalMilliseconds / 3000 / Environment.ProcessorCount * 100:F3}%.");
         File.WriteAllLines(Path.Combine(Root, "report.txt"), report);
+    }
+    private static void Capture(Window window, string name)
+    {
+        foreach (var scale in new[] { 1.0, 1.75 })
+        {
+            var bitmap = new RenderTargetBitmap((int)(window.ActualWidth * scale), (int)(window.ActualHeight * scale), 96 * scale, 96 * scale, PixelFormats.Pbgra32); bitmap.Render(window);
+            var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap));
+            using var output = File.Create(Path.Combine(Root, name + "-" + (int)(scale * 100) + ".png")); encoder.Save(output);
+        }
     }
     private static IEnumerable<DependencyObject> Descendants(DependencyObject d) { for (var i = 0; i < VisualTreeHelper.GetChildrenCount(d); i++) { var child = VisualTreeHelper.GetChild(d, i); yield return child; foreach (var x in Descendants(child)) yield return x; } }
 }

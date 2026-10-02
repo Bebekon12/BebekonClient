@@ -7,6 +7,7 @@ using Xunit;
 namespace Bebekon.Tests;
 public class ServiceIntegrationTests
 {
+    private string testPipeName = "";
     [Fact]
     public async Task HelperValidatesStartsStopsAndDetectsCoreCrash()
     {
@@ -14,6 +15,7 @@ public class ServiceIntegrationTests
         var exe=Path.Combine(root,"src","Bebekon.Service","bin","Release","net10.0-windows","Bebekon.Service.exe");
         using var helper=new Process {StartInfo=new(exe,"--console"){UseShellExecute=false,CreateNoWindow=true,RedirectStandardInput=true,RedirectStandardOutput=true,RedirectStandardError=true}};
         helper.Start();
+        testPipeName = PipeProtocol.PipeName + ".test." + helper.Id;
         try
         {
             using var timeout=new CancellationTokenSource(TimeSpan.FromSeconds(30));
@@ -34,9 +36,9 @@ public class ServiceIntegrationTests
         }
         finally {if(!helper.HasExited){helper.Kill();await helper.WaitForExitAsync();}}
     }
-    private static async Task<ServiceResponse> Send(ServiceRequest request,CancellationToken ct)
+    private async Task<ServiceResponse> Send(ServiceRequest request,CancellationToken ct)
     {
-        using var pipe=new NamedPipeClientStream(".",PipeProtocol.PipeName,PipeDirection.InOut,PipeOptions.Asynchronous,TokenImpersonationLevel.Impersonation);
+        using var pipe=new NamedPipeClientStream(".",testPipeName,PipeDirection.InOut,PipeOptions.Asynchronous,TokenImpersonationLevel.Impersonation);
         await pipe.ConnectAsync(ct);await PipeProtocol.WriteAsync(pipe,request,ct);return await PipeProtocol.ReadAsync<ServiceResponse>(pipe,ct);
     }
 }

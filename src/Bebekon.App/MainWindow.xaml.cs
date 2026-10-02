@@ -23,7 +23,7 @@ public partial class MainWindow : Window
     {
         if (e.PropertyName != nameof(MainViewModel.Page) || !SystemParameters.ClientAreaAnimation) return;
         // No animation remains active after navigation.
-        BeginAnimation(OpacityProperty, new DoubleAnimation(0.7, 1, TimeSpan.FromMilliseconds(140)) { FillBehavior = FillBehavior.Stop });
+        PageContent.BeginAnimation(OpacityProperty, new DoubleAnimation(0.7, 1, TimeSpan.FromMilliseconds(140)) { FillBehavior = FillBehavior.Stop });
     }
     private void OnStatus()
     {

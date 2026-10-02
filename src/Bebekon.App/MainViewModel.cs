@@ -22,6 +22,8 @@ public sealed class MainViewModel : Observable, IDisposable
     private bool recovering;
     public AppState Data { get; }
     public Settings Settings => Data.Settings;
+    public bool IsTunMode { get => Settings.TunnelMode == TunnelMode.Tun; set => SetTunnelMode(value ? TunnelMode.Tun : TunnelMode.Proxy); }
+    public bool IsProxyMode { get => Settings.TunnelMode == TunnelMode.Proxy; set => SetTunnelMode(value ? TunnelMode.Proxy : TunnelMode.Tun); }
     public ObservableCollection<ServerRow> ServerRows { get; } = [];
     public ObservableCollection<RoutingRule> VisibleRules { get; } = [];
     public List<Preset> Presets { get; }
@@ -48,7 +50,7 @@ public sealed class MainViewModel : Observable, IDisposable
     public string StatusLabel => State switch { ConnectionState.Connected => T("Защищено", "Protected"), ConnectionState.Connecting => T("Подключение", "Connecting"), ConnectionState.Disconnecting => T("Отключение", "Disconnecting"), ConnectionState.Error => T("Ошибка подключения", "Connection error"), _ => T("Готов к подключению", "Ready to connect") };
     public string StatusDetail => Connected ? Settings.TunnelMode == TunnelMode.Proxy ? T("Выбранный трафик приложений с прокси идёт через VPN", "Selected traffic from proxy-aware applications uses VPN") : IsWholePc ? T("Весь трафик идёт через VPN", "All traffic goes through VPN") : T("Выбранный трафик идёт через VPN", "Selected traffic goes through VPN") : T("Ваш интернет использует обычное подключение", "Your internet uses your normal connection");
     public string EmptyRulesDetail => IsWholePc ? T("Без правил весь трафик идёт через VPN", "Without rules all traffic goes through VPN") : T("Без правил весь трафик идёт напрямую", "Without rules all traffic goes direct");
-    public string FooterLabel => Connected ? T("онлайн", "online") : "offline";
+    public string FooterLabel => Connected ? T("онлайн", "online") : T("офлайн", "offline");
     public string FooterMode => Connected ? Settings.TunnelMode == TunnelMode.Tun ? "TUN" : "Proxy" : "Offline";
     private string vpnIp = "—";
     public string VpnIp { get => vpnIp; private set => Set(ref vpnIp, value); }
@@ -137,7 +139,7 @@ public sealed class MainViewModel : Observable, IDisposable
         ExportProfile = new Command(_ => { var dialog = new Microsoft.Win32.SaveFileDialog { Filter = "Bebekon profile (*.json)|*.json", FileName = ActiveProfile.Name + ".json" }; if (dialog.ShowDialog() == true) File.WriteAllText(dialog.FileName, ProfileCodec.Export(ActiveProfile)); });
         ImportProfile = new Command(_ => { var dialog = new Microsoft.Win32.OpenFileDialog { Filter = "Bebekon profile (*.json)|*.json" }; if (dialog.ShowDialog() != true) return; try { var profile = ProfileCodec.Import(File.ReadAllText(dialog.FileName)); Data.Profiles.Add(profile); ActiveProfile = profile; } catch (Exception e) { Report(e); } });
         SaveSettings = new Command(_ => { if (Settings.Mtu is < 1280 or > 9000) { Banner = "MTU: 1280–9000"; return; } I18n.Set(Settings.Language); AutoStart.Set(Settings.StartWithWindows); Save(); NotifyStatus(); QueueApply(); Banner = T("Настройки сохранены", "Settings saved"); });
-        ChangeTunnelMode = new Command(p => { if ((string)p! == "DNS") { Go("Settings"); return; } Settings.TunnelMode = (string)p! == "TUN" ? TunnelMode.Tun : TunnelMode.Proxy; Save(); Notify(nameof(Settings)); QueueApply(); NotifyStatus(); });
+        ChangeTunnelMode = new Command(p => { if ((string)p! == "DNS") { Go("Settings"); return; } SetTunnelMode((string)p! == "TUN" ? TunnelMode.Tun : TunnelMode.Proxy); });
         OpenLogs = Async(async _ => { try { var reply = await service.SendAsync(new("GetLogs")); if (reply.Ok && reply.Message is not null) new SafeLog(Paths.Logs, "service").Write(reply.Message); } catch { } OpenFolder(Paths.Logs); });
         OpenConfig = new Command(_ => OpenFolder(store.Root));
         RestartService = Async(async _ => { await EnsureServiceAsync(); var reconnect = Connected; if (reconnect) await DisconnectAsync(); try { await service.SendAsync(new("Shutdown")); await Task.Delay(350); } catch { } var reply = await service.SendAsync(new("GetStatus"), true); if (!reply.Ok) throw new UserError(reply.Message ?? "Service unavailable."); if (reconnect) await ConnectAsync(); Banner = T("Служба перезапущена", "Service restarted"); });
@@ -146,6 +148,11 @@ public sealed class MainViewModel : Observable, IDisposable
         SystemEvents.PowerModeChanged += OnPower; NetworkChange.NetworkAvailabilityChanged += OnNetwork; NetworkChange.NetworkAddressChanged += OnAddress;
     }
     private AsyncCommand Async(Func<object?, Task> action, Func<bool>? can = null) => new(action, Report, can);
+    private void SetTunnelMode(TunnelMode mode)
+    {
+        if (Settings.TunnelMode == mode) return;
+        Settings.TunnelMode = mode; Save(); Notify(nameof(Settings)); Notify(nameof(IsTunMode)); Notify(nameof(IsProxyMode)); QueueApply(); NotifyStatus();
+    }
     private string T(string ru, string en) => Settings.Language == "English" ? en : ru;
     public async Task InitializeAsync()
     {

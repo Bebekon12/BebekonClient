@@ -8,6 +8,8 @@
 
 App owns the DPAPI-protected subscription, servers, profiles and settings. Service owns the active privileged core and networking lifetime. Core is the only VLESS/TUN implementation; C# does not implement VPN cryptography.
 
+Theme.xaml owns the shared palette and native control templates. IconView renders cached outline geometry; SettingRow gives searchable settings a common layout. View filtering stays local to presentation, while switches bind to the shared view model. TUN and Proxy always select one mode. Dialogs use the same tokens, keyboard focus, Escape/cancel and native window chrome. UI rendering and console helper tests have separate instance/pipe identities and cannot operate on the installed service.
+
 Core library is shared by the UI, service and tests. ConfigGenerator maps human rule kinds to domain_suffix, domain_keyword, process_path/process_name and ip_cidr. One ordered list drives routing and compatible DNS matching; it is never partitioned into a list of VPN rules followed by Direct exceptions. FINAL=Direct by default; FINAL=VPN only for explicit Entire PC mode. Protocol sniff and DNS capture precede the list, while the authenticated probe inbound is always forced through VPN.
 
 The app sends validated **models**, not user-selected paths or raw sing-box configs, across the privileged boundary. The service generates a protected, fixed runtime config and checks it before launch. No HTTP control API is exposed. Its state tracks a real child process and its startup signal; the UI additionally requires a successful outbound HTTP probe. A job closes all child cores if the parent unexpectedly terminates.

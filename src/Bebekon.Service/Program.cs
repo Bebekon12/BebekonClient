@@ -25,6 +25,7 @@ internal sealed class VpnService : ServiceBase
 {
     private readonly SecurityIdentifier owner;
     private readonly string root;
+    private readonly string pipeName;
     private readonly SafeLog log;
     private readonly SafeLog coreLog;
     private readonly SemaphoreSlim gate = new(1);
@@ -40,7 +41,8 @@ internal sealed class VpnService : ServiceBase
     {
         ServiceName = PipeProtocol.ServiceName; CanShutdown = true; AutoLog = false;
         owner = new(ownerSid); this.console = console;
-        root = console ? Path.Combine(Paths.UserRoot, "helper-test") : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "BebekonVPN");
+        pipeName = console ? PipeProtocol.PipeName + ".test." + Environment.ProcessId : PipeProtocol.PipeName;
+        root = console ? Path.Combine(Paths.UserRoot, "helper-test", Environment.ProcessId.ToString()) : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "BebekonVPN");
         Directory.CreateDirectory(root);
         if ((File.GetAttributes(root) & FileAttributes.ReparsePoint) != 0 || Directory.EnumerateFileSystemEntries(root).Any(p => (File.GetAttributes(p) & FileAttributes.ReparsePoint) != 0)) throw new InvalidOperationException("Reparse points are forbidden in service runtime storage.");
         var security = new DirectorySecurity(); security.SetAccessRuleProtection(true, false);
@@ -78,7 +80,7 @@ internal sealed class VpnService : ServiceBase
                 acl.AddAccessRule(new(new SecurityIdentifier(WellKnownSidType.NetworkSid, null), PipeAccessRights.FullControl, AccessControlType.Deny));
                 acl.AddAccessRule(new(new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null), PipeAccessRights.FullControl, AccessControlType.Allow));
                 acl.AddAccessRule(new(owner, PipeAccessRights.ReadWrite, AccessControlType.Allow));
-                using var pipe = NamedPipeServerStreamAcl.Create(PipeProtocol.PipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous, 16384, 16384, acl);
+                using var pipe = NamedPipeServerStreamAcl.Create(pipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous, 16384, 16384, acl);
                 await pipe.WaitForConnectionAsync(ct);
                 var authorized = false;
                 pipe.RunAsClient(() => { using var identity = WindowsIdentity.GetCurrent(); authorized = identity.User == owner; });

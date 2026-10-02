@@ -22,7 +22,33 @@ public partial class HomeView : UserControl
 }
 public partial class ServersView : UserControl { public ServersView() => InitializeComponent(); }
 public partial class SubscriptionsView : UserControl { public SubscriptionsView() => InitializeComponent(); }
-public partial class SettingsView : UserControl { public SettingsView() => InitializeComponent(); }
+public partial class SettingsView : UserControl
+{
+    private string category = "Network";
+    public SettingsView() { InitializeComponent(); Loaded += (_, _) => ApplyFilter(); }
+    private void CategoryChanged(object sender, RoutedEventArgs e)
+    {
+        if (sender is not RadioButton { Tag: string selected }) return;
+        category = selected;
+        if (SettingsRows is null) return;
+        SettingsSearch.Clear(); ApplyFilter(); SettingsScroll.ScrollToTop();
+    }
+    private void SearchChanged(object sender, TextChangedEventArgs e) => ApplyFilter();
+    private void ApplyFilter()
+    {
+        if (SettingsRows is null || SettingsSearch is null) return;
+        var query = SettingsSearch.Text.Trim(); var count = 0;
+        foreach (var row in SettingsRows.Children.OfType<SettingRow>())
+        {
+            var visible = query.Length > 0
+                ? (row.Title + " " + row.Description).Contains(query, StringComparison.CurrentCultureIgnoreCase)
+                : category == "All" || row.Category == category;
+            row.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+            if (visible) count++;
+        }
+        NoSettingsFound.Visibility = count == 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+}
 public partial class RulesView : UserControl
 {
     private System.Windows.Point dragStart;

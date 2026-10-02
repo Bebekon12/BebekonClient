@@ -15,6 +15,8 @@ The script verifies the pinned core archive, restores packages, runs tests, publ
 
 No .NET runtime is needed on the destination PC. Build needs internet for NuGet and official downloads. Inno Setup 6.7.3 is bootstrapped per user into .tools when no compiler is installed. Override with -InnoCompiler PATH. -SkipInstaller produces only portable output.
 
+Version 0.1.1 unifies the dark palette, outline icons, controls and dialogs. Settings has searchable categories and card switches. To publish while another build folder is in use, run `./build.ps1 -PublishFolder artifacts/release-design`; normal builds still use artifacts/release.
+
 Setup installs into Program Files, registers a demand-start LocalSystem helper, assigns its pipe and service-start rights to the chosen Windows account, and creates shortcuts. If UAC uses a different administrator account, enter the ordinary user's Windows account on the owner page. Only installation/uninstallation needs elevation; connecting from the UI does not. Upgrades preserve %LOCALAPPDATA% data.
 
 The launch executable is **artifacts/release/Bebekon.App.exe** after building, or **Bebekon.App.exe** in the extracted portable ZIP. Keep its adjacent runtime, scripts and core folders together.
@@ -29,7 +31,7 @@ The portable helper/runtime is copied to a protected Program Files directory bef
     dotnet run --project src/Bebekon.App -c Release
     dotnet test tests/Bebekon.Tests -c Release
 
-For a dev connection, install the published service first. `Bebekon.Service.exe --console` is a local helper harness for tests; TUN still requires administrator rights. The normal UI trusts only the registered service binary. `Bebekon.App.exe --smoke` creates isolated synthetic UI fixtures and screenshots in artifacts/ui-smoke, never in the user's state.
+For a dev connection, install the published service first. `Bebekon.Service.exe --console` is a local helper harness for tests; TUN still requires administrator rights. It uses a separate pipe `BebekonVPN.v1.test.<PID>` and runtime directory to isolate it from the installed service. The normal UI trusts only the registered service binary. `Bebekon.App.exe --smoke` uses its own instance mutex and creates isolated synthetic UI fixtures and screenshots in artifacts/ui-smoke, never in the user's state.
 
 ## Using it
 
@@ -62,7 +64,7 @@ Service runtime and service/core logs are in %PROGRAMDATA%/BebekonVPN, protected
 
 ## Validation and current limits
 
-Measured on Windows 11 x64, Release self-contained, without Working Set trimming:
+Measured on Windows 11 x64, version 0.1.0 Release self-contained, without Working Set trimming. Version 0.1.1 has passed the expanded rendering checks; a new ordinary idle memory benchmark has not been run:
 
 | State/process | Working Set | Private memory | CPU |
 |---|---:|---:|---:|
