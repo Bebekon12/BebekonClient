@@ -15,7 +15,7 @@ The script verifies the pinned core archive, restores packages, runs tests, publ
 
 No .NET runtime is needed on the destination PC. Build needs internet for NuGet and official downloads. Inno Setup 6.7.3 is bootstrapped per user into .tools when no compiler is installed. Override with -InnoCompiler PATH. -SkipInstaller produces only portable output.
 
-Version 0.1.1 unifies the dark palette, outline icons, controls and dialogs. Settings has searchable categories and card switches. To publish while another build folder is in use, run `./build.ps1 -PublishFolder artifacts/release-design`; normal builds still use artifacts/release.
+Version 0.1.2 fixes the collection-modified exception on repeated tray menu openings. Window buttons have larger icons, visible hover/pressed states, a red close hover and a changing maximize/restore icon. Version 0.1.1 unified the dark palette, controls and dialogs, with searchable settings categories. To publish while another build folder is in use, run `./build.ps1 -PublishFolder artifacts/release-fix`; normal builds still use artifacts/release.
 
 Setup installs into Program Files, registers a demand-start LocalSystem helper, assigns its pipe and service-start rights to the chosen Windows account, and creates shortcuts. If UAC uses a different administrator account, enter the ordinary user's Windows account on the owner page. Only installation/uninstallation needs elevation; connecting from the UI does not. Upgrades preserve %LOCALAPPDATA% data.
 
@@ -64,7 +64,7 @@ Service runtime and service/core logs are in %PROGRAMDATA%/BebekonVPN, protected
 
 ## Validation and current limits
 
-Measured on Windows 11 x64, version 0.1.0 Release self-contained, without Working Set trimming. Version 0.1.1 has passed the expanded rendering checks; a new ordinary idle memory benchmark has not been run:
+Measured on Windows 11 x64, version 0.1.0 Release self-contained, without Working Set trimming. Version 0.1.2 has passed the expanded rendering and tray/caption checks; a new ordinary idle memory benchmark has not been run:
 
 | State/process | Working Set | Private memory | CPU |
 |---|---:|---:|---:|

@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
+using Forms = System.Windows.Forms;
 
 namespace Bebekon.App;
 /// <summary>Explicit developer-only render harness; synthetic fixtures never enter the user's settings.</summary>
@@ -34,6 +35,8 @@ internal static class SmokeHarness
     public static async Task RunAsync(MainWindow window, MainViewModel vm)
     {
         await Task.Delay(400); var report = new List<string> { "Startup selects TUN after a saved proxy session." };
+        CheckTrayMenu(window, vm, report);
+        await CheckCaptionButtonsAsync(window, vm, report);
         foreach (var page in new[] { "Home", "Servers", "Rules", "Subscriptions", "Settings" })
         {
             vm.Go(page); await Task.Delay(300); window.UpdateLayout();
@@ -92,6 +95,59 @@ internal static class SmokeHarness
         var boxes = Descendants(window).OfType<ListBox>().ToArray(); var realized = boxes.Sum(b => Descendants(b).OfType<ListBoxItem>().Count()); report.Add($"503 rules, realized list containers: {realized} (virtualization).");
         vm.Go("Home"); await Task.Delay(1000); using var process = Process.GetCurrentProcess(); process.Refresh(); var before = process.TotalProcessorTime; await Task.Delay(3000); process.Refresh(); report.Add($"After rendering (not an idle benchmark): Working Set {process.WorkingSet64 / 1048576.0:F1} MB; private {process.PrivateMemorySize64 / 1048576.0:F1} MB; 3-second CPU {(process.TotalProcessorTime - before).TotalMilliseconds / 3000 / Environment.ProcessorCount * 100:F3}%.");
         File.WriteAllLines(Path.Combine(Root, "report.txt"), report);
+    }
+    private static void CheckTrayMenu(MainWindow window, MainViewModel vm, List<string> report)
+    {
+        var menu = window.BuildMenu();
+        var serverItems = ((Forms.ToolStripMenuItem)menu.Items[2]).DropDownItems;
+        serverItems[1].PerformClick();
+        if (vm.SelectedServer != vm.Data.Servers[1]) throw new InvalidOperationException("Tray server selection did not update the view model.");
+        for (var i = 0; i < 100; i++)
+        {
+            var previous = menu.Items.Cast<Forms.ToolStripItem>().SelectMany(item => item is Forms.ToolStripMenuItem submenu
+                ? submenu.DropDownItems.Cast<Forms.ToolStripItem>().Append(item) : [item]).ToArray();
+            menu = window.BuildMenu();
+            if (previous.Any(item => !item.IsDisposed)) throw new InvalidOperationException("Rebuilding the tray menu did not dispose: " + string.Join(", ", previous.Where(item => !item.IsDisposed).Select(item => item.GetType().Name + ": " + item.Text)));
+            if (menu.Items.Count != 7 || menu.Items[0].Text != vm.ConnectLabel) throw new InvalidOperationException("Repeated tray rebuilds changed the menu contents.");
+            var servers = ((Forms.ToolStripMenuItem)menu.Items[2]).DropDownItems.Cast<Forms.ToolStripMenuItem>().ToArray();
+            if (servers.Length != vm.Data.Servers.Count || servers.Count(item => item.Checked) != 1 || !servers[1].Checked)
+                throw new InvalidOperationException("The tray menu must retain the current server selection.");
+            var profiles = ((Forms.ToolStripMenuItem)menu.Items[3]).DropDownItems.Cast<Forms.ToolStripMenuItem>().ToArray();
+            if (profiles.Length != vm.Data.Profiles.Count || profiles.Count(item => item.Checked) != 1)
+                throw new InvalidOperationException("The tray menu must retain the current profile selection.");
+        }
+        vm.SelectedServer = vm.Data.Servers[0];
+        report.Add("Tray menu rebuilt 100 times; old items/submenus disposed; server selection and profile checks passed.");
+    }
+    private static async Task CheckCaptionButtonsAsync(MainWindow window, MainViewModel vm, List<string> report)
+    {
+        var minimize = (Button)window.FindName("MinimizeButton");
+        var maximize = (Button)window.FindName("MaximizeButton");
+        var close = (Button)window.FindName("CloseButton");
+        foreach (var button in new[] { minimize, maximize, close })
+            if (button.ActualWidth < 46 || button.ActualHeight < 36) throw new InvalidOperationException("Caption buttons must have a full 46×36 hit area.");
+        minimize.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        if (window.WindowState != WindowState.Minimized) throw new InvalidOperationException("Minimize button failed.");
+        window.WindowState = WindowState.Normal;
+        maximize.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        await window.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
+        if (window.WindowState != WindowState.Maximized || ((IconView)maximize.Content).Icon != "Restore" || maximize.ToolTip as string != "Восстановить")
+            throw new InvalidOperationException("Maximize button must switch to Restore.");
+        Capture(window, "Window-Maximized");
+        I18n.Set("English");
+        if (maximize.ToolTip as string != "Restore" || close.ToolTip as string != "Close") throw new InvalidOperationException("Caption labels must follow the selected language.");
+        I18n.Set("Русский");
+        maximize.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        await window.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
+        if (window.WindowState != WindowState.Normal || ((IconView)maximize.Content).Icon != "Maximize" || maximize.ToolTip as string != "Развернуть")
+            throw new InvalidOperationException("Restore button failed.");
+        var minimizeToTray = vm.Settings.MinimizeToTray;
+        vm.Settings.MinimizeToTray = true;
+        close.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        if (window.IsVisible) throw new InvalidOperationException("Close must respect Minimize to tray.");
+        window.Show();
+        vm.Settings.MinimizeToTray = minimizeToTray;
+        report.Add("Caption buttons: hit areas, minimize, maximize/restore icon and labels, language and close-to-tray behavior passed.");
     }
     private static void Capture(Window window, string name)
     {

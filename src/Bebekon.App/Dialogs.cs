@@ -14,7 +14,8 @@ public static class Dialogs
         var grid = new Grid(); grid.RowDefinitions.Add(new() { Height = new(58) }); grid.RowDefinitions.Add(new() { Height = GridLength.Auto }); root.Child = grid;
         var header = new Grid { Margin = new(24, 0, 16, 0) };
         header.Children.Add(new TextBlock { Text = title, FontSize = 21, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center, Margin = new(0, 0, 40, 0) });
-        var close = new Button { Style = (Style)Application.Current.Resources["QuietIconButton"], Content = new IconView { Icon = "Close", Width = 16, Height = 16 }, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center, ToolTip = I18n.T("Закрыть", "Close") };
+        var close = new Button { Style = (Style)Application.Current.Resources["CloseTitleButton"], Width = 36, Content = new IconView { Icon = "Close", Width = 22, Height = 22 }, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center, ToolTip = I18n.T("Закрыть", "Close") };
+        System.Windows.Automation.AutomationProperties.SetName(close, I18n.T("Закрыть", "Close"));
         System.Windows.Shell.WindowChrome.SetIsHitTestVisibleInChrome(close, true); close.Click += (_, _) => window.Close(); header.Children.Add(close); grid.Children.Add(header);
         var scroll = new ScrollViewer { Content = body, MaxHeight = 620, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled }; Grid.SetRow(scroll, 1); grid.Children.Add(scroll); window.Content = root;
         window.PreviewKeyDown += (_, e) => { if (e.Key == System.Windows.Input.Key.Escape) window.Close(); };

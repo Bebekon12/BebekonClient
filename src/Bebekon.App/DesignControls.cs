@@ -51,6 +51,7 @@ public sealed class IconView : FrameworkElement
             ["Check"] = "M5,12 L10,17 L20,6",
             ["Minimize"] = "M5,12 H19",
             ["Maximize"] = "M5,5 H19 V19 H5 Z",
+            ["Restore"] = "M8,8 V4 H20 V16 H16 M4,8 H16 V20 H4 Z",
             ["Grip"] = "M8,5 H8.1 M16,5 H16.1 M8,12 H8.1 M16,12 H16.1 M8,19 H8.1 M16,19 H16.1",
             ["Site"] = "M21,12 A9,9 0 1 1 3,12 A9,9 0 1 1 21,12 M3,12 H21 M12,3 C7,8 7,16 12,21 C17,16 17,8 12,3",
             ["Contains"] = "M16,10 A6,6 0 1 1 4,10 A6,6 0 1 1 16,10 M14.5,14.5 L21,21",

@@ -4,6 +4,7 @@ public static class I18n
     public static bool English { get; private set; }
     public static string T(string ru, string en) => English ? en : ru;
     private static readonly (string Key, string Ru, string En)[] Labels = [
+        ("MinimizeWindow","Свернуть","Minimize"),("MaximizeWindow","Развернуть","Maximize"),("RestoreWindow","Восстановить","Restore"),("CloseWindow","Закрыть","Close"),
         ("Home","Главная","Home"),("Servers","Серверы","Servers"),("Rules","Правила","Rules"),("Subscriptions","Подписки","Subscriptions"),("Settings","Настройки","Settings"),
         ("ServerTitle","Выбор сервера","Choose a server"),("ServerSubtitle","Узлы из вашей подписки","Nodes from your subscription"),("SearchServers","Поиск сервера","Search servers"),("ByLatency","По пингу","By latency"),("ByName","По названию","By name"),("Fast","Быстрый","Fast"),("Exact","VPN (точный)","VPN (exact)"),
         ("RoutingTitle","Маршрутизация","Routing"),("RoutingSubtitle","Куда направлять трафик","Where your traffic goes"),("EntirePc","Весь ПК","Entire PC"),("EntireDetail","Весь трафик через VPN","All traffic through VPN"),("ByRules","По правилам","By rules"),("RulesDetail","Остальное — напрямую","Everything else goes direct"),
