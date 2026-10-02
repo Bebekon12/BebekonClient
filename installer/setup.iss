@@ -1,5 +1,5 @@
 #ifndef PublishDir
- #define PublishDir "..\artifacts\publish"
+ #define PublishDir "..\artifacts\release"
 #endif
 #ifndef OutputDir
  #define OutputDir "..\dist"
@@ -36,18 +36,17 @@ Name: "desktopicon"; Description: "Создать ярлык на рабочем
 Name: "autostart"; Description: "Запускать вместе с Windows"; Flags: unchecked
 [Files]
 Source: "{#PublishDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\scripts\stop-service.ps1"; Flags: dontcopy
 [Icons]
 Name: "{group}\Bebekon VPN"; Filename: "{app}\Bebekon.App.exe"
 Name: "{autodesktop}\Bebekon VPN"; Filename: "{app}\Bebekon.App.exe"; Tasks: desktopicon
-[Registry]
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "BebekonVPN"; ValueData: """{app}\Bebekon.App.exe"" --tray"; Tasks: autostart; Flags: uninsdeletevalue
 [Run]
 Filename: "{app}\Bebekon.App.exe"; Description: "Открыть Bebekon VPN"; Flags: nowait postinstall skipifsilent runasoriginaluser
 [UninstallRun]
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\uninstall-service.ps1"""; Flags: runhidden waituntilterminated; RunOnceId: "RemoveService"
 
 [Code]
-var OwnerPage: TInputQueryWizardPage;
+var OwnerPage: TInputQueryWizardPage; OwnerDataRoot: String;
 function OwnerAccount(Param: String): String;
 begin Result := OwnerPage.Values[0]; end;
 procedure InitializeWizard();
@@ -74,23 +73,35 @@ var Code: Integer;
 begin
   Result := '';
   if FileExists(ExpandConstant('{app}\Bebekon.Service.exe')) then begin
-    Exec(ExpandConstant('{sys}\sc.exe'), 'stop BebekonVPN', '', SW_HIDE, ewWaitUntilTerminated, Code);
-    Sleep(1500);
+    ExtractTemporaryFile('stop-service.ps1');
+    if not Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{tmp}\stop-service.ps1') + '"', '', SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then
+      Result := 'Не удалось остановить службу VPN перед обновлением.';
   end;
 end;
 procedure CurStepChanged(CurStep: TSetupStep);
-var Code: Integer;
+var Code: Integer; StartupArg: String;
 begin
+  StartupArg := ''; if WizardIsTaskSelected('autostart') then StartupArg := ' -EnableStartup';
   if CurStep = ssPostInstall then
-    if not Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\scripts\install-service.ps1') + '" -OwnerAccount "' + OwnerAccount('') + '"', '', SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then
+    if not Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\scripts\install-service.ps1') + '" -OwnerAccount "' + OwnerAccount('') + '"' + StartupArg, '', SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then
       RaiseException('Не удалось установить службу VPN. Запустите scripts\install-service.ps1 от администратора.');
+end;
+function InitializeUninstall(): Boolean;
+var Sid, ProfilePath: String;
+begin
+  Result := True; OwnerDataRoot := '';
+  if RegQueryStringValue(HKLM64, 'SOFTWARE\BebekonVPN', 'OwnerSid', Sid) then
+    if RegQueryStringValue(HKLM64, 'SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\' + Sid, 'ProfileImagePath', ProfilePath) then begin
+      StringChangeEx(ProfilePath, '%SystemDrive%', GetEnv('SystemDrive'), True);
+      if (Pos('%', ProfilePath) = 0) and (Length(ProfilePath) > 3) then OwnerDataRoot := ProfilePath + '\AppData\Local\BebekonVPN';
+    end;
 end;
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var Root: String;
 begin
   if CurUninstallStep = usPostUninstall then
-    if MsgBox('Удалить подписки, правила и настройки текущего пользователя?', mbConfirmation, MB_YESNO) = IDYES then begin
-      Root := ExpandConstant('{localappdata}\BebekonVPN');
+    if (OwnerDataRoot <> '') and (MsgBox('Удалить подписки, правила и настройки владельца VPN?', mbConfirmation, MB_YESNO) = IDYES) then begin
+      Root := OwnerDataRoot;
       DelTree(Root, True, True, True);
     end;
 end;

@@ -70,6 +70,7 @@ public static class ConfigGenerator
         if (s.Security != "none")
         {
             var tls = new JsonObject { ["enabled"] = true, ["server_name"] = s.Sni.Length > 0 ? s.Sni : s.Host };
+            if (s.Alpn.Count > 0) tls["alpn"] = Strings(s.Alpn);
             if (s.Fingerprint.Length > 0) tls["utls"] = new JsonObject { ["enabled"] = true, ["fingerprint"] = s.Fingerprint };
             if (s.Security == "reality") tls["reality"] = new JsonObject { ["enabled"] = true, ["public_key"] = s.PublicKey, ["short_id"] = s.ShortId };
             vpn["tls"] = tls;

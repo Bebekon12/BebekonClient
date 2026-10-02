@@ -21,6 +21,7 @@ public static class VlessParser
         string Get(string key, string fallback = "") => q.GetValueOrDefault(key, fallback);
         var s = new Server { Id = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(input.Trim())))[..24], Name = Uri.UnescapeDataString(u.Fragment.TrimStart('#')), Host = u.IdnHost.Trim('[', ']'), Port = u.Port, Uuid = id.ToString(), Security = Get("security", "none").ToLowerInvariant(), Sni = Get("sni", Get("serverName")), PublicKey = Get("pbk"), ShortId = Get("sid"), Fingerprint = Get("fp", "chrome"), Flow = Get("flow"), Transport = Get("type", "tcp").ToLowerInvariant(), ServiceName = Get("serviceName"), Path = Get("path", "/"), TransportHost = Get("host") };
         if (s.Name.Length == 0) s.Name = s.Host;
+        s.Alpn = Get("alpn").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
         if (s.Transport is not ("tcp" or "grpc" or "ws" or "http" or "httpupgrade")) s.UnsupportedReason = "Не поддерживается этой версией: " + s.Transport;
         if (s.Security is not ("none" or "tls" or "reality")) s.UnsupportedReason = "Не поддерживается тип защиты соединения.";
         if (s.Flow is not ("" or "xtls-rprx-vision")) s.UnsupportedReason = "Не поддерживается режим VLESS flow.";
@@ -35,7 +36,7 @@ public static class VlessParser
             if (s.ShortId.Length > 16 || s.ShortId.Length % 2 != 0 || s.ShortId.Any(c => !Uri.IsHexDigit(c))) throw new UserError("Неверный короткий идентификатор Reality.");
             if (string.IsNullOrWhiteSpace(s.Sni)) throw new UserError("Для Reality необходимо имя сервера (SNI).");
         }
-        if (q.ContainsKey("alpn") || q.ContainsKey("mode") && Get("mode") is not ("" or "gun")) s.UnsupportedReason = "Дополнительные параметры транспорта пока не поддерживаются.";
+        if (q.ContainsKey("mode") && Get("mode") is not ("" or "gun") || s.Transport == "ws" && s.Path.Contains("?ed=", StringComparison.Ordinal)) s.UnsupportedReason = "Дополнительные параметры транспорта пока не поддерживаются.";
         return s;
     }
     public static List<Server> ParseSubscription(string content)

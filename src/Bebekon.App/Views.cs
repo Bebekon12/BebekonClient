@@ -4,7 +4,22 @@ using System.Windows.Input;
 using System.Windows.Media;
 
 namespace Bebekon.App;
-public partial class HomeView : UserControl { public HomeView() => InitializeComponent(); }
+public partial class HomeView : UserControl
+{
+    private MainViewModel? vm;
+    public HomeView()
+    {
+        InitializeComponent(); Loaded += (_, _) => { vm = DataContext as MainViewModel; if (vm is not null) vm.PropertyChanged += OnState; UpdateGlow(); };
+        Unloaded += (_, _) => { if (vm is not null) vm.PropertyChanged -= OnState; vm = null; PowerHalo.BeginAnimation(OpacityProperty, null); };
+        IsVisibleChanged += (_, _) => UpdateGlow();
+    }
+    private void OnState(object? sender, System.ComponentModel.PropertyChangedEventArgs e) { if (e.PropertyName == nameof(MainViewModel.Connected)) UpdateGlow(); }
+    private void UpdateGlow()
+    {
+        PowerHalo.BeginAnimation(OpacityProperty, null);
+        if (IsVisible && SystemParameters.ClientAreaAnimation && vm?.Connected == true) PowerHalo.BeginAnimation(OpacityProperty, new System.Windows.Media.Animation.DoubleAnimation(0.55, 1, TimeSpan.FromSeconds(2.4)) { AutoReverse = true, RepeatBehavior = System.Windows.Media.Animation.RepeatBehavior.Forever });
+    }
+}
 public partial class ServersView : UserControl { public ServersView() => InitializeComponent(); }
 public partial class SubscriptionsView : UserControl { public SubscriptionsView() => InitializeComponent(); }
 public partial class SettingsView : UserControl { public SettingsView() => InitializeComponent(); }

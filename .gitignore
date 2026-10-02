@@ -5,6 +5,8 @@ artifacts/
 .tools/
 core/*.exe
 core/*.dll
+core/download/
+core/*.zip
 *.user
 *.dpapi
 TestResults/

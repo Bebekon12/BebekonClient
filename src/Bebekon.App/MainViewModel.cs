@@ -18,6 +18,8 @@ public sealed class MainViewModel : Observable, IDisposable
     private readonly CancellationTokenSource lifetime = new();
     private CancellationTokenSource? scan;
     private CancellationTokenSource? applyDelay;
+    private CancellationTokenSource? networkDelay;
+    private bool recovering;
     public AppState Data { get; }
     public Settings Settings => Data.Settings;
     public ObservableCollection<ServerRow> ServerRows { get; } = [];
@@ -35,8 +37,8 @@ public sealed class MainViewModel : Observable, IDisposable
     public Server? SelectedServer { get => selectedServer; set { if (Set(ref selectedServer, value)) { Data.SelectedServerId = value?.Id; Notify(nameof(ServerLabel)); Save(); QueueApply(); } } }
     public string ServerLabel => SelectedServer?.Name ?? T("Выберите сервер", "Choose a server");
     private Profile activeProfile;
-    public Profile ActiveProfile { get => activeProfile; set { if (value is null || ReferenceEquals(activeProfile, value)) return; DetachProfile(activeProfile); Set(ref activeProfile, value); Data.SelectedProfileId = value.Id; AttachProfile(); RefreshRules(); Notify(nameof(ModeLabel)); Notify(nameof(IsWholePc)); Save(); QueueApply(); } }
-    public bool IsWholePc { get => ActiveProfile.DefaultRoute == RouteTarget.Vpn; set { if (value == IsWholePc) return; ActiveProfile.DefaultRoute = value ? RouteTarget.Vpn : RouteTarget.Direct; Notify(); Notify(nameof(ModeLabel)); Save(); QueueApply(); } }
+    public Profile ActiveProfile { get => activeProfile; set { if (value is null || ReferenceEquals(activeProfile, value)) return; DetachProfile(activeProfile); Set(ref activeProfile, value); Data.SelectedProfileId = value.Id; AttachProfile(); RefreshRules(); Notify(nameof(ModeLabel)); Notify(nameof(IsWholePc)); Notify(nameof(EmptyRulesDetail)); Notify(nameof(StatusDetail)); Save(); QueueApply(); } }
+    public bool IsWholePc { get => ActiveProfile.DefaultRoute == RouteTarget.Vpn; set { if (value == IsWholePc) return; ActiveProfile.DefaultRoute = value ? RouteTarget.Vpn : RouteTarget.Direct; Notify(); Notify(nameof(ModeLabel)); Notify(nameof(EmptyRulesDetail)); Notify(nameof(StatusDetail)); Save(); QueueApply(); } }
     public string ModeLabel => IsWholePc ? T("Весь ПК", "Entire PC") : T("По правилам", "By rules");
     private ConnectionState state;
     public ConnectionState State { get => state; private set { if (Set(ref state, value)) { NotifyStatus(); CommandManager.InvalidateRequerySuggested(); } } }
@@ -44,7 +46,8 @@ public sealed class MainViewModel : Observable, IDisposable
     public bool ConnectionBusy => State is ConnectionState.Connecting or ConnectionState.Disconnecting;
     public string ConnectLabel => State switch { ConnectionState.Connecting => T("Подключаем…", "Connecting…"), ConnectionState.Disconnecting => T("Отключаем…", "Disconnecting…"), ConnectionState.Connected => T("Отключить", "Disconnect"), _ => T("Подключить", "Connect") };
     public string StatusLabel => State switch { ConnectionState.Connected => T("Защищено", "Protected"), ConnectionState.Connecting => T("Подключение", "Connecting"), ConnectionState.Disconnecting => T("Отключение", "Disconnecting"), ConnectionState.Error => T("Ошибка подключения", "Connection error"), _ => T("Готов к подключению", "Ready to connect") };
-    public string StatusDetail => Connected ? IsWholePc ? T("Весь трафик идёт через VPN", "All traffic goes through VPN") : T("Выбранный трафик идёт через VPN", "Selected traffic goes through VPN") : T("Ваш интернет использует обычное подключение", "Your internet uses your normal connection");
+    public string StatusDetail => Connected ? Settings.TunnelMode == TunnelMode.Proxy ? T("Выбранный трафик приложений с прокси идёт через VPN", "Selected traffic from proxy-aware applications uses VPN") : IsWholePc ? T("Весь трафик идёт через VPN", "All traffic goes through VPN") : T("Выбранный трафик идёт через VPN", "Selected traffic goes through VPN") : T("Ваш интернет использует обычное подключение", "Your internet uses your normal connection");
+    public string EmptyRulesDetail => IsWholePc ? T("Без правил весь трафик идёт через VPN", "Without rules all traffic goes through VPN") : T("Без правил весь трафик идёт напрямую", "Without rules all traffic goes direct");
     public string FooterLabel => Connected ? T("онлайн", "online") : "offline";
     public string FooterMode => Connected ? Settings.TunnelMode == TunnelMode.Tun ? "TUN" : "Proxy" : "Offline";
     private string vpnIp = "—";
@@ -115,7 +118,7 @@ public sealed class MainViewModel : Observable, IDisposable
         AttachProfile(); RefreshServers(); RefreshRules();
         Navigate = new Command(p => Go((string)p!)); CollapseSidebar = new Command(_ => SidebarCollapsed = !SidebarCollapsed);
         ToggleConnect = Async(_ => ToggleAsync(), () => !ConnectionBusy);
-        SelectServer = new Command(p => SelectedServer = (Server)p!);
+        SelectServer = new Command(p => { var node = (Server)p!; if (!node.Supported) Banner = node.UnsupportedReason; else SelectedServer = node; });
         FavoriteServer = new Command(p => { var s = (Server)p!; s.Favorite = !s.Favorite; Save(); });
         PingAll = Async(_ => ScanAsync(true), () => !Scanning);
         RefreshSubscriptions = Async(async _ => { foreach (var sub in Data.Subscriptions.ToArray()) await RefreshSubAsync(sub); });
@@ -136,16 +139,16 @@ public sealed class MainViewModel : Observable, IDisposable
         ChangeTunnelMode = new Command(p => { if ((string)p! == "DNS") { Go("Settings"); return; } Settings.TunnelMode = (string)p! == "TUN" ? TunnelMode.Tun : TunnelMode.Proxy; Save(); Notify(nameof(Settings)); QueueApply(); NotifyStatus(); });
         OpenLogs = Async(async _ => { try { var reply = await service.SendAsync(new("GetLogs")); if (reply.Ok && reply.Message is not null) new SafeLog(Paths.Logs, "service").Write(reply.Message); } catch { } OpenFolder(Paths.Logs); });
         OpenConfig = new Command(_ => OpenFolder(store.Root));
-        RestartService = Async(async _ => { if (Connected) { await DisconnectAsync(); await ConnectAsync(); } else { var reply = await service.SendAsync(new("GetStatus"), true); Banner = reply.Ok ? T("Служба готова", "Service is ready") : reply.Message; } });
+        RestartService = Async(async _ => { var reconnect = Connected; if (reconnect) await DisconnectAsync(); try { await service.SendAsync(new("Shutdown")); await Task.Delay(350); } catch { } var reply = await service.SendAsync(new("GetStatus"), true); if (!reply.Ok) throw new UserError(reply.Message ?? "Service unavailable."); if (reconnect) await ConnectAsync(); Banner = T("Служба перезапущена", "Service restarted"); });
         DismissBanner = new Command(_ => Banner = null);
         I18n.Set(Settings.Language);
-        SystemEvents.PowerModeChanged += OnPower; NetworkChange.NetworkAvailabilityChanged += OnNetwork;
+        SystemEvents.PowerModeChanged += OnPower; NetworkChange.NetworkAvailabilityChanged += OnNetwork; NetworkChange.NetworkAddressChanged += OnAddress;
     }
     private AsyncCommand Async(Func<object?, Task> action, Func<bool>? can = null) => new(action, Report, can);
     private string T(string ru, string en) => Settings.Language == "English" ? en : ru;
     public async Task InitializeAsync()
     {
-        try { var response = await service.SendAsync(new("GetStatus")); ApplyStatus(response.Status); if (Connected) { Banner = T("VPN работает в службе. Переподключите для обновления параметров.", "VPN is running in the service. Reconnect to update settings."); _ = MonitorAsync(); } }
+        try { var response = await service.SendAsync(new("GetStatus")); ApplyStatus(response.Status); if (Connected) { await DisconnectAsync(); await ConnectAsync(); } }
         catch { SystemProxy.Restore(); }
         if (Settings.AutoConnect && !Connected && SelectedServer is not null) try { await ConnectAsync(); } catch (Exception e) { Report(e); }
     }
@@ -239,7 +242,25 @@ public sealed class MainViewModel : Observable, IDisposable
     public void Report(Exception e) { log.Write("Operation failed: " + e.GetType().Name); Banner = e is UserError ? e.Message : e is OperationCanceledException ? T("Время ожидания истекло.", "Operation timed out.") : T("Не удалось выполнить действие. Проверьте подключение и параметры.", "Action failed. Check your connection and settings."); }
     private void Save() { try { store.Save(Data); } catch (Exception e) { Report(e); } }
     private static void OpenFolder(string dir) { Directory.CreateDirectory(dir); Process.Start(new ProcessStartInfo("explorer.exe") { ArgumentList = { dir }, UseShellExecute = true }); }
-    private void OnPower(object sender, PowerModeChangedEventArgs e) { if (e.Mode == PowerModes.Resume) Application.Current.Dispatcher.InvokeAsync(async () => { if (Connected) try { var reply = await service.SendAsync(new("GetStatus")); ApplyStatus(reply.Status); if (spec is not null) { using var client = LatencyService.ProbeClient(spec); using var r = await client.GetAsync("https://www.gstatic.com/generate_204"); r.EnsureSuccessStatusCode(); } } catch { try { await DisconnectAsync(); await ConnectAsync(); } catch (Exception ex) { Report(ex); } } }); }
+    private void OnPower(object sender, PowerModeChangedEventArgs e) { if (e.Mode == PowerModes.Resume) ScheduleNetworkCheck(); }
     private void OnNetwork(object? sender, NetworkAvailabilityEventArgs e) { if (e.IsAvailable) OnPower(this, new(PowerModes.Resume)); }
-    public void Dispose() { Save(); lifetime.Cancel(); scan?.Cancel(); applyDelay?.Cancel(); SystemEvents.PowerModeChanged -= OnPower; NetworkChange.NetworkAvailabilityChanged -= OnNetwork; }
+    private void OnAddress(object? sender, EventArgs e) => ScheduleNetworkCheck();
+    private void ScheduleNetworkCheck() => Application.Current.Dispatcher.InvokeAsync(async () =>
+    {
+        if (!Connected || recovering) return;
+        networkDelay?.Cancel(); networkDelay?.Dispose(); networkDelay = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token); var token = networkDelay.Token;
+        try { await Task.Delay(1000, token); await RecoverAsync(); } catch (OperationCanceledException) { }
+    });
+    private async Task RecoverAsync()
+    {
+        if (recovering || !Connected) return; recovering = true;
+        try
+        {
+            try { var reply = await service.SendAsync(new("GetStatus")); if (reply.Status.State != ConnectionState.Connected) throw new UserError("VPN needs reconnect."); if (spec is not null) { using var client = LatencyService.ProbeClient(spec); using var r = await client.GetAsync("https://www.gstatic.com/generate_204", lifetime.Token); r.EnsureSuccessStatusCode(); } }
+            catch { try { await DisconnectAsync(); } catch { State = ConnectionState.Error; } await ConnectAsync(); }
+        }
+        catch (Exception e) { Report(e); }
+        finally { recovering = false; }
+    }
+    public void Dispose() { Save(); lifetime.Cancel(); scan?.Cancel(); applyDelay?.Cancel(); networkDelay?.Cancel(); SystemEvents.PowerModeChanged -= OnPower; NetworkChange.NetworkAvailabilityChanged -= OnNetwork; NetworkChange.NetworkAddressChanged -= OnAddress; }
 }

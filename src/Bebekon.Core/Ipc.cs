@@ -35,7 +35,7 @@ public sealed class ServiceClient
     {
         if (startService) await Task.Run(() =>
         {
-            try { using var service = new ServiceController(PipeProtocol.ServiceName); if (service.Status == ServiceControllerStatus.Stopped) service.Start(); service.WaitForStatus(ServiceControllerStatus.Running, TimeSpan.FromSeconds(10)); }
+            try { using var service = new ServiceController(PipeProtocol.ServiceName); if (service.Status == ServiceControllerStatus.StopPending) service.WaitForStatus(ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(15)); service.Refresh(); if (service.Status == ServiceControllerStatus.Stopped) service.Start(); service.WaitForStatus(ServiceControllerStatus.Running, TimeSpan.FromSeconds(10)); }
             catch (Exception) { throw new UserError("Служба VPN недоступна. Установите Setup или запустите portable-install-service.ps1 один раз от администратора."); }
         }, ct);
         using var pipe = new NamedPipeClientStream(".", PipeProtocol.PipeName, PipeDirection.InOut, PipeOptions.Asynchronous, TokenImpersonationLevel.Impersonation);

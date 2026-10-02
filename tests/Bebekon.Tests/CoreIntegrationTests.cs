@@ -43,6 +43,8 @@ public class CoreIntegrationTests
                 using var http=new HttpClient(new SocketsHttpHandler {UseProxy=true,Proxy=new WebProxy($"http://127.0.0.1:{mixedPort}")}) {Timeout=TimeSpan.FromSeconds(5)};
                 var vpn=await http.GetStringAsync($"http://vpn.example.com:{targetPort}/",lifetime.Token); var direct=await http.GetStringAsync($"http://direct.example.com:{targetPort}/",lifetime.Token);
                 Assert.Equal("127.0.0.2",vpn);Assert.Equal(global?"127.0.0.2":"127.0.0.1",direct);
+                using var sniffRequest=new HttpRequestMessage(HttpMethod.Get,$"http://127.0.0.1:{targetPort}/"); sniffRequest.Headers.Host="vpn.example.com";
+                using var sniffResponse=await http.SendAsync(sniffRequest,lifetime.Token); Assert.Equal("127.0.0.2",await sniffResponse.Content.ReadAsStringAsync(lifetime.Token));
                 using var probe=LatencyService.ProbeClient(spec); Assert.Equal("127.0.0.2",await probe.GetStringAsync($"http://127.0.0.1:{targetPort}/",lifetime.Token));
                 clientCore.Stop();Assert.False(clientCore.Running);
             }

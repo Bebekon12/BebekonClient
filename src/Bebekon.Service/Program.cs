@@ -44,12 +44,14 @@ internal sealed class VpnService : ServiceBase
         Directory.CreateDirectory(root);
         if ((File.GetAttributes(root) & FileAttributes.ReparsePoint) != 0 || Directory.EnumerateFileSystemEntries(root).Any(p => (File.GetAttributes(p) & FileAttributes.ReparsePoint) != 0)) throw new InvalidOperationException("Reparse points are forbidden in service runtime storage.");
         var security = new DirectorySecurity(); security.SetAccessRuleProtection(true, false);
+        if (!console) security.SetOwner(new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null));
         foreach (var sid in new[] { new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null), new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null) }) security.AddAccessRule(new(sid, FileSystemRights.FullControl, InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
         if (console) security.AddAccessRule(new(owner, FileSystemRights.FullControl, InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
         new DirectoryInfo(root).SetAccessControl(security);
         foreach (var file in Directory.EnumerateFiles(root))
         {
             var fileSecurity = new FileSecurity(); fileSecurity.SetAccessRuleProtection(true, false);
+            if (!console) fileSecurity.SetOwner(new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null));
             foreach (var sid in new[] { new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null), new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null) }) fileSecurity.AddAccessRule(new(sid, FileSystemRights.FullControl, AccessControlType.Allow));
             if (console) fileSecurity.AddAccessRule(new(owner, FileSystemRights.FullControl, AccessControlType.Allow));
             new FileInfo(file).SetAccessControl(fileSecurity);
@@ -92,6 +94,7 @@ internal sealed class VpnService : ServiceBase
                     {
                         case "GetStatus": break;
                         case "StopCore": StopCore(); break;
+                        case "Shutdown": if (console) throw new UserError("Console helper must be stopped with Ctrl+C."); StopCore(); break;
                         case "StartCore": if (request.Spec is null) throw new UserError("Не указан сервер."); await StartCoreAsync(request.Spec, timeout.Token); break;
                         case "RestartCore": var spec = request.Spec ?? last ?? throw new UserError("Сначала выберите сервер."); StopCore(); await StartCoreAsync(spec, timeout.Token); break;
                         case "ValidateConfig": if (request.Spec is null) throw new UserError("Не указан сервер."); var checkPath = Path.Combine(root, "validate.json"); try { await File.WriteAllTextAsync(checkPath, ConfigGenerator.Generate(request.Spec), timeout.Token); using var checker = NewCore(); await checker.ValidateAsync(checkPath, timeout.Token); } finally { File.Delete(checkPath); } break;
@@ -108,6 +111,7 @@ internal sealed class VpnService : ServiceBase
                 }
                 finally { gate.Release(); }
                 await PipeProtocol.WriteAsync(pipe, result, timeout.Token);
+                if (request.Operation == "Shutdown" && result.Ok) { _ = Task.Run(Stop); break; }
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
             catch (Exception e) { log.Write("IPC interrupted: " + e.GetType().Name); await Task.Delay(200, ct); }

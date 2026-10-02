@@ -1,4 +1,4 @@
-param([string]$OwnerAccount, [string]$OwnerSid)
+param([string]$OwnerAccount, [string]$OwnerSid, [switch]$EnableStartup)
 $ErrorActionPreference = 'Stop'
 $principal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'Run this script once as administrator to register the service.' }
@@ -22,13 +22,21 @@ $null = [Security.Principal.SecurityIdentifier]::new($OwnerSid)
 New-Item -Path 'HKLM:\SOFTWARE\BebekonVPN' -Force | Out-Null
 Set-ItemProperty -Path 'HKLM:\SOFTWARE\BebekonVPN' -Name OwnerSid -Value $OwnerSid
 $service = Get-Service -Name BebekonVPN -ErrorAction SilentlyContinue
-if ($service) { if ($service.Status -ne 'Stopped') { Stop-Service -Name BebekonVPN; $service.WaitForStatus('Stopped',[TimeSpan]::FromSeconds(20)) }; & sc.exe config BebekonVPN binPath= ('"' + $exe + '"') start= demand obj= LocalSystem }
-else { & sc.exe create BebekonVPN binPath= ('"' + $exe + '"') start= demand obj= LocalSystem DisplayName= 'Bebekon VPN helper' }
-if ($LASTEXITCODE -ne 0) { throw 'Service registration failed.' }
-& sc.exe description BebekonVPN 'Local protected helper for Bebekon VPN. Starts on demand.'
+if ($service) {
+    if ($service.Status -ne 'Stopped') { Stop-Service -Name BebekonVPN; $service.WaitForStatus('Stopped',[TimeSpan]::FromSeconds(20)) }
+    $win32Service = Get-CimInstance Win32_Service -Filter "Name='BebekonVPN'"
+    $result = Invoke-CimMethod -InputObject $win32Service -MethodName Change -Arguments @{PathName=('"' + $exe + '"');StartMode='Manual';StartName='LocalSystem'}
+    if ($result.ReturnValue -ne 0) { throw 'Service update failed.' }
+}
+else { New-Service -Name BebekonVPN -BinaryPathName ('"' + $exe + '"') -StartupType Manual -DisplayName 'Bebekon VPN helper' | Out-Null }
+Set-Service -Name BebekonVPN -Description 'Local protected helper for Bebekon VPN. Starts on demand.'
 # UI may query and start the service. Only administrators may change its binary or ACL.
 & sc.exe sdset BebekonVPN ('D:(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)(A;;LCRP;;;' + $OwnerSid + ')')
 if ($LASTEXITCODE -ne 0) { throw 'Service permissions could not be applied.' }
+if ($EnableStartup) {
+    $ownerHive = [Microsoft.Win32.Registry]::Users.OpenSubKey($OwnerSid, $true)
+    if (-not $ownerHive) { throw 'The selected user must be logged in to configure startup.' }
+    try { $runKey = $ownerHive.CreateSubKey('Software\Microsoft\Windows\CurrentVersion\Run'); try { $ui = Join-Path $installRoot 'Bebekon.App.exe'; $runKey.SetValue('BebekonVPN', ('"' + $ui + '" --tray')) } finally { $runKey.Dispose() } } finally { $ownerHive.Dispose() }
+}
 # Never repeatedly restart a crashing TUN core in the background.
-& sc.exe failure BebekonVPN reset= 0 actions= ''
 Write-Host 'Bebekon service installed. Launch the UI without administrator privileges.'

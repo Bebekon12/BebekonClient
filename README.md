@@ -17,7 +17,7 @@ No .NET runtime is needed on the destination PC. Build needs internet for NuGet 
 
 Setup installs into Program Files, registers a demand-start LocalSystem helper, assigns its pipe and service-start rights to the chosen Windows account, and creates shortcuts. If UAC uses a different administrator account, enter the ordinary user's Windows account on the owner page. Only installation/uninstallation needs elevation; connecting from the UI does not. Upgrades preserve %LOCALAPPDATA% data.
 
-Portable still needs a privileged helper for TUN: extract to a trusted directory that other accounts cannot write, run scripts/install-service.ps1 **once as administrator**, then launch Bebekon.App.exe normally. Use -OwnerAccount 'COMPUTER\username' if elevating with another account. scripts/uninstall-service.ps1 removes it. Portable means no app installer, not an unprivileged TUN driver.
+Portable still needs a privileged helper for TUN: extract the ZIP, run scripts/install-service.ps1 **once as administrator**, then launch Bebekon.App.exe normally. The script copies the helper/runtime to a protected Program Files directory before service registration; a LocalSystem binary never remains in the user-writable portable folder. Use -OwnerAccount 'COMPUTER\username' if elevating with another account. scripts/uninstall-service.ps1 removes the service and its protected copy. Portable means no app installer, not an unprivileged TUN driver.
 
 ## Development
 
@@ -58,7 +58,17 @@ Service runtime and service/core logs are in %PROGRAMDATA%/BebekonVPN, protected
 
 ## Validation and current limits
 
-Measured results and remaining manual checks are in docs/VALIDATION.md. A passing build and local VLESS fixture are **not** proof of the Ultima/TUN/browser acceptance scenario.
+Measured on Windows 11 x64, Release self-contained, without Working Set trimming:
+
+| State/process | Working Set | Private memory | CPU |
+|---|---:|---:|---:|
+| UI, disconnected idle | 146.1 MB | 108.1 MB | 0.03% over 5s |
+| Helper harness, no core | 35.3 MB | 8.3 MB | 0.00% over 5s |
+| Connected UI + service + core | pending | pending | pending |
+
+The desired ≤90MB UI target is **not met**. No process is hidden or trimmed. CPU is normalized to the whole machine. Screenshot rendering allocates extra surfaces and is excluded from idle measurements. Real provider/TUN combined memory is unmeasured.
+
+46 automated tests cover parsing, models, DPAPI, priority, generated config checks, actual loopback VLESS traffic, HTTP Host sniffing, helper/core crash detection and job cleanup. Measured results and remaining manual checks are in docs/VALIDATION.md. A passing build and local VLESS fixture are **not** proof of the Ultima/TUN/browser acceptance scenario.
 
 Known limits:
 

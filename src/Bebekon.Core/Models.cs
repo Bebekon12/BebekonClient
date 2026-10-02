@@ -32,6 +32,7 @@ public sealed class Server : Observable
     public string PublicKey { get; set; } = "";
     public string ShortId { get; set; } = "";
     public string Fingerprint { get; set; } = "chrome";
+    public List<string> Alpn { get; set; } = [];
     public string Flow { get; set; } = "";
     public string Transport { get; set; } = "tcp";
     public string ServiceName { get; set; } = "";
