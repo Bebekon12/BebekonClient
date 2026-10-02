@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType><UseWPF>true</UseWPF><UseWindowsForms>true</UseWindowsForms>
+    <ApplicationManifest>app.manifest</ApplicationManifest><ApplicationIcon>../../resources/icons/bebekon.ico</ApplicationIcon>
+  </PropertyGroup>
+  <ItemGroup>
+    <Using Remove="System.Drawing"/><Using Remove="System.Windows.Forms"/>
+    <ProjectReference Include="../Bebekon.Core/Bebekon.Core.csproj" />
+    <Content Include="../../resources/presets/services.json" Link="resources/services.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../../core/sing-box.exe" Link="core/sing-box.exe" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../../resources/icons/bebekon.ico" Link="resources/bebekon.ico" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

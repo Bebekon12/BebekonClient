@@ -1,0 +1,11 @@
+global using System.IO;
+global using System.Windows;
+global using System.Windows.Controls;
+global using Bebekon.Core;
+global using Application = System.Windows.Application;
+global using Button = System.Windows.Controls.Button;
+global using TextBox = System.Windows.Controls.TextBox;
+global using CheckBox = System.Windows.Controls.CheckBox;
+global using ComboBox = System.Windows.Controls.ComboBox;
+global using UserControl = System.Windows.Controls.UserControl;
+global using MessageBox = System.Windows.MessageBox;

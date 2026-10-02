@@ -1,0 +1,13 @@
+<Application x:Class="Bebekon.App.App" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="clr-namespace:Bebekon.App">
+ <Application.Resources>
+  <ResourceDictionary>
+   <ResourceDictionary.MergedDictionaries><ResourceDictionary Source="Theme.xaml"/></ResourceDictionary.MergedDictionaries>
+   <BooleanToVisibilityConverter x:Key="BoolVisibility"/>
+   <DataTemplate DataType="{x:Type local:HomePage}"><local:HomeView DataContext="{Binding Main}"/></DataTemplate>
+   <DataTemplate DataType="{x:Type local:ServersPage}"><local:ServersView DataContext="{Binding Main}"/></DataTemplate>
+   <DataTemplate DataType="{x:Type local:RulesPage}"><local:RulesView DataContext="{Binding Main}"/></DataTemplate>
+   <DataTemplate DataType="{x:Type local:SubscriptionsPage}"><local:SubscriptionsView DataContext="{Binding Main}"/></DataTemplate>
+   <DataTemplate DataType="{x:Type local:SettingsPage}"><local:SettingsView DataContext="{Binding Main}"/></DataTemplate>
+  </ResourceDictionary>
+ </Application.Resources>
+</Application>

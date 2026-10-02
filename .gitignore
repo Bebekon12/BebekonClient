@@ -1,0 +1,10 @@
+**/bin/
+**/obj/
+dist/
+artifacts/
+.tools/
+core/*.exe
+core/*.dll
+*.user
+*.dpapi
+TestResults/
