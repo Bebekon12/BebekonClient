@@ -5,7 +5,7 @@ Environment: Windows 11 x64, .NET SDK 10.0.300, runtime 10.0.8, sing-box 1.14.2.
 ## Executed
 
 - Release solution compilation.
-- 113 parser/model/storage/config and real-core tests, including JSON Xray subscription import, gRPC/Reality schema acceptance, parallel logging, multilingual country labels, the helper crash suite and elevation command boundaries.
+- 129 parser/model/storage/config and real-core tests, including JSON Xray subscription import, gRPC/Reality schema acceptance, parallel logging, multilingual country labels, the helper crash suite, elevation command boundaries and pipe/service identity checks.
 - WPF smoke harness checks that startup selects TUN even after a saved Proxy session. Elevated registration uses the original user's SID and literal argument list; partial packages are rejected before elevation. Actual UAC acceptance/cancellation and protected service installation remain manual checks.
 - Official `sing-box check` accepted generated TCP, Reality, gRPC, WebSocket, HTTPUpgrade configurations.
 - Real local VLESS fixture confirmed: selected domain exits via VLESS; unmatched domain Direct; Entire PC default VPN; authenticated forced VPN probe; HTTP Host sniffing routes an IP-addressed request by its hostname.
@@ -33,6 +33,14 @@ Environment: Windows 11 x64, .NET SDK 10.0.300, runtime 10.0.8, sing-box 1.14.2.
 - WPF harness: all six editor types, optional name, Direct/VPN and specific/Auto server selections; rule choices ≥44px and submit buttons ≥44px. Owner blur/restoration verified; screenshots inspected. All five screens at 100/125/150/175% render scale and 860×660 minimum window. The home halo fits inside the hero; logo glow is present. Compact routing shortcuts leave a usable list viewport at minimum size even with a banner; the actual Add preset command is applied twice, then Save edits the same rule ID without changing its Direct action. Existing tray, settings, animation and virtualization checks retained.
 - Published self-contained 0.1.5 UI passed the full WPF smoke suite. A separate disconnected idle process, before screen captures or explicit GC, measured 152.4 MB Working Set / 112.0 MB private and 0.000% visible/hidden machine-normalized CPU over 5 seconds each. The 90 MB UI target remains missed; real connected TUN memory remains unmeasured.
 - A registered older helper is upgraded via the existing protected installer before connecting; version comparison is automated. Actual elevated upgrade remains part of manual acceptance.
+
+## Version 0.1.6
+
+- Reproduced the reported connection error from a medium-integrity Windows owner: GetNamedPipeServerProcessId succeeds, but OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION) on the installed LocalSystem helper fails with ERROR_ACCESS_DENIED (5). The pipe PID matches the Running own-process service PID returned by QueryServiceStatusEx using the owner's existing SERVICE_QUERY_STATUS permission.
+- Replaced executable inspection with the authoritative SCM PID check before sending requests. Sixteen new tests cover the native 36-byte status layout, matching/zero/different PIDs, stopped/pending/paused states, driver/shared-process types and a real counterfeit pipe owned by the test process. No identity verification bypass or extra client privileges were added.
+- The fixed client, running without elevation, completed five authenticated GetStatus requests to the actual installed protected LocalSystem helper (0.1.5). It then validated the saved server/profile, launched the real core, received forced-VPN HTTPS HTTP 204 and a valid egress IP, and stopped the core with Disconnected/no-core status. Reproduction: `dotnet run --file tools/verify-service.cs -c Release -- --probe`. Private connection details are not printed. The probe uses a separate authenticated local port, does not change Windows proxy/routes or saved user state, and requires an idle helper.
+- SnowVPN's TUN is active on this machine. The installed-helper probe therefore used proxy mode; independent TUN/browser routing acceptance remains pending.
+- Published self-contained 0.1.6 Core also completed five verified status requests to the installed LocalSystem helper without elevation. The published App passed the complete WPF smoke suite: five pages at 100/125/150/175% render scales, five dialogs, minimum size, tray/caption controls, settings, routing editor, admin preset and virtualization checks. Release tests: 129 passed, zero failed/skipped.
 
 ## Required manual acceptance — pending
 

@@ -2,9 +2,6 @@ using System.IO.Pipes;
 using System.Security.Principal;
 using System.ServiceProcess;
 using System.Text.Json;
-using System.Runtime.InteropServices;
-using System.Text;
-using Microsoft.Win32;
 
 namespace Bebekon.Core;
 
@@ -41,20 +38,7 @@ public sealed class ServiceClient
         using var pipe = new NamedPipeClientStream(".", PipeProtocol.PipeName, PipeDirection.InOut, PipeOptions.Asynchronous, TokenImpersonationLevel.Impersonation);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct); timeout.CancelAfter(TimeSpan.FromSeconds(startService ? 25 : 4));
         await pipe.ConnectAsync(timeout.Token);
-        VerifyServer(pipe);
+        ServiceIdentity.Verify(pipe);
         await PipeProtocol.WriteAsync(pipe, request, timeout.Token); return await PipeProtocol.ReadAsync<ServiceResponse>(pipe, timeout.Token);
     }
-    private static void VerifyServer(NamedPipeClientStream pipe)
-    {
-        var imagePath = Registry.GetValue(@"HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\BebekonVPN", "ImagePath", null) as string;
-        var expected = imagePath?.Trim().Trim('"');
-        if (string.IsNullOrWhiteSpace(expected) || !GetNamedPipeServerProcessId(pipe.SafePipeHandle.DangerousGetHandle(), out var pid)) throw new UserError("Не удалось проверить службу VPN.");
-        var handle = OpenProcess(0x1000, false, pid);
-        try { var path = new StringBuilder(32768); var size = path.Capacity; if (handle == IntPtr.Zero || !QueryFullProcessImageName(handle, 0, path, ref size) || !string.Equals(Path.GetFullPath(path.ToString()), Path.GetFullPath(expected), StringComparison.OrdinalIgnoreCase)) throw new UserError("Источник команд VPN не прошёл проверку. Переустановите службу."); }
-        finally { if (handle != IntPtr.Zero) CloseHandle(handle); }
-    }
-    [DllImport("kernel32.dll")] private static extern bool GetNamedPipeServerProcessId(IntPtr pipe, out uint id);
-    [DllImport("kernel32.dll")] private static extern IntPtr OpenProcess(uint access, bool inherit, uint id);
-    [DllImport("kernel32.dll", CharSet=CharSet.Unicode)] private static extern bool QueryFullProcessImageName(IntPtr process, int flags, StringBuilder path, ref int size);
-    [DllImport("kernel32.dll")] private static extern bool CloseHandle(IntPtr handle);
 }

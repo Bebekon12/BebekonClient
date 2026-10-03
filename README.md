@@ -31,7 +31,9 @@ The portable helper/runtime is copied to a protected Program Files directory bef
     dotnet run --project src/Bebekon.App -c Release
     dotnet test tests/Bebekon.Tests -c Release
 
-For a dev connection, install the published service first. `Bebekon.Service.exe --console` is a local helper harness for tests; TUN still requires administrator rights. It uses a separate pipe `BebekonVPN.v1.test.<PID>` and runtime directory to isolate it from the installed service. The normal UI trusts only the registered service binary. `Bebekon.App.exe --smoke` uses its own instance mutex and creates isolated synthetic UI fixtures and screenshots in artifacts/ui-smoke, never in the user's state.
+For a dev connection, install the published service first. `Bebekon.Service.exe --console` is a local helper harness for tests; TUN still requires administrator rights. It uses a separate pipe `BebekonVPN.v1.test.<PID>` and runtime directory to isolate it from the installed service. The normal UI trusts only the Running own-process service registered with Windows SCM, matching its PID to the pipe server before sending any request. `Bebekon.App.exe --smoke` uses its own instance mutex and creates isolated synthetic UI fixtures and screenshots in artifacts/ui-smoke, never in the user's state.
+
+Version 0.1.6 fixes a false service-identity rejection when the ordinary UI cannot inspect a LocalSystem process. No elevation is needed for the new SCM status check. `dotnet run --file tools/verify-service.cs -c Release` explicitly tests five authenticated status requests against an installed helper assigned to the current ordinary user. Add `-- --probe` to validate the saved profile and test HTTPS/IP through a temporary proxy core; it stops the core afterward and does not change Windows routes, proxy or saved state.
 
 ## Using it
 
@@ -67,7 +69,7 @@ Pinned official stable **sing-box 1.14.2**, Windows amd64. Archive SHA256 is in 
 
 %LOCALAPPDATA%/BebekonVPN/state.dpapi contains the whole user state protected with DPAPI CurrentUser. Runtime mirror: runtime/sing-box.dpapi. Logs: logs/app.log, logs/core.log, logs/service.log. Rotation: 1MB, 3 archives. Raw core messages are not persisted, because they can contain private destinations; diagnostics intentionally disclose less detail.
 
-Service runtime and service/core logs are in %PROGRAMDATA%/BebekonVPN, protected to SYSTEM/Administrators. The service writes its own fixed sing-box.json and removes it on disconnect/core exit. It never accepts raw JSON, executable paths, arbitrary config paths or command-line arguments from the UI. Local pipe ACL allows only the installation owner and SYSTEM, denies network logons, and additionally checks the impersonated SID. The UI verifies the pipe server's executable against the registered service image. Core children belong to kill-on-close jobs.
+Service runtime and service/core logs are in %PROGRAMDATA%/BebekonVPN, protected to SYSTEM/Administrators. The service writes its own fixed sing-box.json and removes it on disconnect/core exit. It never accepts raw JSON, executable paths, arbitrary config paths or command-line arguments from the UI. Local pipe ACL allows only the installation owner and SYSTEM, denies network logons, and additionally checks the impersonated SID. The UI verifies the pipe server's PID against the registered Running own-process service using SCM query-status access. Core children belong to kill-on-close jobs.
 
 ## Validation and current limits
 
@@ -81,7 +83,7 @@ Measured on Windows 11 x64: version 0.1.5 Release self-contained UI in an ordina
 
 The desired ≤90MB UI target is **not met**. No process is hidden or trimmed. CPU is normalized to the whole machine. Screenshot rendering allocates extra surfaces and is excluded from idle measurements. Real provider/TUN combined memory is unmeasured.
 
-113 automated tests cover plain/Base64/JSON Xray subscription parsing, models, DPAPI, priority, generated config checks, actual loopback VLESS traffic, HTTP Host sniffing, helper/core crash detection, job cleanup and elevation command boundaries. A supplied Ultima subscription was also imported live: nine supported nodes, nine configurations accepted by the official core, and a successful forced-VPN HTTPS probe through gRPC/Reality. This is **not** proof of the full TUN/browser acceptance scenario; remaining manual checks are in docs/VALIDATION.md.
+129 automated tests cover plain/Base64/JSON Xray subscription parsing, models, DPAPI, priority, generated config checks, actual loopback VLESS traffic, HTTP Host sniffing, helper/core crash detection, job cleanup, elevation command boundaries and service identity rejection cases. A supplied Ultima subscription was also imported live: nine supported nodes, nine configurations accepted by the official core, and a successful forced-VPN HTTPS probe through gRPC/Reality. Version 0.1.6 also verified authenticated commands and a live saved-profile HTTPS/IP probe through the installed LocalSystem helper from an ordinary UI identity. Full TUN/browser acceptance remains in docs/VALIDATION.md.
 
 Known limits:
 
