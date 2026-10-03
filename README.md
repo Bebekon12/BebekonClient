@@ -35,6 +35,12 @@ For a dev connection, install the published service first. `Bebekon.Service.exe 
 
 Version 0.1.6 fixes a false service-identity rejection when the ordinary UI cannot inspect a LocalSystem process. No elevation is needed for the new SCM status check. `dotnet run --file tools/verify-service.cs -c Release` explicitly tests five authenticated status requests against an installed helper assigned to the current ordinary user. Add `-- --probe` to validate the saved profile and test HTTPS/IP through a temporary proxy core; it stops the core afterward and does not change Windows routes, proxy or saved state.
 
+## Version 0.1.8
+
+Settings → Updates checks for new versions, verifies a signed release manifest and installer hash, and offers an in-place update with restart. Subscriptions, rules, settings and the helper owner are preserved. The local channel uses this workspace's dist/update.json; Internet distribution needs a stable HTTPS host. See [publishing updates](docs/UPDATES.md). Install 0.1.8 once to enable subsequent in-app upgrades.
+
+Ping results retain their green/orange/red colors while busy, and previous measurements remain until replaced. The connection button has a dark layered face, gradient rim, hover/press feedback, keyboard focus and a distinct connected state.
+
 ## Version 0.1.7
 
 Home now shows live download/upload rates and totals, and the server and mode cards are clickable. Scroll down for all subscription servers, search by server/subscription, sort, favorites, individual/batch ping and refresh. The list is virtualized, and the wheel returns to the dashboard at its edges. The white-and-blue running snowman is used in the sidebar, EXE, tray and installer; its source and generation prompt are in resources/icons.
@@ -89,7 +95,7 @@ Measured on Windows 11 x64: version 0.1.5 Release self-contained UI in an ordina
 
 The desired ≤90MB UI target is **not met**. No process is hidden or trimmed. CPU is normalized to the whole machine. Screenshot rendering allocates extra surfaces and is excluded from idle measurements. Real provider/TUN combined memory is unmeasured.
 
-135 automated tests cover plain/Base64/JSON Xray subscription parsing, models, DPAPI, priority, generated config checks, actual loopback VLESS traffic, HTTP Host sniffing, helper/core crash detection, job cleanup, elevation command boundaries and service identity rejection cases. A supplied Ultima subscription was also imported live: nine supported nodes, nine configurations accepted by the official core, and a successful forced-VPN HTTPS probe through gRPC/Reality. Version 0.1.6 also verified authenticated commands and a live saved-profile HTTPS/IP probe through the installed LocalSystem helper from an ordinary UI identity. Full TUN/browser acceptance remains in docs/VALIDATION.md.
+150 automated tests cover plain/Base64/JSON Xray subscription parsing, models, DPAPI, priority, generated config checks, actual loopback VLESS traffic, HTTP Host sniffing, helper/core crash detection, job cleanup, elevation command boundaries and service identity rejection cases. A supplied Ultima subscription was also imported live: nine supported nodes, nine configurations accepted by the official core, and a successful forced-VPN HTTPS probe through gRPC/Reality. Version 0.1.6 also verified authenticated commands and a live saved-profile HTTPS/IP probe through the installed LocalSystem helper from an ordinary UI identity. Full TUN/browser acceptance remains in docs/VALIDATION.md.
 
 Known limits:
 

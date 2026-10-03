@@ -4,6 +4,7 @@
     <ApplicationManifest>app.manifest</ApplicationManifest><ApplicationIcon>../../resources/icons/bebekon.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
+    <EmbeddedResource Include="../../resources/updates/public-key.xml" LogicalName="Bebekon.UpdateKey" />
     <Using Remove="System.Drawing"/><Using Remove="System.Windows.Forms"/>
     <ProjectReference Include="../Bebekon.Core/Bebekon.Core.csproj" />
     <Content Include="../../resources/presets/services.json" Link="resources/services.json" CopyToOutputDirectory="PreserveNewest" />

@@ -16,8 +16,9 @@ public partial class MainWindow : Window
         icon = new System.Drawing.Icon(Path.Combine(AppContext.BaseDirectory, "resources", "bebekon.ico"));
         tray = new() { Icon = icon, Text = "Bebekon VPN", Visible = true };
         tray.DoubleClick += (_, _) => Dispatcher.Invoke(ShowWindow);
+        tray.BalloonTipClicked += (_, _) => Dispatcher.Invoke(ShowWindow);
         tray.ContextMenuStrip = new(); tray.ContextMenuStrip.Opening += (_, _) => BuildMenu();
-        vm.StatusChanged += OnStatus; vm.PropertyChanged += OnChanged;
+        vm.StatusChanged += OnStatus; vm.PropertyChanged += OnChanged; vm.UpdateFound += OnUpdateFound;
         Closing += OnClosing;
         SourceInitialized += (_, _) => NativeChrome.Apply(this);
     }
@@ -35,6 +36,10 @@ public partial class MainWindow : Window
     {
         tray.Text = "Bebekon VPN · " + vm.FooterLabel;
         if (vm.Settings.Notifications && !IsVisible && vm.State is ConnectionState.Connected or ConnectionState.Error) tray.ShowBalloonTip(3000, "Bebekon VPN", vm.StatusLabel, vm.Connected ? Forms.ToolTipIcon.Info : Forms.ToolTipIcon.Warning);
+    }
+    private void OnUpdateFound()
+    {
+        if (vm.Settings.Notifications && !IsVisible) tray.ShowBalloonTip(5000, "Bebekon VPN", vm.UpdateNotice, Forms.ToolTipIcon.Info);
     }
     internal Forms.ContextMenuStrip BuildMenu()
     {
@@ -59,7 +64,7 @@ public partial class MainWindow : Window
     private void CloseWindow(object sender, RoutedEventArgs e) => Close();
     private async void OnClosing(object? sender, CancelEventArgs e)
     {
-        if (ForceExit) { vm.StatusChanged -= OnStatus; vm.PropertyChanged -= OnChanged; vm.Dispose(); tray.Visible = false; tray.ContextMenuStrip?.Dispose(); tray.Dispose(); icon.Dispose(); return; }
+        if (ForceExit) { vm.StatusChanged -= OnStatus; vm.PropertyChanged -= OnChanged; vm.UpdateFound -= OnUpdateFound; vm.Dispose(); tray.Visible = false; tray.ContextMenuStrip?.Dispose(); tray.Dispose(); icon.Dispose(); return; }
         e.Cancel = true; if (vm.Settings.MinimizeToTray) Hide(); else await ExitAsync();
     }
     private async Task ExitAsync()

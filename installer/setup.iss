@@ -7,7 +7,7 @@
 [Setup]
 AppId={{31857247-067C-4DC1-BA47-44F01A87B70D}
 AppName=Bebekon VPN
-AppVersion=0.1.7
+AppVersion=0.1.8
 AppPublisher=Bebekon
 DefaultDirName={autopf}\Bebekon VPN
 DefaultGroupName=Bebekon VPN
@@ -42,11 +42,17 @@ Name: "{group}\Bebekon VPN"; Filename: "{app}\Bebekon.App.exe"
 Name: "{autodesktop}\Bebekon VPN"; Filename: "{app}\Bebekon.App.exe"; Tasks: desktopicon
 [Run]
 Filename: "{app}\Bebekon.App.exe"; Description: "Открыть Bebekon VPN"; Flags: nowait postinstall skipifsilent runasoriginaluser
+Filename: "{app}\Bebekon.App.exe"; Flags: nowait runasoriginaluser; Check: IsUpdate
 [UninstallRun]
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\uninstall-service.ps1"""; Flags: runhidden waituntilterminated; RunOnceId: "RemoveService"
 
 [Code]
-var OwnerPage: TInputQueryWizardPage; OwnerDataRoot: String;
+var OwnerPage: TInputQueryWizardPage; OwnerDataRoot: String; HandoffDone: Boolean;
+function OpenProcess(Access: LongWord; Inherit: Boolean; Pid: LongWord): THandle; external 'OpenProcess@kernel32.dll stdcall';
+function WaitForSingleObject(Handle: THandle; Timeout: LongWord): LongWord; external 'WaitForSingleObject@kernel32.dll stdcall';
+function CloseHandle(Handle: THandle): Boolean; external 'CloseHandle@kernel32.dll stdcall';
+function IsUpdate(): Boolean;
+begin Result := ExpandConstant('{param:UPDATE|0}') = '1'; end;
 function OwnerAccount(Param: String): String;
 begin Result := OwnerPage.Values[0]; end;
 procedure InitializeWizard();
@@ -70,8 +76,23 @@ begin
 end;
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var Code: Integer;
+    Parent: THandle; Pid: Integer;
 begin
   Result := '';
+  if IsUpdate() and not HandoffDone then begin
+    Pid := StrToIntDef(ExpandConstant('{param:PARENTID|0}'), 0);
+    if Pid <= 0 then begin Result := 'Не указан процесс приложения для обновления.'; Exit; end;
+    Parent := OpenProcess($00100000, False, Pid);
+    if Parent = 0 then begin Result := 'Приложение уже закрыто. Запустите обновление из приложения ещё раз.'; Exit; end;
+    try
+      if not SaveStringToFile(ExpandConstant('{srcexe}') + '.ready', 'ready', False) then begin Result := 'Не удалось подтвердить запуск обновления.'; Exit; end;
+      if WaitForSingleObject(Parent, 60000) <> 0 then begin Result := 'Обновление отменено: приложение не завершило работу.'; Exit; end;
+      HandoffDone := True;
+    finally
+      CloseHandle(Parent);
+      DeleteFile(ExpandConstant('{srcexe}') + '.ready');
+    end;
+  end;
   if FileExists(ExpandConstant('{app}\Bebekon.Service.exe')) then begin
     ExtractTemporaryFile('stop-service.ps1');
     if not Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{tmp}\stop-service.ps1') + '"', '', SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then
@@ -79,11 +100,21 @@ begin
   end;
 end;
 procedure CurStepChanged(CurStep: TSetupStep);
-var Code: Integer; StartupArg: String;
+var Code: Integer; StartupArg, OwnerArg, Sid: String; I: Integer;
 begin
-  StartupArg := ''; if WizardIsTaskSelected('autostart') then StartupArg := ' -EnableStartup';
+  StartupArg := ''; if not IsUpdate() and WizardIsTaskSelected('autostart') then StartupArg := ' -EnableStartup';
+  OwnerArg := ' -OwnerAccount "' + OwnerAccount('') + '"';
+  { Keep the service owner across upgrades, including UAC with another admin account. }
+  if RegQueryStringValue(HKLM64, 'SOFTWARE\BebekonVPN', 'OwnerSid', Sid) then
+    OwnerArg := ' -OwnerSid "' + Sid + '"'
+  else if IsUpdate() then begin
+    Sid := ExpandConstant('{param:OWNERSID|}');
+    if Pos('S-1-', Sid) <> 1 then RaiseException('Некорректный владелец обновления.');
+    for I := 1 to Length(Sid) do if not ((Sid[I] = 'S') or (Sid[I] = '-') or ((Sid[I] >= '0') and (Sid[I] <= '9'))) then RaiseException('Некорректный SID.');
+    OwnerArg := ' -OwnerSid "' + Sid + '"';
+  end;
   if CurStep = ssPostInstall then
-    if not Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\scripts\install-service.ps1') + '" -OwnerAccount "' + OwnerAccount('') + '"' + StartupArg, '', SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then
+    if not Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\scripts\install-service.ps1') + '"' + OwnerArg + StartupArg, '', SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then
       RaiseException('Не удалось установить службу VPN. Запустите scripts\install-service.ps1 от администратора.');
 end;
 function InitializeUninstall(): Boolean;

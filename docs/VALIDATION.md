@@ -5,7 +5,7 @@ Environment: Windows 11 x64, .NET SDK 10.0.300, runtime 10.0.8, sing-box 1.14.2.
 ## Executed
 
 - Release solution compilation.
-- 135 parser/model/storage/config and real-core tests, including JSON Xray subscription import, gRPC/Reality schema acceptance, parallel logging, multilingual country labels, the helper crash suite, elevation command boundaries and pipe/service identity checks.
+- 150 parser/model/storage/config, signed-update and real-core tests, including JSON Xray subscription import, gRPC/Reality schema acceptance, parallel logging, multilingual country labels, the helper crash suite, elevation command boundaries and pipe/service identity checks.
 - WPF smoke harness checks that startup selects TUN even after a saved Proxy session. Elevated registration uses the original user's SID and literal argument list; partial packages are rejected before elevation. Actual UAC acceptance/cancellation and protected service installation remain manual checks.
 - Official `sing-box check` accepted generated TCP, Reality, gRPC, WebSocket, HTTPUpgrade configurations.
 - Real local VLESS fixture confirmed: selected domain exits via VLESS; unmatched domain Direct; Entire PC default VPN; authenticated forced VPN probe; HTTP Host sniffing routes an IP-addressed request by its hostname.
@@ -48,6 +48,10 @@ Environment: Windows 11 x64, .NET SDK 10.0.300, runtime 10.0.8, sing-box 1.14.2.
 - WPF connection regressions use synthetic storage and fake IPC: unchanged refresh makes no restart; three rapid site additions produce one restart containing all rules; the connection stays stable beyond five seconds; a stale failing recovery cannot restart the new session; manual off cancels a queued update; edits during startup apply afterward; cancelling startup remains disconnected. Transitions never overlap, and traffic direction/unit conversion is checked.
 - Home checks cover the embedded full server list, navigation from its server card, routing-mode dialog action and ping-click result. All five pages render at 100/125/150/175% and minimum window size; existing rule editor, tray, captions and animation checks remain. The snowman source is generated with built-in image_gen, exported to a seven-size ICO and embedded as a decoded-size PNG for the sidebar. Prompt provenance: resources/icons/snowman.asset.json.
 - The website report is covered by deterministic connection/routing regressions. Physical TUN/browser reproduction with the user's live website, adapter changes and ECH/DoH remains in manual acceptance below; simulated IPC is not labelled as a live TUN check.
+
+## Version 0.1.8
+
+Version 0.1.8 adds 15 update tests (150 total): signed local feed and package download; equal/older version rejection; wrong signing key/tampered payload rejection; truncated, oversized and corrupted package cleanup; cancellation cleanup; unsafe package paths and non-HTTPS sources. WPF smoke checks disabled ping opacity, the Updates category, update banner/actions at minimum size, and the real signed current-version feed in the published build. The Inno update branch compiles. Full UAC handoff and installed-file replacement are not performed against the user's running app; they remain part of installer acceptance below.
 
 ## Required manual acceptance — pending
 

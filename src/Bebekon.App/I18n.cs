@@ -4,6 +4,10 @@ public static class I18n
     public static bool English { get; private set; }
     public static string T(string ru, string en) => English ? en : ru;
     private static readonly (string Key, string Ru, string En)[] Labels = [
+        ("AppUpdates","Обновления","Updates"),("CheckUpdate","Проверить","Check"),("InstallUpdate","Обновить и перезапустить","Update and restart"),
+        ("AutoUpdates","Проверять новые версии","Check for new versions"),("AutoUpdatesDetail","При запуске и каждые 6 часов. Установка — по нажатию кнопки.","At startup and every 6 hours. Install when you choose."),
+        ("UpdateChannel","Источник обновлений","Update source"),("ConfigureChannel","Изменить","Change"),("UpdateVersion","Версия приложения","Application version"),
+        ("UpdateVersionDetail","Обновление сохраняет подписки, правила и настройки.","Updates preserve subscriptions, rules and settings."),
         ("AllServersTitle","Все серверы","All servers"),("AllServersDetail","Все подписки · выбор сервера и проверка пинга","All subscriptions · choose a server and check latency"),
         ("PingAgain","Проверить пинг заново · до 5 секунд","Refresh latency · up to 5 seconds"),("ChangeMode","Изменить режим","Change mode"),
         ("DownloadTraffic","Получено","Downloaded"),("UploadTraffic","Отправлено","Uploaded"),("TrafficHelp","Скорость и объём трафика, обработанного ядром VPN, включая прямые маршруты.","Traffic handled by the VPN core, including direct routes."),

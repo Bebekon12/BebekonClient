@@ -1,4 +1,4 @@
-param([string]$InnoCompiler, [switch]$SkipInstaller, [string]$PublishFolder = 'artifacts\release')
+param([string]$InnoCompiler, [switch]$SkipInstaller, [string]$PublishFolder = 'artifacts\release', [string]$UpdateFeedUrl, [string]$InstallerUrl, [string]$ReleaseNotes = 'Обновления из приложения, яркие пинги и новая кнопка подключения.')
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $projectRoot = $PSScriptRoot
@@ -14,7 +14,7 @@ function Safe-Clean([string]$Relative) {
 }
 Safe-Clean $PublishFolder
 Safe-Clean 'artifacts\service-publish'
-Safe-Clean 'dist'
+# Keep versioned installers available to clients already downloading a published release.
 New-Item -ItemType Directory -Path $appPublishRoot,artifacts\service-publish,dist,core,.tools -Force | Out-Null
 $pin = Get-Content -LiteralPath core\version.json -Raw | ConvertFrom-Json
 $archive = Join-Path $projectRoot '.tools\sing-box.zip'
@@ -45,10 +45,12 @@ foreach ($file in Get-ChildItem -LiteralPath $servicePublishRoot -File -Recurse)
 Copy-Item -LiteralPath scripts -Destination $appPublishRoot -Recurse -Force
 Copy-Item -LiteralPath README.md,ARCHITECTURE.md,LICENSE -Destination $appPublishRoot -Force
 New-Item -ItemType Directory -Path (Join-Path $appPublishRoot 'docs') -Force | Out-Null
-Copy-Item -LiteralPath docs\VALIDATION.md -Destination (Join-Path $appPublishRoot 'docs') -Force
+Copy-Item -LiteralPath docs\VALIDATION.md,docs\UPDATES.md -Destination (Join-Path $appPublishRoot 'docs') -Force
 New-Item -ItemType Directory -Path (Join-Path $appPublishRoot 'resources\geo') -Force | Out-Null
 Copy-Item -LiteralPath resources\geo\README.md,resources\geo\LICENSE-SagerNet,resources\geo\sources.json -Destination (Join-Path $appPublishRoot 'resources\geo') -Force
 Copy-Item -LiteralPath core\LICENSE,core\version.json -Destination (Join-Path $appPublishRoot 'core') -Force
+$channelSource = if ($UpdateFeedUrl) { $UpdateFeedUrl } else { Join-Path $projectRoot 'dist\update.json' }
+@{ source = $channelSource } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $appPublishRoot 'resources\update-channel.json') -Encoding utf8
 if (-not $SkipInstaller) {
     if (-not $InnoCompiler) {
         foreach ($candidate in @((Join-Path $projectRoot '.tools\InnoSetup\ISCC.exe'), 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe', 'C:\Program Files\Inno Setup 7\ISCC.exe')) { if (Test-Path -LiteralPath $candidate) { $InnoCompiler=$candidate; break } }
@@ -63,6 +65,10 @@ if (-not $SkipInstaller) {
         $InnoCompiler = Join-Path $projectRoot '.tools\InnoSetup\ISCC.exe'
     }
     Invoke-Checked $InnoCompiler @('/Qp',('/DPublishDir=' + $appPublishRoot),('/DOutputDir=' + (Join-Path $projectRoot 'dist')),'installer\setup.iss')
+    $releaseVersion = ([xml](Get-Content Directory.Build.props -Raw)).Project.PropertyGroup.Version
+    $versionedInstaller = Join-Path $projectRoot ('dist\BebekonVPN-' + $releaseVersion + '-Setup-x64.exe')
+    Copy-Item -LiteralPath 'dist\BebekonVPN-Setup-x64.exe' -Destination $versionedInstaller -Force
+    & (Join-Path $projectRoot 'scripts\publish-update.ps1') -Installer $versionedInstaller -Version $releaseVersion -Output (Join-Path $projectRoot 'dist\update.json') -InstallerUrl $InstallerUrl -Notes $ReleaseNotes
 }
-Compress-Archive -Path (Join-Path $appPublishRoot '*') -DestinationPath dist\BebekonVPN-Portable-x64.zip -CompressionLevel Optimal
+Compress-Archive -Path (Join-Path $appPublishRoot '*') -DestinationPath dist\BebekonVPN-Portable-x64.zip -CompressionLevel Optimal -Force
 Get-ChildItem -LiteralPath dist | Select-Object Name,Length

@@ -99,7 +99,7 @@ internal static class SmokeHarness
         settingsScroll.ScrollToEnd(); window.UpdateLayout();
         if (settingsScroll.ScrollableHeight > 0 && settingsScroll.VerticalOffset <= 0) throw new InvalidOperationException("Settings scrolling must reach the lower rows.");
         settingsScroll.ScrollToTop(); window.UpdateLayout();
-        foreach (var category in new[] { "Network", "Appearance", "Behavior", "Advanced", "All" })
+        foreach (var category in new[] { "Network", "Appearance", "Behavior", "Advanced", "Updates", "All" })
         {
             Descendants(settings).OfType<RadioButton>().Single(r => r.Tag as string == category).IsChecked = true;
             await Task.Delay(400); window.UpdateLayout(); Capture(window, "Settings-" + category);
@@ -108,6 +108,20 @@ internal static class SmokeHarness
                 if (toggle.Template.FindName("Thumb", toggle) is not FrameworkElement thumb || Canvas.GetLeft(thumb) != (toggle.IsChecked == true ? 23 : 3)) throw new InvalidOperationException("Initial switch thumb must reflect its checked state.");
         }
         var originalAccent = vm.AccentColor;
+        Descendants(settings).OfType<RadioButton>().Single(r => r.Tag as string == "Updates").IsChecked = true;
+        if (File.Exists(vm.UpdateSource))
+        {
+            await vm.CheckUpdatesAsync(false);
+            if (!vm.UpdateStatus.Contains(vm.AppVersion) || vm.UpdateVisibility != Visibility.Collapsed) throw new InvalidOperationException("Published signed feed must report the current build as up to date.");
+        }
+        vm.SetAvailableUpdate(new(new("0.1.9", "fixture.exe", 1, new string('0', 64), "Synthetic UI fixture"), "fixture.exe"));
+        window.UpdateLayout(); await Task.Delay(250); Capture(window, "Update-Available");
+        if (!vm.InstallUpdate.CanExecute(null) || vm.UpdateVisibility != Visibility.Visible) throw new InvalidOperationException("Verified newer release must expose an update action.");
+        var oldWidth = window.Width; var oldHeight = window.Height; window.Width = 860; window.Height = 660; window.UpdateLayout();
+        foreach (var button in Descendants(settings).OfType<Button>().Where(b => b.IsVisible && b.Command == vm.InstallUpdate))
+            if (button.ActualHeight < 42 || button.ActualWidth < 200) throw new InvalidOperationException("Update action must keep its full hit area at minimum size.");
+        Capture(window, "Update-Minimum"); window.Width = oldWidth; window.Height = oldHeight;
+        vm.SetAvailableUpdate(null); report.Add("Updates: signed current-release check when published, update action/banner and minimum-size layout; no installer launched by smoke.");
         foreach (var accent in new[] { "Blue", "Emerald", "Violet", "Cyan" }) { vm.AccentColor = accent; if (Application.Current.Resources["Accent"] is not SolidColorBrush) throw new InvalidOperationException("Accent must apply to live resources."); }
         vm.AccentColor = originalAccent;
         vm.PureBlack = true; if (((SolidColorBrush)Application.Current.Resources["Background"]).Color != Colors.Black) throw new InvalidOperationException("OLED background was not applied."); vm.PureBlack = false;
@@ -282,6 +296,15 @@ internal static class SmokeHarness
             {
                 var server = (Server)value.DataContext; var key = LatencyDisplay.Quality(server.LatencyMs) switch { LatencyQuality.Good => "PingGood", LatencyQuality.Moderate => "PingModerate", _ => "PingPoor" };
                 if (value.Foreground != Application.Current.Resources[key]) throw new InvalidOperationException("Measured latency must use its quality color.");
+                var parent = VisualTreeHelper.GetParent(value);
+                while (parent is not null && parent is not Button) parent = VisualTreeHelper.GetParent(parent);
+                if (parent is Button ping)
+                {
+                    ping.IsEnabled = false; ping.ApplyTemplate();
+                    if (ping.Template.FindName("HitArea", ping) is not Border surface || surface.Opacity != 1 || ping.Opacity != 1 || value.Opacity != 1)
+                        throw new InvalidOperationException("Busy ping buttons must preserve full color intensity.");
+                    ping.ClearValue(UIElement.IsEnabledProperty);
+                }
             }
             foreach (var button in Descendants(window).OfType<Button>().Where(b => b.IsVisible && b.Style == Application.Current.Resources["IconButton"]))
                 if (Math.Abs(button.ActualWidth - button.ActualHeight) > .1 || button.ActualWidth < 46) throw new InvalidOperationException("Server toolbar icons must have square 46×46 areas.");

@@ -94,6 +94,8 @@ public sealed class Subscription
 }
 public sealed class Settings
 {
+    public bool CheckForUpdates { get; set; } = true;
+    public string UpdateSource { get; set; } = "";
     public string Language { get; set; } = "Русский";
     public bool StartWithWindows { get; set; }
     public bool MinimizeToTray { get; set; } = true;

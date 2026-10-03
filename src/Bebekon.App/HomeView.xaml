@@ -2,8 +2,28 @@
  <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"><StackPanel Margin="0,0,4,0">
   <Grid x:Name="Hero" Height="268">
    <Ellipse x:Name="PowerHalo" Width="300" Height="232" VerticalAlignment="Top" Margin="0,0,0,0" Fill="{DynamicResource Halo}" Opacity="0.4" IsHitTestVisible="False"/>
-   <Ellipse Width="190" Height="190" VerticalAlignment="Top" Margin="0,21,0,0" Stroke="{DynamicResource Accent}" StrokeThickness="7" Opacity="0.13" IsHitTestVisible="False"/>
-   <Button Command="{Binding ToggleConnect}" Width="176" Height="176" MinHeight="0" VerticalAlignment="Top" Margin="0,28,0,0" Background="{DynamicResource PowerGradient}" BorderBrush="{DynamicResource Accent}" BorderThickness="1" Padding="0" AutomationProperties.Name="{Binding ConnectLabel}"><Button.Template><ControlTemplate TargetType="Button"><Grid><Border x:Name="Circle" Background="{TemplateBinding Background}" CornerRadius="88" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1"/><Border CornerRadius="88" Margin="2" IsHitTestVisible="False"><Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="0,1"><GradientStop Color="#55FFFFFF" Offset="0"/><GradientStop Color="#00FFFFFF" Offset="0.55"/><GradientStop Color="#10002040" Offset="1"/></LinearGradientBrush></Border.Background></Border><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Grid><ControlTemplate.Triggers><Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Circle" Property="BorderThickness" Value="3"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Button.Template><StackPanel><local:IconView Icon="Power" Width="42" Height="42" Foreground="#F1FFFF" HorizontalAlignment="Center"/><TextBlock Text="{Binding ConnectLabel}" FontSize="14" FontWeight="SemiBold" HorizontalAlignment="Center" Foreground="#F1FFFF" Margin="0,13,0,0"/></StackPanel></Button>
+   <Ellipse Width="204" Height="204" VerticalAlignment="Top" Margin="0,14,0,0" Stroke="{DynamicResource Accent}" StrokeThickness="1" Opacity="0.12" IsHitTestVisible="False"/>
+   <Button x:Name="ConnectPower" Command="{Binding ToggleConnect}" Width="180" Height="180" MinHeight="180" VerticalAlignment="Top" Margin="0,26,0,0" Padding="0" AutomationProperties.Name="{Binding ConnectLabel}">
+    <Button.Template><ControlTemplate TargetType="Button">
+     <Grid>
+      <Border Background="{DynamicResource AccentGradient}" CornerRadius="90" Padding="1.5">
+       <Border CornerRadius="89"><Border.Background><RadialGradientBrush Center="0.35,0.2" GradientOrigin="0.35,0.2" RadiusX="0.95" RadiusY="0.95"><GradientStop Color="#21454F" Offset="0"/><GradientStop Color="#0B202B" Offset="1"/></RadialGradientBrush></Border.Background></Border>
+      </Border>
+      <Border x:Name="ActiveWash" Background="{DynamicResource AccentGradient}" CornerRadius="88" Margin="2" Opacity="0"/>
+      <Ellipse Margin="8" Stroke="#16FFFFFF" StrokeThickness="1" IsHitTestVisible="False"/>
+      <Border x:Name="HoverLight" Background="#0FFFFFFF" CornerRadius="90" Opacity="0"/>
+      <Ellipse x:Name="FocusRing" Margin="-6" Stroke="{DynamicResource Text}" StrokeThickness="2" StrokeDashArray="2,3" Visibility="Collapsed"/>
+      <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+     </Grid>
+     <ControlTemplate.Triggers>
+      <DataTrigger Binding="{Binding Connected}" Value="True"><Setter TargetName="ActiveWash" Property="Opacity" Value="0.22"/></DataTrigger>
+      <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="HoverLight" Property="Opacity" Value="1"/></Trigger>
+      <Trigger Property="IsPressed" Value="True"><Setter TargetName="HoverLight" Property="Background" Value="#18000000"/></Trigger>
+      <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="FocusRing" Property="Visibility" Value="Visible"/></Trigger>
+     </ControlTemplate.Triggers>
+    </ControlTemplate></Button.Template>
+    <StackPanel><local:IconView Icon="Power" Width="48" Height="48" Foreground="{DynamicResource Accent}" HorizontalAlignment="Center"/><TextBlock Text="{Binding ConnectLabel}" FontSize="14" FontWeight="SemiBold" HorizontalAlignment="Center" Foreground="{DynamicResource Text}" Margin="0,17,0,0"/></StackPanel>
+   </Button>
    <Path Width="190" Height="190" Data="M 95,1 A 94,94 0 0 1 189,95" Stroke="{DynamicResource Accent}" StrokeThickness="3" StrokeStartLineCap="Round" StrokeEndLineCap="Round" VerticalAlignment="Top" Margin="0,21,0,0" RenderTransformOrigin="0.5,0.5" IsHitTestVisible="False" Visibility="{Binding ConnectionBusy, Converter={StaticResource BoolVisibility}}"><Path.RenderTransform><RotateTransform x:Name="Orbit"/></Path.RenderTransform></Path>
    <StackPanel VerticalAlignment="Bottom"><TextBlock Text="{Binding StatusLabel}" HorizontalAlignment="Center" FontSize="24" FontWeight="SemiBold"/><TextBlock Text="{Binding StatusDetail}" HorizontalAlignment="Center" Style="{StaticResource Subtitle}" Margin="0,6,0,0"/></StackPanel>
   </Grid>
@@ -16,7 +36,7 @@
       <Grid Grid.Row="1" Margin="0,10,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="34"/><ColumnDefinition/></Grid.ColumnDefinitions><local:FlagView Country="{Binding SelectedServer.Name}" Width="32" Height="23" VerticalAlignment="Center"/><TextBlock Grid.Column="1" Text="{Binding ServerLabel}" FontSize="16" FontWeight="SemiBold" Margin="10,0,8,0" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/></Grid>
      </Grid>
     </Button>
-    <Button x:Name="HomePing" Command="{Binding PingServer}" Height="30" MinHeight="30" Padding="4,0" Margin="14,0,14,6" HorizontalAlignment="Left" VerticalAlignment="Bottom" Background="Transparent" BorderThickness="0" ToolTip="{DynamicResource PingAgain}" Foreground="{Binding SelectedServer.LatencyMs, Converter={StaticResource LatencyBrush}}"><StackPanel Orientation="Horizontal"><local:IconView Icon="Bolt" Width="12" Height="12" Margin="0,0,6,0"/><TextBlock Text="{Binding SelectedServer.Latency, TargetNullValue=—}" FontSize="12" FontWeight="SemiBold" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/></StackPanel></Button>
+    <Button x:Name="HomePing" Command="{Binding PingServer}" Height="30" MinHeight="30" Padding="4,0" Margin="14,0,14,6" HorizontalAlignment="Left" VerticalAlignment="Bottom" Background="Transparent" BorderThickness="0" Style="{StaticResource PingButton}" ToolTip="{DynamicResource PingAgain}" Foreground="{Binding SelectedServer.LatencyMs, Converter={StaticResource LatencyBrush}}"><StackPanel Orientation="Horizontal"><local:IconView Icon="Bolt" Width="12" Height="12" Margin="0,0,6,0"/><TextBlock Text="{Binding SelectedServer.Latency, TargetNullValue=—}" FontSize="12" FontWeight="SemiBold" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/></StackPanel></Button>
    </Grid>
    <Button x:Name="ModeCard" Grid.Column="1" Command="{Binding ChangeRoutingMode}" Margin="7,0,0,0" Height="112" HorizontalContentAlignment="Stretch" Padding="18,15" ToolTip="{DynamicResource ChangeMode}"><Grid><StackPanel><StackPanel Orientation="Horizontal"><local:IconView Icon="Rules" Width="12" Height="12" Foreground="{DynamicResource Muted}" Margin="0,0,6,0"/><TextBlock Text="{DynamicResource Mode}" Style="{StaticResource Eyebrow}"/></StackPanel><TextBlock Text="{Binding ModeLabel}" FontSize="16" FontWeight="SemiBold" Margin="0,11,0,7"/><TextBlock Text="{DynamicResource ChangeMode}" Style="{StaticResource Subtitle}" FontSize="11"/></StackPanel><local:IconView Icon="Down" Width="13" Height="13" HorizontalAlignment="Right" VerticalAlignment="Top" Foreground="{DynamicResource Muted}"/></Grid></Button>
   </Grid>

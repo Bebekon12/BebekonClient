@@ -8,7 +8,7 @@ using Microsoft.Win32;
 
 namespace Bebekon.App;
 
-public sealed class MainViewModel : Observable, IDisposable
+public sealed partial class MainViewModel : Observable, IDisposable
 {
     private readonly StateStore store;
     private readonly IServiceClient service;
@@ -149,7 +149,7 @@ public sealed class MainViewModel : Observable, IDisposable
         Presets = PresetCatalog.Load();
         AttachProfile(); RefreshServers(); RefreshRules();
         Navigate = new Command(p => Go((string)p!)); CollapseSidebar = new Command(_ => SidebarCollapsed = !SidebarCollapsed);
-        ToggleConnect = new Command(_ => _ = ToggleSafelyAsync(), () => State != ConnectionState.Disconnecting);
+        ToggleConnect = new Command(_ => _ = ToggleSafelyAsync(), () => State != ConnectionState.Disconnecting && !updateInstalling);
         SelectServer = new Command(p => { var node = (Server)p!; if (!node.Supported) Banner = node.UnsupportedReason; else SelectedServer = node; });
         FavoriteServer = new Command(p => { var s = (Server)p!; s.Favorite = !s.Favorite; Save(); });
         PingAll = Async(_ => ScanAsync(true), () => !Scanning);
@@ -190,6 +190,7 @@ public sealed class MainViewModel : Observable, IDisposable
         DismissBanner = new Command(_ => Banner = null);
         I18n.Set(Settings.Language);
         ThemeManager.Apply(Settings);
+        InitializeUpdates();
         SystemEvents.PowerModeChanged += OnPower; NetworkChange.NetworkAvailabilityChanged += OnNetwork; NetworkChange.NetworkAddressChanged += OnAddress;
     }
     private AsyncCommand Async(Func<object?, Task> action, Func<bool>? can = null) => new(action, Report, can);
@@ -201,6 +202,7 @@ public sealed class MainViewModel : Observable, IDisposable
     private string T(string ru, string en) => Settings.Language == "English" ? en : ru;
     public async Task InitializeAsync()
     {
+        _ = WatchUpdatesAsync();
         try { var response = await service.SendAsync(new("GetStatus")); ApplyStatus(response.Status); if (Connected) { await DisconnectAsync(); await ConnectAsync(); } }
         catch { SystemProxy.Restore(); }
         if (Settings.AutoConnect && !Connected && SelectedServer is not null) try { await ConnectAsync(); } catch (Exception e) { Report(e); }
@@ -226,7 +228,7 @@ public sealed class MainViewModel : Observable, IDisposable
     {
         if (Scanning) return; Scanning = true; scan?.Dispose(); scan = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token); var token = scan.Token; var mode = LatencyIndex == 0 ? LatencyMode.Fast : LatencyMode.Exact;
         var nodes = Data.Servers.ToArray();
-        foreach (var node in nodes) { node.Latency = T("В очереди", "Queued"); node.LatencyMs = null; }
+        foreach (var node in nodes) if (node.LatencyMs is null) node.Latency = T("В очереди", "Queued");
         try { await Task.WhenAll(nodes.Select(s => MeasureServerAsync(s, force, token))); RefreshServers(); }
         catch (OperationCanceledException) { }
         finally { foreach (var node in nodes.Where(n => n.Latency is "В очереди" or "Queued" or "Проверка…" or "Checking…")) node.Latency = "—"; Scanning = false; }
@@ -234,7 +236,7 @@ public sealed class MainViewModel : Observable, IDisposable
     private async Task MeasureServerAsync(Server node, bool force, CancellationToken token)
     {
         var mode = LatencyIndex == 0 ? LatencyMode.Fast : LatencyMode.Exact;
-        var result = await latency.MeasureAsync(node, mode, force, token, () => { node.LatencyMs = null; node.Latency = T("Проверка…", "Checking…"); });
+        var result = await latency.MeasureAsync(node, mode, force, token, () => { if (node.LatencyMs is null) node.Latency = T("Проверка…", "Checking…"); });
         token.ThrowIfCancellationRequested();
         if (mode != (LatencyIndex == 0 ? LatencyMode.Fast : LatencyMode.Exact)) return;
         node.Latency = mode == LatencyMode.Exact && !node.Supported ? "—" : result.Milliseconds is { } ms
@@ -437,5 +439,5 @@ public sealed class MainViewModel : Observable, IDisposable
         }
         catch (NetworkInformationException) { return ""; }
     }
-    public void Dispose() { Save(); desiredConnected = false; lifetime.Cancel(); connectionAttempt?.Cancel(); scan?.Cancel(); applyDelay?.Cancel(); networkDelay?.Cancel(); SystemEvents.PowerModeChanged -= OnPower; NetworkChange.NetworkAvailabilityChanged -= OnNetwork; NetworkChange.NetworkAddressChanged -= OnAddress; }
+    public void Dispose() { Save(); desiredConnected = false; lifetime.Cancel(); updateCancellation?.Cancel(); updater?.Dispose(); connectionAttempt?.Cancel(); scan?.Cancel(); applyDelay?.Cancel(); networkDelay?.Cancel(); SystemEvents.PowerModeChanged -= OnPower; NetworkChange.NetworkAvailabilityChanged -= OnNetwork; NetworkChange.NetworkAddressChanged -= OnAddress; }
 }
