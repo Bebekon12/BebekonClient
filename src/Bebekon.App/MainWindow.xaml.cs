@@ -12,18 +12,24 @@ public partial class MainWindow : Window
     public MainWindow(MainViewModel vm)
     {
         InitializeComponent(); this.vm = vm; DataContext = vm;
+        SidebarHost.Width = vm.SidebarWidth.Value;
         icon = new System.Drawing.Icon(Path.Combine(AppContext.BaseDirectory, "resources", "bebekon.ico"));
         tray = new() { Icon = icon, Text = "Bebekon VPN", Visible = true };
         tray.DoubleClick += (_, _) => Dispatcher.Invoke(ShowWindow);
         tray.ContextMenuStrip = new(); tray.ContextMenuStrip.Opening += (_, _) => BuildMenu();
         vm.StatusChanged += OnStatus; vm.PropertyChanged += OnChanged;
         Closing += OnClosing;
+        SourceInitialized += (_, _) => NativeChrome.Apply(this);
     }
     private void OnChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName != nameof(MainViewModel.Page) || !SystemParameters.ClientAreaAnimation) return;
-        // No animation remains active after navigation.
-        PageContent.BeginAnimation(OpacityProperty, new DoubleAnimation(0.7, 1, TimeSpan.FromMilliseconds(140)) { FillBehavior = FillBehavior.Stop });
+        if (e.PropertyName == nameof(MainViewModel.Page)) Motion.Reveal(PageContent);
+        if (e.PropertyName == nameof(MainViewModel.SidebarWidth))
+        {
+            var from = SidebarHost.ActualWidth; var target = vm.SidebarWidth.Value;
+            SidebarHost.BeginAnimation(WidthProperty, null); SidebarHost.Width = target;
+            if (Motion.Enabled) SidebarHost.BeginAnimation(WidthProperty, new DoubleAnimation(from, target, TimeSpan.FromMilliseconds(230)) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }, FillBehavior = FillBehavior.Stop });
+        }
     }
     private void OnStatus()
     {
@@ -58,7 +64,7 @@ public partial class MainWindow : Window
     }
     private async Task ExitAsync()
     {
-        try { if (vm.Connected || vm.ConnectionBusy) await vm.DisconnectAsync(); }
+        try { await vm.StopScansAsync(); if (vm.Connected || vm.ConnectionBusy) await vm.DisconnectAsync(); }
         catch (Exception e) { vm.Report(e); ShowWindow(); return; }
         ForceExit = true; Close(); Application.Current.Shutdown();
     }

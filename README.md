@@ -44,6 +44,7 @@ An off rule means **Direct**, not disabled. Higher rules win. Drag a rule row to
 
 Changes to server, profile, rule, routing mode, or saved DNS settings regenerate the core configuration and reconnect. Applying changes closes existing connections; it does not migrate sockets. Proxy mode configures Windows' per-user system proxy on 127.0.0.1:17890 and restores the prior settings on disconnect/next startup. Per-process routing requires TUN.
 
+Appearance settings apply immediately: four coordinated accent palettes, smooth interaction/page/sidebar animations, connection glow and an OLED black background. Motion respects the Windows animation preference and can be disabled. State-bound looping animations stop when their view is hidden, minimized or unloaded. Country flags are bundled locally from [Flagpedia / FlagCDN](https://flagpedia.net/download/api), recognizing ISO codes, emoji and Russian/English provider labels; a flag reflects the provider label, not verified geolocation. Subscriptions can be pasted directly into the inline field or added through the named-subscription dialog.
 ## Core and DNS
 
 Pinned official stable **sing-box 1.14.2**, Windows amd64. Archive SHA256 is in core/version.json. Documentation snapshots in docs/ come from the exact v1.14.2 tag. The bundled executable is downloaded and checked by build.ps1. To update: review official tagged docs and release notes, change version/archive/hash, rerun core schema and routing tests and repeat the Windows acceptance matrix. Do not replace just the executable without validating fields.
@@ -53,7 +54,7 @@ Pinned official stable **sing-box 1.14.2**, Windows amd64. Archive SHA256 is in 
 - Direct and VPN DNS are separate typed HTTPS servers. Domain DNS rules follow the user order; selective final DNS is Direct, entire-PC final DNS is VPN.
 - Native Windows DNS protection uses strict_route; Docker/VM compatibility relaxes strict_route.
 - No geoip/geosite or deprecated inbound sniff configuration. No MITM, certificate bypass, telemetry or geolocation service.
-- Exact ping is a median of three small HTTPS requests through an authenticated local SOCKS5 probe into an isolated real VLESS outbound. Fast ping is median TCP connect time; the caches are distinct, 3-minute TTL, concurrency 6. Nodes never show invented latency.
+- Exact ping (the default) is a median of three small HTTPS requests through an authenticated local SOCKS5 probe into an isolated real VLESS outbound. TCP (port) measures TCP connection time; another active VPN may intercept that handshake and understate remote latency. The caches are distinct, 3-minute TTL, concurrency 2 for exact probes and 6 for TCP. Checks can be cancelled. Nodes never show invented latency.
 - VPN IP comes from api.ipify.org through a forced VPN probe inbound, irrespective of user rules. This shares only the egress IP with the IP-check endpoint. No subscription/UUID is sent to it. Throughput stays “—”: no fabricated speed or location.
 
 ## Storage and security
@@ -74,7 +75,7 @@ Measured on Windows 11 x64, version 0.1.0 Release self-contained, without Workin
 
 The desired ≤90MB UI target is **not met**. No process is hidden or trimmed. CPU is normalized to the whole machine. Screenshot rendering allocates extra surfaces and is excluded from idle measurements. Real provider/TUN combined memory is unmeasured.
 
-75 automated tests cover plain/Base64/JSON Xray subscription parsing, models, DPAPI, priority, generated config checks, actual loopback VLESS traffic, HTTP Host sniffing, helper/core crash detection, job cleanup and elevation command boundaries. A supplied Ultima subscription was also imported live: nine supported nodes, nine configurations accepted by the official core, and a successful forced-VPN HTTPS probe through gRPC/Reality. This is **not** proof of the full TUN/browser acceptance scenario; remaining manual checks are in docs/VALIDATION.md.
+93 automated tests cover plain/Base64/JSON Xray subscription parsing, models, DPAPI, priority, generated config checks, actual loopback VLESS traffic, HTTP Host sniffing, helper/core crash detection, job cleanup and elevation command boundaries. A supplied Ultima subscription was also imported live: nine supported nodes, nine configurations accepted by the official core, and a successful forced-VPN HTTPS probe through gRPC/Reality. This is **not** proof of the full TUN/browser acceptance scenario; remaining manual checks are in docs/VALIDATION.md.
 
 Known limits:
 

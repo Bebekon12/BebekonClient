@@ -44,6 +44,7 @@ public sealed class Server : Observable
     [JsonIgnore] public string Star => Favorite ? "★" : "☆";
     [JsonIgnore] public bool Supported => UnsupportedReason is null;
     [JsonIgnore] public string Protocol => "VLESS · " + (Transport == "grpc" ? "gRPC" : Transport.ToUpperInvariant());
+    [JsonIgnore] public string DisplayName => CountryInfo.DisplayName(Name);
     private string latency = "—";
     [JsonIgnore] public string Latency { get => latency; set => Set(ref latency, value); }
     [JsonIgnore] public long? LatencyMs { get; set; }
@@ -93,6 +94,10 @@ public sealed class Settings
     public bool CompatibilityMode { get; set; }
     public int Mtu { get; set; } = 1500;
     public TunnelMode TunnelMode { get; set; } = TunnelMode.Tun;
+    public bool Animations { get; set; } = true;
+    public bool GlowEffects { get; set; } = true;
+    public bool PureBlack { get; set; }
+    public string AccentColor { get; set; } = "Cyan";
 }
 public sealed class AppState
 {

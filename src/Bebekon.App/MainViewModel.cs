@@ -17,11 +17,17 @@ public sealed class MainViewModel : Observable, IDisposable
     private readonly SemaphoreSlim connectionGate = new(1);
     private readonly CancellationTokenSource lifetime = new();
     private CancellationTokenSource? scan;
+    private Task? activeScan;
     private CancellationTokenSource? applyDelay;
     private CancellationTokenSource? networkDelay;
     private bool recovering;
     public AppState Data { get; }
     public Settings Settings => Data.Settings;
+    public bool AnimationsEnabled { get => Settings.Animations; set { Settings.Animations = value; AppearanceChanged(nameof(AnimationsEnabled)); } }
+    public bool GlowEnabled { get => Settings.GlowEffects; set { Settings.GlowEffects = value; AppearanceChanged(nameof(GlowEnabled)); } }
+    public bool PureBlack { get => Settings.PureBlack; set { Settings.PureBlack = value; AppearanceChanged(nameof(PureBlack)); } }
+    public string AccentColor { get => Settings.AccentColor; set { if (Settings.AccentColor == value) return; Settings.AccentColor = value; AppearanceChanged(nameof(AccentColor)); } }
+    private void AppearanceChanged(string name) { ThemeManager.Apply(Settings); Save(); Notify(name); }
     public bool IsTunMode { get => Settings.TunnelMode == TunnelMode.Tun; set => SetTunnelMode(value ? TunnelMode.Tun : TunnelMode.Proxy); }
     public bool IsProxyMode { get => Settings.TunnelMode == TunnelMode.Proxy; set => SetTunnelMode(value ? TunnelMode.Proxy : TunnelMode.Tun); }
     public ObservableCollection<ServerRow> ServerRows { get; } = [];
@@ -37,7 +43,7 @@ public sealed class MainViewModel : Observable, IDisposable
     public Visibility NavTextVisibility => SidebarCollapsed ? Visibility.Collapsed : Visibility.Visible;
     private Server? selectedServer;
     public Server? SelectedServer { get => selectedServer; set { if (Set(ref selectedServer, value)) { Data.SelectedServerId = value?.Id; Notify(nameof(ServerLabel)); Save(); QueueApply(); } } }
-    public string ServerLabel => SelectedServer?.Name ?? T("Выберите сервер", "Choose a server");
+    public string ServerLabel => SelectedServer?.DisplayName ?? T("Выберите сервер", "Choose a server");
     private Profile activeProfile;
     public Profile ActiveProfile { get => activeProfile; set { if (value is null || ReferenceEquals(activeProfile, value)) return; DetachProfile(activeProfile); Set(ref activeProfile, value); Data.SelectedProfileId = value.Id; AttachProfile(); RefreshRules(); Notify(nameof(ModeLabel)); Notify(nameof(IsWholePc)); Notify(nameof(EmptyRulesDetail)); Notify(nameof(StatusDetail)); Save(); QueueApply(); } }
     public bool IsWholePc { get => ActiveProfile.DefaultRoute == RouteTarget.Vpn; set { if (value == IsWholePc) return; ActiveProfile.DefaultRoute = value ? RouteTarget.Vpn : RouteTarget.Direct; Notify(); Notify(nameof(ModeLabel)); Notify(nameof(EmptyRulesDetail)); Notify(nameof(StatusDetail)); Save(); QueueApply(); } }
@@ -51,7 +57,7 @@ public sealed class MainViewModel : Observable, IDisposable
     public string StatusDetail => Connected ? Settings.TunnelMode == TunnelMode.Proxy ? T("Выбранный трафик приложений с прокси идёт через VPN", "Selected traffic from proxy-aware applications uses VPN") : IsWholePc ? T("Весь трафик идёт через VPN", "All traffic goes through VPN") : T("Выбранный трафик идёт через VPN", "Selected traffic goes through VPN") : T("Ваш интернет использует обычное подключение", "Your internet uses your normal connection");
     public string EmptyRulesDetail => IsWholePc ? T("Без правил весь трафик идёт через VPN", "Without rules all traffic goes through VPN") : T("Без правил весь трафик идёт напрямую", "Without rules all traffic goes direct");
     public string FooterLabel => Connected ? T("онлайн", "online") : T("офлайн", "offline");
-    public string FooterMode => Connected ? Settings.TunnelMode == TunnelMode.Tun ? "TUN" : "Proxy" : "Offline";
+    public string FooterMode => Connected ? Settings.TunnelMode == TunnelMode.Tun ? "TUN" : T("Прокси", "Proxy") : T("Нет подключения", "Disconnected");
     private string vpnIp = "—";
     public string VpnIp { get => vpnIp; private set => Set(ref vpnIp, value); }
     private string session = "—";
@@ -68,12 +74,13 @@ public sealed class MainViewModel : Observable, IDisposable
     public string RuleSearch { get => ruleSearch; set { if (Set(ref ruleSearch, value)) RefreshRules(); } }
     private int sortIndex;
     public int SortIndex { get => sortIndex; set { if (Set(ref sortIndex, value)) RefreshServers(); } }
-    private int latencyIndex;
+    private int latencyIndex = 1;
     public int LatencyIndex { get => latencyIndex; set { if (Set(ref latencyIndex, value)) { scan?.Cancel(); foreach (var s in Data.Servers) { s.Latency = "—"; s.LatencyMs = null; } RefreshServers(); if (PageName == "Servers") _ = ScanSafelyAsync(); } } }
     private bool listMode;
     public bool ListMode { get => listMode; set { if (Set(ref listMode, value)) { Notify(nameof(SecondColumn)); RefreshServers(); } } }
     public GridLength SecondColumn => new(ListMode ? 0 : 1, GridUnitType.Star);
     private bool scanning;
+    private int scanGeneration;
     public bool Scanning { get => scanning; private set { if (Set(ref scanning, value)) CommandManager.InvalidateRequerySuggested(); } }
     public string CoreVersion => ConfigGenerator.CoreVersion;
     public string ServerCount => Data.Servers.Count.ToString();
@@ -87,8 +94,14 @@ public sealed class MainViewModel : Observable, IDisposable
     public ICommand SelectServer { get; }
     public ICommand FavoriteServer { get; }
     public ICommand PingAll { get; }
+    public ICommand CancelPing { get; }
     public ICommand RefreshSubscriptions { get; }
     public ICommand AddSubscription { get; }
+    public ICommand ImportQuickSubscription { get; }
+    private string quickSource = "";
+    public string QuickSource { get => quickSource; set { if (Set(ref quickSource, value)) CommandManager.InvalidateRequerySuggested(); } }
+    private bool importing;
+    public bool Importing { get => importing; private set { if (Set(ref importing, value)) CommandManager.InvalidateRequerySuggested(); } }
     public ICommand EditSubscription { get; }
     public ICommand RefreshSubscription { get; }
     public ICommand DeleteSubscription { get; }
@@ -124,8 +137,21 @@ public sealed class MainViewModel : Observable, IDisposable
         SelectServer = new Command(p => { var node = (Server)p!; if (!node.Supported) Banner = node.UnsupportedReason; else SelectedServer = node; });
         FavoriteServer = new Command(p => { var s = (Server)p!; s.Favorite = !s.Favorite; Save(); });
         PingAll = Async(_ => ScanAsync(true), () => !Scanning);
+        CancelPing = new Command(_ => { scanGeneration++; scan?.Cancel(); });
         RefreshSubscriptions = Async(async _ => { foreach (var sub in Data.Subscriptions.ToArray()) await RefreshSubAsync(sub); });
         AddSubscription = Async(async _ => { var sub = Dialogs.Subscription(null); if (sub is null) return; var servers = await SubscriptionLoader.LoadAsync(sub.Source, lifetime.Token); Data.Subscriptions.Add(sub); ReplaceServers(sub, servers); Save(); Go("Servers"); });
+        ImportQuickSubscription = Async(async _ =>
+        {
+            Importing = true;
+            try
+            {
+                var source = QuickSource.Trim();
+                var sub = new Subscription { Source = source, Name = Uri.TryCreate(source, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https" ? uri.Host.EndsWith("ultm.in", StringComparison.OrdinalIgnoreCase) ? "Ultima" : uri.Host : "VLESS" };
+                var nodes = await SubscriptionLoader.LoadAsync(source, lifetime.Token);
+                Data.Subscriptions.Add(sub); ReplaceServers(sub, nodes); Save(); QuickSource = ""; Go("Servers");
+            }
+            finally { Importing = false; }
+        }, () => !Importing && !string.IsNullOrWhiteSpace(QuickSource));
         EditSubscription = Async(async p => { var old = (Subscription)p!; var sub = Dialogs.Subscription(old); if (sub is null) return; var servers = await SubscriptionLoader.LoadAsync(sub.Source, lifetime.Token); old.Name = sub.Name; old.Source = sub.Source; ReplaceServers(old, servers); Save(); Notify(nameof(NoSubscriptions)); });
         RefreshSubscription = Async(p => RefreshSubAsync((Subscription)p!));
         DeleteSubscription = Async(async p => { var sub = (Subscription)p!; if (!Dialogs.Confirm(T("Удалить подписку?", "Delete subscription?"), sub.Name)) return; if (Connected && SelectedServer?.SubscriptionId == sub.Id) await DisconnectAsync(); Data.Subscriptions.Remove(sub); foreach (var s in Data.Servers.Where(s => s.SubscriptionId == sub.Id).ToArray()) Data.Servers.Remove(s); if (!Data.Servers.Contains(SelectedServer!)) SelectedServer = Data.Servers.FirstOrDefault(); Save(); RefreshServers(); Notify(nameof(NoSubscriptions)); });
@@ -145,6 +171,7 @@ public sealed class MainViewModel : Observable, IDisposable
         RestartService = Async(async _ => { await EnsureServiceAsync(); var reconnect = Connected; if (reconnect) await DisconnectAsync(); try { await service.SendAsync(new("Shutdown")); await Task.Delay(350); } catch { } var reply = await service.SendAsync(new("GetStatus"), true); if (!reply.Ok) throw new UserError(reply.Message ?? "Service unavailable."); if (reconnect) await ConnectAsync(); Banner = T("Служба перезапущена", "Service restarted"); });
         DismissBanner = new Command(_ => Banner = null);
         I18n.Set(Settings.Language);
+        ThemeManager.Apply(Settings);
         SystemEvents.PowerModeChanged += OnPower; NetworkChange.NetworkAvailabilityChanged += OnNetwork; NetworkChange.NetworkAddressChanged += OnAddress;
     }
     private AsyncCommand Async(Func<object?, Task> action, Func<bool>? can = null) => new(action, Report, can);
@@ -162,14 +189,25 @@ public sealed class MainViewModel : Observable, IDisposable
     }
     public void Go(string name)
     {
-        scan?.Cancel(); PageName = name; Page = name switch { "Servers" => new ServersPage(this), "Rules" => new RulesPage(this), "Subscriptions" => new SubscriptionsPage(this), "Settings" => new SettingsPage(this), _ => new HomePage(this) };
+        scanGeneration++; scan?.Cancel(); PageName = name; Page = name switch { "Servers" => new ServersPage(this), "Rules" => new RulesPage(this), "Subscriptions" => new SubscriptionsPage(this), "Settings" => new SettingsPage(this), _ => new HomePage(this) };
         if (name == "Servers" && Data.Servers.Count > 0) _ = ScanSafelyAsync();
     }
-    private async Task ScanSafelyAsync() { try { while (Scanning && !lifetime.IsCancellationRequested) await Task.Delay(50, lifetime.Token); if (PageName == "Servers") await ScanAsync(false); } catch (OperationCanceledException) { } catch (Exception e) { Report(e); } }
-    private async Task ScanAsync(bool force)
+    private async Task ScanSafelyAsync()
+    {
+        var generation = ++scanGeneration;
+        try { while (Scanning && !lifetime.IsCancellationRequested) await Task.Delay(50, lifetime.Token); if (!lifetime.IsCancellationRequested && generation == scanGeneration && PageName == "Servers") await ScanAsync(false); }
+        catch (OperationCanceledException) { } catch (Exception e) { Report(e); }
+    }
+    private Task ScanAsync(bool force) => activeScan = RunScanAsync(force);
+    public async Task StopScansAsync()
+    {
+        scanGeneration++; scan?.Cancel();
+        if (activeScan is not null) await activeScan;
+    }
+    private async Task RunScanAsync(bool force)
     {
         if (Scanning) return; Scanning = true; scan?.Dispose(); scan = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token); var token = scan.Token; var mode = LatencyIndex == 0 ? LatencyMode.Fast : LatencyMode.Exact;
-        try { await Task.WhenAll(Data.Servers.ToArray().Select(async s => { var result = await latency.MeasureAsync(s, mode, force, token); token.ThrowIfCancellationRequested(); if (mode != (LatencyIndex == 0 ? LatencyMode.Fast : LatencyMode.Exact)) return; if (mode == LatencyMode.Exact && !s.Supported) s.Latency = "—"; else s.Latency = result.Milliseconds is { } ms ? ms + " ms" : T("Недоступен", "Unavailable"); s.LatencyMs = result.Milliseconds; })); RefreshServers(); }
+        try { await Task.WhenAll(Data.Servers.ToArray().Select(async s => { var result = await latency.MeasureAsync(s, mode, force, token); token.ThrowIfCancellationRequested(); if (mode != (LatencyIndex == 0 ? LatencyMode.Fast : LatencyMode.Exact)) return; if (mode == LatencyMode.Exact && !s.Supported) s.Latency = "—"; else s.Latency = result.Milliseconds is { } ms ? (mode == LatencyMode.Fast ? "TCP · " : "") + ms + T(" мс", " ms") : T("Недоступен", "Unavailable"); s.LatencyMs = result.Milliseconds; })); RefreshServers(); }
         catch (OperationCanceledException) { }
         finally { Scanning = false; }
     }

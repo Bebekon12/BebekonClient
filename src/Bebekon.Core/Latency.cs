@@ -10,11 +10,13 @@ public sealed record LatencyResult(long? Milliseconds, LatencyMode Mode, DateTim
 public sealed class LatencyService(string executable)
 {
     private readonly ConcurrentDictionary<string, LatencyResult> cache = new();
-    private readonly SemaphoreSlim limit = new(6);
+    private readonly SemaphoreSlim fastLimit = new(6);
+    private readonly SemaphoreSlim exactLimit = new(2);
     public async Task<LatencyResult> MeasureAsync(Server server, LatencyMode mode, bool force, CancellationToken ct)
     {
         var key = server.Id + mode;
         if (!force && cache.TryGetValue(key, out var prior) && DateTimeOffset.UtcNow - prior.MeasuredAt < TimeSpan.FromMinutes(3)) return prior;
+        var limit = mode == LatencyMode.Fast ? fastLimit : exactLimit;
         await limit.WaitAsync(ct);
         try
         {

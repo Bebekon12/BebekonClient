@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -39,14 +40,24 @@ public sealed class StateStore(string? root = null)
 }
 public sealed class SafeLog(string directory, string name)
 {
-    private readonly object gate = new();
+    private static readonly ConcurrentDictionary<string, object> Gates = new(StringComparer.OrdinalIgnoreCase);
+    private readonly string path = Path.GetFullPath(Path.Combine(directory, name + ".log"));
     public void Write(string message)
     {
-        lock (gate)
+        // Parallel probe cores use different SafeLog instances for the same file.
+        lock (Gates.GetOrAdd(path, static _ => new()))
         {
-            Directory.CreateDirectory(directory); var path = Path.Combine(directory, name + ".log");
-            if (File.Exists(path) && new FileInfo(path).Length > 1024 * 1024) { for (var i = 2; i >= 1; i--) if (File.Exists(path + "." + i)) File.Move(path + "." + i, path + "." + (i + 1), true); File.Move(path, path + ".1", true); }
-            File.AppendAllText(path, DateTimeOffset.Now.ToString("O") + " " + Redact(message) + Environment.NewLine);
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                if (File.Exists(path) && new FileInfo(path).Length > 1024 * 1024) { for (var i = 2; i >= 1; i--) if (File.Exists(path + "." + i)) File.Move(path + "." + i, path + "." + (i + 1), true); File.Move(path, path + ".1", true); }
+                File.AppendAllText(path, DateTimeOffset.Now.ToString("O") + " " + Redact(message) + Environment.NewLine);
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+            {
+                // Logging is best effort: an external lock/full disk must never
+                // throw out of a process-output callback and terminate the app.
+            }
         }
     }
     public static string Redact(string message)

@@ -20,6 +20,7 @@ public static class Dialogs
         var scroll = new ScrollViewer { Content = body, MaxHeight = 620, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled }; Grid.SetRow(scroll, 1); grid.Children.Add(scroll); window.Content = root;
         window.PreviewKeyDown += (_, e) => { if (e.Key == System.Windows.Input.Key.Escape) window.Close(); };
         window.Loaded += (_, _) => RenderObserver?.Invoke(window);
+        window.SourceInitialized += (_, _) => NativeChrome.Apply(window);
         return window;
     }
     private static TextBox Field(StackPanel body, string label, string value)

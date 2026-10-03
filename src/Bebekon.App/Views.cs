@@ -7,17 +7,22 @@ namespace Bebekon.App;
 public partial class HomeView : UserControl
 {
     private MainViewModel? vm;
+    private Window? owner;
     public HomeView()
     {
-        InitializeComponent(); Loaded += (_, _) => { vm = DataContext as MainViewModel; if (vm is not null) vm.PropertyChanged += OnState; UpdateGlow(); };
-        Unloaded += (_, _) => { if (vm is not null) vm.PropertyChanged -= OnState; vm = null; PowerHalo.BeginAnimation(OpacityProperty, null); };
+        InitializeComponent(); Loaded += (_, _) => { vm = DataContext as MainViewModel; if (vm is not null) vm.PropertyChanged += OnState; owner = Window.GetWindow(this); if (owner is not null) owner.StateChanged += OwnerStateChanged; ThemeManager.Changed += UpdateGlow; UpdateGlow(); };
+        Unloaded += (_, _) => { if (vm is not null) vm.PropertyChanged -= OnState; if (owner is not null) owner.StateChanged -= OwnerStateChanged; ThemeManager.Changed -= UpdateGlow; vm = null; owner = null; StopMotion(); };
         IsVisibleChanged += (_, _) => UpdateGlow();
     }
-    private void OnState(object? sender, System.ComponentModel.PropertyChangedEventArgs e) { if (e.PropertyName == nameof(MainViewModel.Connected)) UpdateGlow(); }
+    private void OnState(object? sender, System.ComponentModel.PropertyChangedEventArgs e) { if (e.PropertyName is nameof(MainViewModel.Connected) or nameof(MainViewModel.ConnectionBusy)) UpdateGlow(); }
+    private void OwnerStateChanged(object? sender, EventArgs e) => UpdateGlow();
+    private void StopMotion() { PowerHalo.BeginAnimation(OpacityProperty, null); Orbit.BeginAnimation(RotateTransform.AngleProperty, null); }
     private void UpdateGlow()
     {
-        PowerHalo.BeginAnimation(OpacityProperty, null);
-        if (IsVisible && SystemParameters.ClientAreaAnimation && vm?.Connected == true) PowerHalo.BeginAnimation(OpacityProperty, new System.Windows.Media.Animation.DoubleAnimation(0.55, 1, TimeSpan.FromSeconds(2.4)) { AutoReverse = true, RepeatBehavior = System.Windows.Media.Animation.RepeatBehavior.Forever });
+        StopMotion(); PowerHalo.Visibility = ThemeManager.Glow ? Visibility.Visible : Visibility.Hidden;
+        if (!IsVisible || owner?.WindowState == WindowState.Minimized || !Motion.Enabled) return;
+        if (ThemeManager.Glow && vm?.Connected == true) PowerHalo.BeginAnimation(OpacityProperty, new System.Windows.Media.Animation.DoubleAnimation(.3, .6, TimeSpan.FromSeconds(2.4)) { AutoReverse = true, RepeatBehavior = System.Windows.Media.Animation.RepeatBehavior.Forever });
+        if (vm?.ConnectionBusy == true) Orbit.BeginAnimation(RotateTransform.AngleProperty, new System.Windows.Media.Animation.DoubleAnimation(0, 360, TimeSpan.FromSeconds(1.7)) { RepeatBehavior = System.Windows.Media.Animation.RepeatBehavior.Forever });
     }
 }
 public partial class ServersView : UserControl { public ServersView() => InitializeComponent(); }
@@ -44,7 +49,7 @@ public partial class SettingsView : UserControl
                 ? (row.Title + " " + row.Description).Contains(query, StringComparison.CurrentCultureIgnoreCase)
                 : category == "All" || row.Category == category;
             row.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
-            if (visible) count++;
+            if (visible) { Motion.Reveal(row, Math.Min(count * 25, 100)); count++; }
         }
         NoSettingsFound.Visibility = count == 0 ? Visibility.Visible : Visibility.Collapsed;
     }
@@ -70,20 +75,8 @@ public sealed class SelectionConverter : IMultiValueConverter
     public object Convert(object[] values, Type type, object parameter, CultureInfo culture) => values.Length == 2 && values[0] is Server a && values[1] is Server b && a.Id == b.Id;
     public object[] ConvertBack(object value, Type[] types, object parameter, CultureInfo culture) => throw new NotSupportedException();
 }
-public sealed class FlagView : FrameworkElement
+public sealed class InverseBoolVisibilityConverter : IValueConverter
 {
-    public static readonly DependencyProperty CountryProperty = DependencyProperty.Register(nameof(Country), typeof(string), typeof(FlagView), new FrameworkPropertyMetadata("", FrameworkPropertyMetadataOptions.AffectsRender));
-    public string Country { get => (string)GetValue(CountryProperty); set => SetValue(CountryProperty, value); }
-    protected override void OnRender(DrawingContext dc)
-    {
-        base.OnRender(dc); var text = (Country ?? "").ToLowerInvariant(); var w = ActualWidth; var h = ActualHeight;
-        var flags = new Dictionary<string, string[]> { ["estonia"] = ["#0088CF", "#111111", "#FFFFFF"], ["poland"] = ["#FFFFFF", "#E61C47"], ["hungary"] = ["#D92C40", "#FFFFFF", "#45795C"], ["bulgaria"] = ["#FFFFFF", "#009D78", "#E43124"], ["austria"] = ["#DD1435", "#FFFFFF", "#DD1435"], ["russia"] = ["#FFFFFF", "#155CCD", "#DB302E"], ["germany"] = ["#111111", "#DA2431", "#F3CB38"], ["netherlands"] = ["#D93445", "#FFFFFF", "#285BA4"] };
-        var vertical = new Dictionary<string, string[]> { ["france"] = ["#002974", "#FFFFFF", "#E12B39"], ["romania"] = ["#06378E", "#FAD72F", "#DF2033"], ["italy"] = ["#039865", "#FFFFFF", "#DF2033"], ["belgium"] = ["#111111", "#FAD72F", "#DF2033"] };
-        dc.PushClip(new RectangleGeometry(new(0, 0, w, h), 5, 5));
-        var key = flags.Keys.FirstOrDefault(text.Contains);
-        if (key is not null) { var colors = flags[key]; for (var i = 0; i < colors.Length; i++) dc.DrawRectangle((Brush)new BrushConverter().ConvertFromString(colors[i])!, null, new(0, h * i / colors.Length, w, h / colors.Length + 0.5)); }
-        else if ((key = vertical.Keys.FirstOrDefault(text.Contains)) is not null) { var colors = vertical[key]; for (var i = 0; i < colors.Length; i++) dc.DrawRectangle((Brush)new BrushConverter().ConvertFromString(colors[i])!, null, new(w * i / colors.Length, 0, w / colors.Length + 0.5, h)); }
-        else { dc.DrawRoundedRectangle(new SolidColorBrush(Color.FromRgb(31, 80, 98)), null, new(0, 0, w, h), 5, 5); dc.DrawEllipse(null, new Pen(new SolidColorBrush(Color.FromRgb(70, 219, 216)), 1.2), new(w / 2, h / 2), h * 0.32, h * 0.32); dc.DrawLine(new Pen(new SolidColorBrush(Color.FromRgb(70, 219, 216)), 1), new(w / 2 - h * 0.3, h / 2), new(w / 2 + h * 0.3, h / 2)); }
-        dc.Pop();
-    }
+    public object Convert(object value, Type type, object parameter, CultureInfo culture) => value is true ? Visibility.Collapsed : Visibility.Visible;
+    public object ConvertBack(object value, Type type, object parameter, CultureInfo culture) => throw new NotSupportedException();
 }

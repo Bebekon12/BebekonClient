@@ -20,7 +20,7 @@ internal static class SmokeHarness
         Directory.CreateDirectory(Root);
         var store = new StateStore(Path.Combine(Root, "test-user"));
         var data = new AppState();
-        foreach (var name in new[] { "Estonia", "Poland", "Hungary", "Bulgaria", "Austria", "Romania", "Norway", "Albania", "USA · New York", "Russia, Saint Petersburg", "Russia, Novosibirsk", "Brazil", "France", "Germany", "Italy", "United Kingdom" }) data.Servers.Add(VlessParser.Parse("vless://" + Guid.NewGuid() + "@127.0.0.1:9?security=none&type=tcp#" + Uri.EscapeDataString(name)));
+        foreach (var name in new[] { "🇱🇻 Латвия", "DE Германия", "EU Hysteria", "LT Литва", "LT Литва — YouTube", "LV Латвия #2", "NL Нидерланды", "NL Нидерланды #2", "SE Швеция" }) data.Servers.Add(VlessParser.Parse("vless://" + Guid.NewGuid() + "@127.0.0.1:9?security=none&type=tcp#" + Uri.EscapeDataString(name)));
         data.Subscriptions.Add(new() { Name = "UI test fixture", Source = "https://example.invalid/private-token", ServerCount = data.Servers.Count });
         data.SelectedServerId = data.Servers[0].Id;
         data.Profiles[0].Rules.Add(new() { Name = "OpenAI / ChatGPT", Values = ["openai.com", "chatgpt.com", "oaistatic.com", "oaiusercontent.com"] });
@@ -30,6 +30,8 @@ internal static class SmokeHarness
         store.Save(data);
         var vm = new MainViewModel(store);
         if (vm.Settings.TunnelMode != TunnelMode.Tun) throw new InvalidOperationException("Startup must select TUN even after a prior proxy session.");
+        if (vm.LatencyIndex != 1) throw new InvalidOperationException("Exact VPN latency must be the default.");
+        foreach (var server in vm.Data.Servers) if (CountryInfo.Resolve(server.Name) is not { } code || FlagView.GetImage(code) is null) throw new InvalidOperationException("Every known fixture country must have a bundled flag.");
         return vm;
     }
     public static async Task RunAsync(MainWindow window, MainViewModel vm)
@@ -37,9 +39,15 @@ internal static class SmokeHarness
         await Task.Delay(400); var report = new List<string> { "Startup selects TUN after a saved proxy session." };
         CheckTrayMenu(window, vm, report);
         await CheckCaptionButtonsAsync(window, vm, report);
+        vm.Go("Servers"); vm.LatencyIndex = 0; vm.LatencyIndex = 1; vm.LatencyIndex = 0; vm.CancelPing.Execute(null); vm.Go("Home");
+        await Task.Delay(400);
+        if (vm.Scanning) throw new InvalidOperationException("Rapid mode changes and navigation must cancel pending scans.");
+        vm.LatencyIndex = 1;
+        report.Add("Bundled flags, exact default and rapid scan mode/navigation cancellation passed.");
         foreach (var page in new[] { "Home", "Servers", "Rules", "Subscriptions", "Settings" })
         {
             vm.Go(page); await Task.Delay(300); window.UpdateLayout();
+            if (page == "Servers" && Descendants(window).OfType<FlagView>().Count(flag => flag.IsVisible) != vm.Data.Servers.Count) throw new InvalidOperationException("Odd server lists must not render an empty card.");
             foreach (var scale in new[] { 1.0, 1.25, 1.5, 1.75 })
             {
                 var bitmap = new RenderTargetBitmap((int)(window.ActualWidth * scale), (int)(window.ActualHeight * scale), 96 * scale, 96 * scale, PixelFormats.Pbgra32); bitmap.Render(window);
@@ -62,8 +70,36 @@ internal static class SmokeHarness
         foreach (var category in new[] { "Network", "Appearance", "Behavior", "Advanced", "All" })
         {
             Descendants(settings).OfType<RadioButton>().Single(r => r.Tag as string == category).IsChecked = true;
-            window.UpdateLayout(); Capture(window, "Settings-" + category);
+            await Task.Delay(400); window.UpdateLayout(); Capture(window, "Settings-" + category);
+            if (!Descendants(settings).OfType<CheckBox>().Any(Motion.GetSlidingSwitch)) throw new InvalidOperationException("Settings switch style must enable sliding motion.");
+            foreach (var toggle in Descendants(settings).OfType<CheckBox>().Where(Motion.GetSlidingSwitch))
+                if (toggle.Template.FindName("Thumb", toggle) is not FrameworkElement thumb || Canvas.GetLeft(thumb) != (toggle.IsChecked == true ? 23 : 3)) throw new InvalidOperationException("Initial switch thumb must reflect its checked state.");
         }
+        var originalAccent = vm.AccentColor;
+        foreach (var accent in new[] { "Blue", "Emerald", "Violet", "Cyan" }) { vm.AccentColor = accent; if (Application.Current.Resources["Accent"] is not SolidColorBrush) throw new InvalidOperationException("Accent must apply to live resources."); }
+        vm.AccentColor = originalAccent;
+        vm.PureBlack = true; if (((SolidColorBrush)Application.Current.Resources["Background"]).Color != Colors.Black) throw new InvalidOperationException("OLED background was not applied."); vm.PureBlack = false;
+        vm.AnimationsEnabled = false; vm.IsProxyMode = true; window.UpdateLayout();
+        foreach (var toggle in Descendants(settings).OfType<CheckBox>().Where(Motion.GetSlidingSwitch)) if (Motion.GetSwitchOffset(toggle) != (toggle.IsChecked == true ? 20 : 0) || toggle.HasAnimatedProperties) throw new InvalidOperationException("Reduced motion switches must move immediately with no animation.");
+        vm.IsTunMode = true; vm.AnimationsEnabled = true;
+        await Task.Delay(250);
+        foreach (var toggle in Descendants(settings).OfType<CheckBox>().Where(Motion.GetSlidingSwitch))
+        {
+            if (toggle.Template.FindName("Thumb", toggle) is not FrameworkElement thumb || Canvas.GetLeft(thumb) != (toggle.IsChecked == true ? 23 : 3)) throw new InvalidOperationException("Switch thumb must reflect its actual checked state.");
+        }
+        report.Add("Live accent palettes, OLED and reduced-motion switch behavior passed.");
+        vm.SidebarCollapsed = true; await Task.Delay(300);
+        if (Math.Abs(((Border)window.FindName("SidebarHost")).ActualWidth - 76) > .1) throw new InvalidOperationException("Sidebar must settle at its collapsed width.");
+        vm.SidebarCollapsed = false; await Task.Delay(300);
+        if (Math.Abs(((Border)window.FindName("SidebarHost")).ActualWidth - 214) > .1) throw new InvalidOperationException("Sidebar must restore its expanded width.");
+        if (vm.ImportQuickSubscription.CanExecute(null)) throw new InvalidOperationException("Empty quick subscription must be disabled.");
+        var originalSubscriptions = vm.Data.Subscriptions.Count; var originalServers = vm.Data.Servers.Count;
+        vm.QuickSource = $"vless://{Guid.NewGuid()}@127.0.0.1:9?security=none&type=tcp#Quick-import-fixture";
+        vm.ImportQuickSubscription.Execute(null);
+        var importTimeout = Stopwatch.StartNew(); while (vm.Importing && importTimeout.Elapsed < TimeSpan.FromSeconds(5)) await Task.Delay(50);
+        if (vm.Importing || vm.Data.Subscriptions.Count != originalSubscriptions + 1 || vm.Data.Servers.Count != originalServers + 1 || vm.QuickSource != "" || vm.PageName != "Servers") throw new InvalidOperationException("Quick import must add the subscription, clear the field and show servers.");
+        vm.Go("Settings");
+        report.Add("Animated sidebar final widths and inline subscription import passed.");
         vm.IsProxyMode = true; if (vm.IsTunMode || !vm.IsProxyMode) throw new InvalidOperationException("TUN and Proxy cannot be active together.");
         vm.IsTunMode = true; if (!vm.IsTunMode || vm.IsProxyMode) throw new InvalidOperationException("TUN must switch Proxy off.");
         report.Add("Settings categories, cross-category search, empty results and TUN/Proxy exclusivity passed.");
@@ -95,6 +131,19 @@ internal static class SmokeHarness
         var boxes = Descendants(window).OfType<ListBox>().ToArray(); var realized = boxes.Sum(b => Descendants(b).OfType<ListBoxItem>().Count()); report.Add($"503 rules, realized list containers: {realized} (virtualization).");
         vm.Go("Home"); await Task.Delay(1000); using var process = Process.GetCurrentProcess(); process.Refresh(); var before = process.TotalProcessorTime; await Task.Delay(3000); process.Refresh(); report.Add($"After rendering (not an idle benchmark): Working Set {process.WorkingSet64 / 1048576.0:F1} MB; private {process.PrivateMemorySize64 / 1048576.0:F1} MB; 3-second CPU {(process.TotalProcessorTime - before).TotalMilliseconds / 3000 / Environment.ProcessorCount * 100:F3}%.");
         File.WriteAllLines(Path.Combine(Root, "report.txt"), report);
+    }
+    internal static async Task MeasureIdleAsync(MainWindow window)
+    {
+        await Task.Delay(2000);
+        var process = Process.GetCurrentProcess(); process.Refresh();
+        var cpu = process.TotalProcessorTime; var timer = Stopwatch.StartNew();
+        await Task.Delay(5000); process.Refresh();
+        var visibleCpu = (process.TotalProcessorTime - cpu).TotalMilliseconds / timer.Elapsed.TotalMilliseconds / Environment.ProcessorCount * 100;
+        var workingSet = process.WorkingSet64 / 1048576d; var privateBytes = process.PrivateMemorySize64 / 1048576d;
+        window.Hide(); await Task.Delay(1000); cpu = process.TotalProcessorTime; timer.Restart();
+        await Task.Delay(5000); process.Refresh();
+        var hiddenCpu = (process.TotalProcessorTime - cpu).TotalMilliseconds / timer.Elapsed.TotalMilliseconds / Environment.ProcessorCount * 100;
+        File.WriteAllText(Path.Combine(Root, "idle-report.txt"), $"Disconnected synthetic fixture, no screen captures or explicit GC. Visible CPU {visibleCpu:F3}%; hidden CPU {hiddenCpu:F3}%; visible Working Set {workingSet:F1} MB, private {privateBytes:F1} MB.\n");
     }
     private static void CheckTrayMenu(MainWindow window, MainViewModel vm, List<string> report)
     {

@@ -15,7 +15,7 @@ public partial class App : Application
         {
             var vm = smoke ? SmokeHarness.CreateViewModel() : new MainViewModel();
             var window = new MainWindow(vm); MainWindow = window; window.Show();
-            if (smoke) { await SmokeHarness.RunAsync(window, vm); window.ForceExit = true; window.Close(); Shutdown(); return; }
+            if (smoke) { if (e.Args.Contains("--idle")) await SmokeHarness.MeasureIdleAsync(window); else await SmokeHarness.RunAsync(window, vm); await vm.StopScansAsync(); window.ForceExit = true; window.Close(); Shutdown(); return; }
             await vm.InitializeAsync();
             if (e.Args.Contains("--tray")) window.Hide();
         }

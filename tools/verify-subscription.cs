@@ -21,6 +21,16 @@ try
     using var lifetime = new CancellationTokenSource(TimeSpan.FromMinutes(3));
     var nodes = await SubscriptionLoader.LoadAsync(source, lifetime.Token);
     Console.WriteLine($"Loaded {nodes.Count} nodes; supported: {nodes.Count(node => node.Supported)}.");
+    if (args.Contains("--latency"))
+    {
+        var latency = new LatencyService(executable);
+        var results = await Task.WhenAll(nodes.Select(node => latency.MeasureAsync(node, LatencyMode.Exact, true, lifetime.Token)));
+        for (var i = 0; i < results.Length; i++) Console.WriteLine($"Node {i + 1}: exact HTTPS median {results[i].Milliseconds?.ToString() ?? "unavailable"} ms; flag {CountryInfo.Resolve(nodes[i].Name) ?? "unknown"}.");
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
+        try { await Task.WhenAll(nodes.Select(node => latency.MeasureAsync(node, LatencyMode.Exact, true, cancellation.Token))); throw new InvalidOperationException("Cancellation did not stop the scan."); }
+        catch (OperationCanceledException) { Console.WriteLine("Parallel exact scan cancellation completed."); }
+        return results.Any(result => result.Milliseconds is not null) ? 0 : 2;
+    }
     var specs = new List<ConnectSpec>();
     foreach (var node in nodes.Where(node => node.Supported))
     {
@@ -58,6 +68,7 @@ try
 }
 catch (Exception error)
 {
+    if (error is TypeInitializationException initialization) Console.WriteLine($"Initialization failure in {initialization.TypeName}: {initialization.InnerException?.GetType().Name}.");
     Console.WriteLine($"Subscription verification failed ({error.GetType().Name}; private URL and credentials withheld).");
     return 1;
 }
