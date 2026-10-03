@@ -17,11 +17,11 @@ No .NET runtime is needed on the destination PC. Build needs internet for NuGet 
 
 Version 0.1.3 imports Ultima's JSON Xray subscriptions directly from the provider URL, in addition to plain/Base64 VLESS links. It reads VLESS connection parameters from each configuration and keeps the application's own routing/DNS rules. Version 0.1.2 fixed repeated tray menu openings and improved window buttons; 0.1.1 unified the dark palette, controls and dialogs. To publish while another build folder is in use, run `./build.ps1 -PublishFolder artifacts/release-ultima`; normal builds still use artifacts/release.
 
-Setup installs into Program Files, registers a demand-start LocalSystem helper, assigns its pipe and service-start rights to the chosen Windows account, and creates shortcuts. If UAC uses a different administrator account, enter the ordinary user's Windows account on the owner page. Only installation/uninstallation needs elevation; connecting from the UI does not. Upgrades preserve %LOCALAPPDATA% data.
+Setup installs into Program Files, registers a demand-start LocalSystem helper, assigns its pipe and service-start rights to the chosen Windows account, and creates shortcuts. If UAC uses a different administrator account, enter the ordinary user's Windows account on the owner page. Only helper installation/update and uninstallation need elevation; connecting from the UI does not. Upgrades preserve %LOCALAPPDATA% data.
 
 The launch executable is **artifacts/release/Bebekon.App.exe** after building, or **Bebekon.App.exe** in the extracted portable ZIP. Keep its adjacent runtime, scripts and core folders together.
 
-TUN is selected automatically at each launch. Proxy can still be selected manually for the current session. If the service is missing, the first connection automatically opens Windows' UAC prompt and installs the helper; confirm that prompt once. The UI waits for installation, then continues connecting. Cancelling UAC produces a clear error and does not show Connected. With Setup, the helper is already installed, so connections need no elevation.
+TUN is selected automatically at each launch. Proxy can still be selected manually for the current session. If the service is missing, the first connection automatically opens Windows' UAC prompt and installs the helper; confirm that prompt once. The UI waits for installation, then continues connecting. An older helper is upgraded once before connecting so it understands the new rule schema. Cancelling UAC produces a clear error and does not show Connected. With Setup, the helper is already installed, so connections need no elevation.
 
 The portable helper/runtime is copied to a protected Program Files directory before service registration; its owner and ACL permit writes only to Administrators/SYSTEM. The original UI user's SID is passed before elevation, including when UAC uses a different administrator account. Manual fallback: run scripts/install-service.ps1 **once as administrator**, with -OwnerAccount 'COMPUTER\username' when elevating with another account. scripts/uninstall-service.ps1 removes the service and its protected copy. Portable means no app installer, not an unprivileged TUN driver.
 
@@ -40,6 +40,12 @@ For a dev connection, install the published service first. `Bebekon.Service.exe 
 3. Open Rules, leave **By rules**, add OpenAI / ChatGPT, Claude / Anthropic and Telegram.exe.
 4. Connect. A real HTTPS probe through the selected server must succeed before the UI shows Protected.
 
+Choose **Rules → Add preset → Правила админа** to add the 42 rules from the supplied screenshots: 36 VPN and 6 Direct entries. Direct exceptions are inserted first; applying the preset again does not duplicate it. `store.supercell.com` is represented as a domain suffix because it is a website, not an executable. The two case variants of Telegram.exe from the reference list are preserved.
+
+The rule editor supports Application, GeoSite, Domain suffix, Domain keyword, GeoIP and IP-CIDR; a name is optional. Its List button selects running/installed applications or available embedded geo sets. **Auto — selected server** follows the main selection; a specific server routes both matching traffic and DNS through that node. Missing server references require editing the rule, with no silent fallback. Direct rules do not retain a VPN server selection. Per-rule server IDs are included in profile exports, so imported profiles may need their server selections updated. 13 service GeoSite sets and 15 country GeoIP sets plus Telegram IP ranges are bundled; sources/hashes and licenses are in resources/geo.
+
+Measured pings use green (≤100 ms), orange (101–200 ms) and red (>200 ms); unmeasured values remain muted. Logo and connection halos respect the glow setting. Modal dialogs blur their owner and restore it on close; the connection animation pauses behind a modal. Text, icon and rule-choice buttons have independent minimum sizes.
+
 An off rule means **Direct**, not disabled. Higher rules win. Drag a rule row to reorder. Exact process paths are used when known; an executable name is the fallback when only a name is entered. Each profile owns its ordered list and default route. Import/export is this application's JSON, without subscription secrets.
 
 Changes to server, profile, rule, routing mode, or saved DNS settings regenerate the core configuration and reconnect. Applying changes closes existing connections; it does not migrate sockets. Proxy mode configures Windows' per-user system proxy on 127.0.0.1:17890 and restores the prior settings on disconnect/next startup. Per-process routing requires TUN.
@@ -53,7 +59,7 @@ Pinned official stable **sing-box 1.14.2**, Windows amd64. Archive SHA256 is in 
 - DNS hijack and 300ms HTTP/TLS/QUIC sniffing precede the ordered user routes.
 - Direct and VPN DNS are separate typed HTTPS servers. Domain DNS rules follow the user order; selective final DNS is Direct, entire-PC final DNS is VPN.
 - Native Windows DNS protection uses strict_route; Docker/VM compatibility relaxes strict_route.
-- No geoip/geosite or deprecated inbound sniff configuration. No MITM, certificate bypass, telemetry or geolocation service.
+- GeoSite and GeoIP use trusted embedded inline rule sets, without legacy geoip/geosite fields or deprecated inbound sniff configuration. No MITM, certificate bypass, telemetry or geolocation service.
 - Exact ping (the default) is a median of three small HTTPS requests through an authenticated local SOCKS5 probe into an isolated real VLESS outbound. TCP (port) measures TCP connection time; another active VPN may intercept that handshake and understate remote latency. The caches are distinct, 3-minute TTL, concurrency 2 for exact probes and 6 for TCP. Checks can be cancelled. Nodes never show invented latency.
 - VPN IP comes from api.ipify.org through a forced VPN probe inbound, irrespective of user rules. This shares only the egress IP with the IP-check endpoint. No subscription/UUID is sent to it. Throughput stays “—”: no fabricated speed or location.
 
@@ -65,24 +71,24 @@ Service runtime and service/core logs are in %PROGRAMDATA%/BebekonVPN, protected
 
 ## Validation and current limits
 
-Measured on Windows 11 x64, version 0.1.0 Release self-contained, without Working Set trimming. Version 0.1.2 has passed the expanded rendering and tray/caption checks; a new ordinary idle memory benchmark has not been run:
+Measured on Windows 11 x64: version 0.1.5 Release self-contained UI in an ordinary disconnected idle process before render captures, without Working Set trimming. The helper figure is the earlier isolated helper benchmark; actual connected TUN memory is still pending:
 
 | State/process | Working Set | Private memory | CPU |
 |---|---:|---:|---:|
-| UI, disconnected idle | 146.1 MB | 108.1 MB | 0.03% over 5s |
+| UI, disconnected idle | 152.4 MB | 112.0 MB | 0.000% over 5s |
 | Helper harness, no core | 35.3 MB | 8.3 MB | 0.00% over 5s |
 | Connected UI + service + core | pending | pending | pending |
 
 The desired ≤90MB UI target is **not met**. No process is hidden or trimmed. CPU is normalized to the whole machine. Screenshot rendering allocates extra surfaces and is excluded from idle measurements. Real provider/TUN combined memory is unmeasured.
 
-93 automated tests cover plain/Base64/JSON Xray subscription parsing, models, DPAPI, priority, generated config checks, actual loopback VLESS traffic, HTTP Host sniffing, helper/core crash detection, job cleanup and elevation command boundaries. A supplied Ultima subscription was also imported live: nine supported nodes, nine configurations accepted by the official core, and a successful forced-VPN HTTPS probe through gRPC/Reality. This is **not** proof of the full TUN/browser acceptance scenario; remaining manual checks are in docs/VALIDATION.md.
+113 automated tests cover plain/Base64/JSON Xray subscription parsing, models, DPAPI, priority, generated config checks, actual loopback VLESS traffic, HTTP Host sniffing, helper/core crash detection, job cleanup and elevation command boundaries. A supplied Ultima subscription was also imported live: nine supported nodes, nine configurations accepted by the official core, and a successful forced-VPN HTTPS probe through gRPC/Reality. This is **not** proof of the full TUN/browser acceptance scenario; remaining manual checks are in docs/VALIDATION.md.
 
 Known limits:
 
 - XHTTP, mKCP and unfamiliar VLESS extensions are shown as unsupported; current official stable transport support is followed.
 - Plain/Base64 VLESS and JSON Xray VLESS subscriptions are supported. JSON imports server settings, not provider listeners, routes or DNS. Unsupported connection options are marked on the affected node. YAML, sing-box provider JSON and other VPN protocols are not supported. Redirected subscription URLs are rejected to avoid leaking secret URLs.
 - TLS ECH hides SNI; encrypted names cannot be sniffed. Browser DoH plus ECH can prevent domain selection. No promise to infer names from arbitrary encrypted traffic.
-- Telegram presets cover websites; add Telegram.exe for its native/IP connections. Process DNS from the Windows DNS Client service cannot always be attributed to the original program; use TUN and domain rules alongside process rules where needed.
+- The basic Telegram preset covers websites; the admin preset also includes Telegram.exe and the official Telegram IP ranges. Process DNS from the Windows DNS Client service cannot always be attributed to the original program; use TUN and domain rules alongside process rules where needed.
 - Domain-only routing does not cover hard-coded IPs without an observable hostname. Add IP/subnet or application rules.
 - Full-VPN is not a kill switch after a core crash; Windows resumes its normal route when the TUN closes.
 - RAM targets are goals; any missed target is reported, without trimming Working Sets or hiding processes.

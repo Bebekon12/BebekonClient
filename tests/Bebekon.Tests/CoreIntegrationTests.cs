@@ -51,6 +51,37 @@ public class CoreIntegrationTests
         }
         finally {lifetime.Cancel();target.Stop();try{await targetTask;}catch(OperationCanceledException){}Directory.Delete(root,true);}
     }
+    [Fact]
+    public async Task GeoSiteAndPinnedServerReallyRouteThroughDifferentVlessOutbounds()
+    {
+        var root=Path.Combine(Path.GetTempPath(),"BebekonTests",Guid.NewGuid().ToString("N")); Directory.CreateDirectory(root);
+        using var lifetime=new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var target=new TcpListener(IPAddress.Loopback,0); target.Start(); var targetPort=((IPEndPoint)target.LocalEndpoint).Port;
+        var responder=RespondAsync(target,lifetime.Token);
+        try
+        {
+            var a=LatencyService.FreePort(); var b=LatencyService.FreePort();
+            var fixture=JsonNode.Parse($$$"""{"log":{"level":"info"},"dns":{"servers":[{"type":"hosts","tag":"hosts","predefined":{"chatgpt.com":["127.0.0.1"],"api.openai.com":["127.0.0.1"],"selected.example.com":["127.0.0.1"]}}]},"inbounds":[{"type":"vless","tag":"a","listen":"127.0.0.1","listen_port":{{{a}}},"users":[{"uuid":"{{{CoreTests.Id}}}"}]},{"type":"vless","tag":"b","listen":"127.0.0.1","listen_port":{{{b}}},"users":[{"uuid":"{{{CoreTests.Id}}}"}]}],"outbounds":[{"type":"direct","tag":"egress-a","inet4_bind_address":"127.0.0.2","domain_resolver":"hosts"},{"type":"direct","tag":"egress-b","inet4_bind_address":"127.0.0.3","domain_resolver":"hosts"}],"route":{"rules":[{"inbound":"a","outbound":"egress-a"},{"inbound":"b","outbound":"egress-b"}]}}""")!;
+            var serverPath=Path.Combine(root,"server.json"); await File.WriteAllTextAsync(serverPath,fixture.ToJsonString());
+            using var serverCore=new CoreProcess(CoreExe,new(root,"server")); await serverCore.StartAsync(serverPath,lifetime.Token);
+            Server Node(int port)=>VlessParser.Parse($"vless://{CoreTests.Id}@127.0.0.1:{port}?security=none&type=tcp#Fixture");
+            var selected=Node(a); var second=Node(b);
+            var p=new Profile {Rules=[new(){Name="Direct exception",Values=["api.openai.com"],UseVpn=false},new(){Name="OpenAI pinned",Kind=RuleKind.GeoSite,Values=["openai"],ServerId=second.Id},new(){Name="Selected server",Values=["selected.example.com"]}]};
+            var spec=new ConnectSpec(selected,p,new(){TunnelMode=TunnelMode.Proxy},LatencyService.FreePort(),new string('b',48),[second]);
+            var config=JsonNode.Parse(ConfigGenerator.Generate(spec))!; var mixed=LatencyService.FreePort(); config["inbounds"]![1]!["listen_port"]=mixed;
+            var hosts=fixture["dns"]!["servers"]![0]!["predefined"]!;
+            // Local host answers keep the fixture offline; real routing and embedded GeoSite matching stay intact.
+            foreach(var dns in config["dns"]!["servers"]!.AsArray().ToArray()) { var tag=(string)dns!["tag"]!; var replacement=new JsonObject {["type"]="hosts",["tag"]=tag,["predefined"]=hosts.DeepClone()}; var i=config["dns"]!["servers"]!.AsArray().IndexOf(dns); config["dns"]!["servers"]![i]=replacement; }
+            var clientPath=Path.Combine(root,"client.json"); await File.WriteAllTextAsync(clientPath,config.ToJsonString());
+            using var clientCore=new CoreProcess(CoreExe,new(root,"client")); await clientCore.StartAsync(clientPath,lifetime.Token);
+            using var http=new HttpClient(new SocketsHttpHandler{UseProxy=true,Proxy=new WebProxy($"http://127.0.0.1:{mixed}")}) {Timeout=TimeSpan.FromSeconds(5)};
+            Assert.Equal("127.0.0.3",await http.GetStringAsync($"http://chatgpt.com:{targetPort}/",lifetime.Token));
+            Assert.Equal("127.0.0.1",await http.GetStringAsync($"http://api.openai.com:{targetPort}/",lifetime.Token));
+            Assert.Equal("127.0.0.2",await http.GetStringAsync($"http://selected.example.com:{targetPort}/",lifetime.Token));
+            using var probe=LatencyService.ProbeClient(spec); Assert.Equal("127.0.0.2",await probe.GetStringAsync($"http://127.0.0.1:{targetPort}/",lifetime.Token));
+        }
+        finally {lifetime.Cancel();target.Stop();try{await responder;}catch(OperationCanceledException){}Directory.Delete(root,true);}
+    }
     private static async Task RespondAsync(TcpListener listener,CancellationToken ct)
     {
         while(!ct.IsCancellationRequested)

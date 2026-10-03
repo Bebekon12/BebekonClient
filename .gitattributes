@@ -1,0 +1,2 @@
+# Keep the exact generated geo bytes stable for the provenance SHA-256 hashes.
+resources/geo/*.json -text whitespace=cr-at-eol

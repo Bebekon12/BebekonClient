@@ -5,7 +5,7 @@ Environment: Windows 11 x64, .NET SDK 10.0.300, runtime 10.0.8, sing-box 1.14.2.
 ## Executed
 
 - Release solution compilation.
-- 93 parser/model/storage/config and real-core tests, including JSON Xray subscription import, gRPC/Reality schema acceptance, parallel logging, multilingual country labels, the helper crash suite and elevation command boundaries.
+- 113 parser/model/storage/config and real-core tests, including JSON Xray subscription import, gRPC/Reality schema acceptance, parallel logging, multilingual country labels, the helper crash suite and elevation command boundaries.
 - WPF smoke harness checks that startup selects TUN even after a saved Proxy session. Elevated registration uses the original user's SID and literal argument list; partial packages are rejected before elevation. Actual UAC acceptance/cancellation and protected service installation remain manual checks.
 - Official `sing-box check` accepted generated TCP, Reality, gRPC, WebSocket, HTTPUpgrade configurations.
 - Real local VLESS fixture confirmed: selected domain exits via VLESS; unmatched domain Direct; Entire PC default VPN; authenticated forced VPN probe; HTTP Host sniffing routes an IP-addressed request by its hostname.
@@ -23,6 +23,16 @@ Environment: Windows 11 x64, .NET SDK 10.0.300, runtime 10.0.8, sing-box 1.14.2.
 - Version 0.1.0 ordinary framework-dependent Release UI idle: 145.7 MB Working Set, 109.3 MB private, 0.174% machine-normalized CPU over 3 seconds.
 - Version 0.1.0 published self-contained Release UI idle: 146.1MB Working Set, 108.1MB private, 0.03% CPU over 5 seconds. **90MB target missed**. Version 0.1.1/0.1.2 screenshot harness peak is higher and is not an idle measurement; a new ordinary idle benchmark is pending.
 - Self-contained app launches without using an installed runtime; service runtime merging preserves WPF assemblies. Installer compilation and portable ZIP generation succeed; privileged installation itself is pending.
+
+## Version 0.1.5
+
+- Admin preset: 42 screenshot entries, 36 VPN and 6 Direct; Direct exceptions precede existing broad Google routes. The store.supercell.com entry is a domain rule. Case variants of the Telegram application are preserved. Reapplication adds no duplicates; profiles and preset copies remain independent.
+- All 29 embedded GeoSite/GeoIP rule sets and the admin preset passed official sing-box 1.14.2 schema validation. Sources are pinned SagerNet commits plus the dated official Telegram CIDR list; runtime uses inline sets, no downloads or user-writable paths.
+- Real offline VLESS integration fixture proved GeoSite OpenAI → pinned second node (127.0.0.3), specific domain exception → Direct (127.0.0.1), other VPN rule/forced probe → selected node (127.0.0.2). Unit checks verify matching per-node DNS detours, missing/invalid server errors and extended profile round-trip.
+- Ping quality tests cover null, 0, 100, 101, 200, 201 and failed values, and changes notify WPF bindings. UI verifies actual measured-label colors and full square 46×46 toolbar hit areas.
+- WPF harness: all six editor types, optional name, Direct/VPN and specific/Auto server selections; rule choices ≥44px and submit buttons ≥44px. Owner blur/restoration verified; screenshots inspected. All five screens at 100/125/150/175% render scale and 860×660 minimum window. The home halo fits inside the hero; logo glow is present. Compact routing shortcuts leave a usable list viewport at minimum size even with a banner; the actual Add preset command is applied twice, then Save edits the same rule ID without changing its Direct action. Existing tray, settings, animation and virtualization checks retained.
+- Published self-contained 0.1.5 UI passed the full WPF smoke suite. A separate disconnected idle process, before screen captures or explicit GC, measured 152.4 MB Working Set / 112.0 MB private and 0.000% visible/hidden machine-normalized CPU over 5 seconds each. The 90 MB UI target remains missed; real connected TUN memory remains unmeasured.
+- A registered older helper is upgraded via the existing protected installer before connecting; version comparison is automated. Actual elevated upgrade remains part of manual acceptance.
 
 ## Required manual acceptance — pending
 

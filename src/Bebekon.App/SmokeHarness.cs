@@ -43,10 +43,12 @@ internal static class SmokeHarness
         await Task.Delay(400);
         if (vm.Scanning) throw new InvalidOperationException("Rapid mode changes and navigation must cancel pending scans.");
         vm.LatencyIndex = 1;
+        foreach (var (node, ms) in vm.Data.Servers.Zip(new long?[] { 25, 125, 310, 68, 91, 165, 240, null, 80 })) { node.LatencyMs = ms; node.Latency = ms is null ? "—" : ms + " ms"; }
         report.Add("Bundled flags, exact default and rapid scan mode/navigation cancellation passed.");
         foreach (var page in new[] { "Home", "Servers", "Rules", "Subscriptions", "Settings" })
         {
-            vm.Go(page); await Task.Delay(300); window.UpdateLayout();
+            vm.Go(page); await vm.StopScansAsync(); await Task.Delay(300); window.UpdateLayout();
+            CheckGeometry(window, page);
             if (page == "Servers" && Descendants(window).OfType<FlagView>().Count(flag => flag.IsVisible) != vm.Data.Servers.Count) throw new InvalidOperationException("Odd server lists must not render an empty card.");
             foreach (var scale in new[] { 1.0, 1.25, 1.5, 1.75 })
             {
@@ -104,26 +106,51 @@ internal static class SmokeHarness
         vm.IsTunMode = true; if (!vm.IsTunMode || vm.IsProxyMode) throw new InvalidOperationException("TUN must switch Proxy off.");
         report.Add("Settings categories, cross-category search, empty results and TUN/Proxy exclusivity passed.");
         window.Width = window.MinWidth; window.Height = window.MinHeight; window.UpdateLayout();
-        foreach (var page in new[] { "Home", "Servers", "Rules", "Subscriptions", "Settings" }) { vm.Go(page); await Task.Delay(150); window.UpdateLayout(); Capture(window, page + "-Minimum"); }
+        foreach (var page in new[] { "Home", "Servers", "Rules", "Subscriptions", "Settings" }) { vm.Go(page); await vm.StopScansAsync(); await Task.Delay(150); window.UpdateLayout(); if (page == "Rules") CheckRulesViewport(window); Capture(window, page + "-Minimum"); }
         window.Width = 1000; window.Height = 740; window.UpdateLayout();
         vm.Go("Settings"); await Task.Delay(150); I18n.Set("English"); window.UpdateLayout(); Capture(window, "Settings-English"); I18n.Set("Русский");
         string dialogName = "Subscription"; Exception? renderFailure = null;
         Dialogs.RenderObserver = dialog => dialog.Dispatcher.BeginInvoke(new Action(() =>
         {
-            try { dialog.UpdateLayout(); Capture(dialog, "Dialog-" + dialogName); }
+            try {
+                dialog.UpdateLayout();
+                if (dialogName == "Rule") CheckRuleEditor(dialog, vm);
+                if (window.Content is not UIElement { Effect: System.Windows.Media.Effects.BlurEffect { Radius: 8 } }) throw new InvalidOperationException("Modal background must be blurred.");
+                Capture(dialog, "Dialog-" + dialogName); Capture(window, "Backdrop-" + dialogName);
+            }
             catch (Exception error) { renderFailure = error; }
             finally { dialog.Close(); }
         }));
         try
         {
-            Dialogs.Subscription(null); dialogName = "Rule"; Dialogs.Rule(null);
+            Dialogs.Subscription(null); dialogName = "Rule"; Dialogs.Rule(null, vm.Data.Servers);
             dialogName = "Preset"; Dialogs.Preset(vm.Presets);
             dialogName = "Application"; await Dialogs.ApplicationAsync();
             dialogName = "Confirm"; Dialogs.Confirm("Удалить правило?", "UI test fixture");
         }
         finally { Dialogs.RenderObserver = null; }
         if (renderFailure is not null) throw renderFailure;
+        if (((UIElement)window.Content).Effect is not null || Dialogs.ModalOpen) throw new InvalidOperationException("Closing dialogs must restore the background.");
+        report.Add("Rule editor: all six types, optional name, actions and server references; full button areas; modal blur/restoration passed.");
         report.Add("Five native dialogs rendered with the shared theme.");
+        var originalProfile = vm.ActiveProfile;
+        var adminProfile = new Profile { Name = "Правила админа · UI fixture" }; vm.Data.Profiles.Add(adminProfile); vm.ActiveProfile = adminProfile;
+        Dialogs.RenderObserver = dialog => dialog.Dispatcher.BeginInvoke(new Action(() => Descendants(dialog).OfType<Button>().Single(b => b.IsDefault).RaiseEvent(new RoutedEventArgs(Button.ClickEvent))));
+        try { vm.AddPreset.Execute(null); vm.AddPreset.Execute(null); }
+        finally { Dialogs.RenderObserver = null; }
+        if (adminProfile.Rules.Count != 42 || adminProfile.Rules.Count(r => !r.UseVpn) != 6) throw new InvalidOperationException("Admin preset command must add 42 rules exactly once.");
+        vm.Go("Rules"); await Task.Delay(250); window.UpdateLayout(); Capture(window, "Rules-Admin");
+        window.Width = window.MinWidth; window.Height = window.MinHeight; window.UpdateLayout(); Capture(window, "Rules-Admin-Minimum"); CheckRulesViewport(window);
+        window.Width = 1000; window.Height = 740; window.UpdateLayout();
+        var firstRule = adminProfile.Rules[0];
+        Dialogs.RenderObserver = dialog => dialog.Dispatcher.BeginInvoke(new Action(() => {
+            var editor = Descendants(dialog).OfType<RuleEditor>().Single(); editor.NameField.Text = "Edited fixture";
+            Descendants(dialog).OfType<Button>().Single(b => b.IsDefault).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        }));
+        try { vm.EditRule.Execute(firstRule); } finally { Dialogs.RenderObserver = null; }
+        if (adminProfile.Rules[0].Id != firstRule.Id || adminProfile.Rules[0].Name != "Edited fixture" || adminProfile.Rules[0].UseVpn) throw new InvalidOperationException("Saving an edit must preserve the rule ID and Direct action.");
+        vm.ActiveProfile = originalProfile; vm.Data.Profiles.Remove(adminProfile);
+        report.Add("Admin preset Add command applied twice without duplicates (42 rules / 6 Direct); modal Save edited the same ID and kept its action.");
         vm.Go("Rules"); for (var i = 0; i < 500; i++) vm.ActiveProfile.Rules.Add(new() { Name = "Rule " + i, Values = [$"site{i}.example.com"] }); vm.RuleSearch = ""; vm.RuleSearch = "Rule"; await Task.Delay(200); window.UpdateLayout();
         vm.IsWholePc = true; window.UpdateLayout(); if (Descendants(window).OfType<RadioButton>().Count(r => r.IsChecked == true) != 1) throw new InvalidOperationException("Routing mode selection is inconsistent.");
         vm.IsWholePc = false; window.UpdateLayout(); if (Descendants(window).OfType<RadioButton>().Count(r => r.IsChecked == true) != 1) throw new InvalidOperationException("Selective mode selection is inconsistent.");
@@ -206,6 +233,55 @@ internal static class SmokeHarness
             var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap));
             using var output = File.Create(Path.Combine(Root, name + "-" + (int)(scale * 100) + ".png")); encoder.Save(output);
         }
+    }
+    private static void CheckGeometry(MainWindow window, string page)
+    {
+        var halo = (FrameworkElement)window.FindName("LogoHalo");
+        if (!halo.IsVisible || halo.ActualWidth < 68 || halo.ActualHeight < 68) throw new InvalidOperationException("Logo glow is missing.");
+        if (page == "Home")
+        {
+            var view = Descendants(window).OfType<HomeView>().Single(); var power = (FrameworkElement)view.FindName("PowerHalo"); var hero = (FrameworkElement)view.FindName("Hero");
+            var bounds = power.TransformToAncestor(hero).TransformBounds(new Rect(0, 0, power.ActualWidth, power.ActualHeight));
+            if (bounds.Top < 0 || bounds.Bottom > hero.ActualHeight) throw new InvalidOperationException("Home glow must fit inside its hero block.");
+        }
+        if (page == "Servers")
+        {
+            var values = Descendants(window).OfType<TextBlock>().Where(t => t.DataContext is Server && t.Text.EndsWith(" ms")).ToArray();
+            if (values.Length != 8) throw new InvalidOperationException("Latency fixtures must actually be rendered.");
+            foreach (var value in values)
+            {
+                var server = (Server)value.DataContext; var key = LatencyDisplay.Quality(server.LatencyMs) switch { LatencyQuality.Good => "PingGood", LatencyQuality.Moderate => "PingModerate", _ => "PingPoor" };
+                if (value.Foreground != Application.Current.Resources[key]) throw new InvalidOperationException("Measured latency must use its quality color.");
+            }
+            foreach (var button in Descendants(window).OfType<Button>().Where(b => b.IsVisible && b.Style == Application.Current.Resources["IconButton"]))
+                if (Math.Abs(button.ActualWidth - button.ActualHeight) > .1 || button.ActualWidth < 46) throw new InvalidOperationException("Server toolbar icons must have square 46×46 areas.");
+        }
+    }
+    private static void CheckRulesViewport(MainWindow window)
+    {
+        var view = Descendants(window).OfType<RulesView>().Single();
+        var list = (ListBox)view.FindName("RulesList");
+        if (list.ActualHeight < 100) throw new InvalidOperationException($"Routing controls must leave a usable rules viewport at minimum window size, including with a banner: {list.ActualHeight:F1}px.");
+    }
+    private static void CheckRuleEditor(Window dialog, MainViewModel vm)
+    {
+        var editor = Descendants(dialog).OfType<RuleEditor>().Single();
+        var choices = Descendants(editor).OfType<RadioButton>().ToArray();
+        if (choices.Length != 8 || choices.Any(c => c.ActualHeight < 44 || c.ActualWidth < 180)) throw new InvalidOperationException("Rule choices need full, equal-sized hit areas.");
+        foreach (var (kind, value) in new[] { (RuleKind.Application, "Telegram.exe"), (RuleKind.GeoSite, "openai"), (RuleKind.Site, "figma.com"), (RuleKind.Contains, "claude"), (RuleKind.GeoIp, "telegram"), (RuleKind.Network, "192.168.1.0/24") })
+        {
+            editor.SelectKind(kind); editor.ValueField.Text = value; editor.NameField.Clear();
+            var rule = editor.Build(); if (rule.Kind != kind || rule.Name.Length == 0 || rule.Values.Count != 1) throw new InvalidOperationException("Rule type or optional name was not saved correctly.");
+        }
+        editor.SelectKind(RuleKind.Application); editor.ValueField.Text = "Telegram.exe";
+        editor.ServerField.SelectedIndex = 2; editor.SelectAction(true);
+        if (editor.Build().ServerId != vm.Data.Servers[1].Id) throw new InvalidOperationException("Explicit server selection was lost.");
+        editor.SelectAction(false);
+        if (editor.ServerField.IsEnabled || editor.Build().UseVpn || editor.Build().ServerId is not null) throw new InvalidOperationException("Direct rules cannot use a VPN server.");
+        editor.SelectAction(true); editor.ServerField.SelectedIndex = 0;
+        dialog.UpdateLayout();
+        foreach (var button in Descendants(dialog).OfType<Button>().Where(b => b.IsDefault || b.Content as string == "Отмена"))
+            if (button.ActualHeight < 44 || button.ActualWidth < 200) throw new InvalidOperationException("Dialog action buttons are compressed.");
     }
     private static IEnumerable<DependencyObject> Descendants(DependencyObject d) { for (var i = 0; i < VisualTreeHelper.GetChildrenCount(d); i++) { var child = VisualTreeHelper.GetChild(d, i); yield return child; foreach (var x in Descendants(child)) yield return x; } }
 }

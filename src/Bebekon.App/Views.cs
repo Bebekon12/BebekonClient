@@ -10,8 +10,8 @@ public partial class HomeView : UserControl
     private Window? owner;
     public HomeView()
     {
-        InitializeComponent(); Loaded += (_, _) => { vm = DataContext as MainViewModel; if (vm is not null) vm.PropertyChanged += OnState; owner = Window.GetWindow(this); if (owner is not null) owner.StateChanged += OwnerStateChanged; ThemeManager.Changed += UpdateGlow; UpdateGlow(); };
-        Unloaded += (_, _) => { if (vm is not null) vm.PropertyChanged -= OnState; if (owner is not null) owner.StateChanged -= OwnerStateChanged; ThemeManager.Changed -= UpdateGlow; vm = null; owner = null; StopMotion(); };
+        InitializeComponent(); Loaded += (_, _) => { vm = DataContext as MainViewModel; if (vm is not null) vm.PropertyChanged += OnState; owner = Window.GetWindow(this); if (owner is not null) owner.StateChanged += OwnerStateChanged; ThemeManager.Changed += UpdateGlow; Dialogs.ModalStateChanged += UpdateGlow; UpdateGlow(); };
+        Unloaded += (_, _) => { if (vm is not null) vm.PropertyChanged -= OnState; if (owner is not null) owner.StateChanged -= OwnerStateChanged; ThemeManager.Changed -= UpdateGlow; Dialogs.ModalStateChanged -= UpdateGlow; vm = null; owner = null; StopMotion(); };
         IsVisibleChanged += (_, _) => UpdateGlow();
     }
     private void OnState(object? sender, System.ComponentModel.PropertyChangedEventArgs e) { if (e.PropertyName is nameof(MainViewModel.Connected) or nameof(MainViewModel.ConnectionBusy)) UpdateGlow(); }
@@ -20,10 +20,19 @@ public partial class HomeView : UserControl
     private void UpdateGlow()
     {
         StopMotion(); PowerHalo.Visibility = ThemeManager.Glow ? Visibility.Visible : Visibility.Hidden;
-        if (!IsVisible || owner?.WindowState == WindowState.Minimized || !Motion.Enabled) return;
+        if (!IsVisible || owner?.WindowState == WindowState.Minimized || Dialogs.ModalOpen || !Motion.Enabled) return;
         if (ThemeManager.Glow && vm?.Connected == true) PowerHalo.BeginAnimation(OpacityProperty, new System.Windows.Media.Animation.DoubleAnimation(.3, .6, TimeSpan.FromSeconds(2.4)) { AutoReverse = true, RepeatBehavior = System.Windows.Media.Animation.RepeatBehavior.Forever });
         if (vm?.ConnectionBusy == true) Orbit.BeginAnimation(RotateTransform.AngleProperty, new System.Windows.Media.Animation.DoubleAnimation(0, 360, TimeSpan.FromSeconds(1.7)) { RepeatBehavior = System.Windows.Media.Animation.RepeatBehavior.Forever });
     }
+}
+public sealed class LatencyBrushConverter : IValueConverter
+{
+    public object Convert(object value, Type type, object parameter, CultureInfo culture)
+    {
+        var quality = LatencyDisplay.Quality(value is long ms ? ms : null);
+        return Application.Current.Resources[quality switch { LatencyQuality.Good => "PingGood", LatencyQuality.Moderate => "PingModerate", LatencyQuality.Poor => "PingPoor", _ => "Muted" }];
+    }
+    public object ConvertBack(object value, Type type, object parameter, CultureInfo culture) => throw new NotSupportedException();
 }
 public partial class ServersView : UserControl { public ServersView() => InitializeComponent(); }
 public partial class SubscriptionsView : UserControl { public SubscriptionsView() => InitializeComponent(); }

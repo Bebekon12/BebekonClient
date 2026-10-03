@@ -10,6 +10,7 @@ public static class RuleValidation
     public static void Validate(RoutingRule rule)
     {
         if (!Enum.IsDefined(rule.Kind) || string.IsNullOrWhiteSpace(rule.Name) || rule.Name.Length > 160 || rule.Values.Count is < 1 or > 500) throw new UserError("Укажите название и адрес правила.");
+        if (rule.ServerId is { } serverId && (serverId.Length is < 1 or > 128 || serverId.Any(char.IsControl))) throw new UserError("Некорректный сервер правила.");
         for (var i = 0; i < rule.Values.Count; i++)
         {
             var v = rule.Values[i].Trim();
@@ -30,6 +31,11 @@ public static class RuleValidation
                     var p = v.Split('/');
                     if (p.Length > 2 || !IPAddress.TryParse(p[0], out var ip) || p.Length == 2 && (!int.TryParse(p[1], out var prefix) || prefix < 0 || prefix > (ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork ? 32 : 128))) throw new UserError("Укажите IP или подсеть, например 192.168.1.0/24.");
                     if (p.Length == 1) v += ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork ? "/32" : "/128";
+                    break;
+                case RuleKind.GeoSite:
+                case RuleKind.GeoIp:
+                    v = v.ToLowerInvariant();
+                    if (!GeoCatalog.Contains(rule.Kind, v)) throw new UserError("Этот набор не встроен в приложение. Выберите набор из списка.");
                     break;
             }
             rule.Values[i] = v;
@@ -52,7 +58,7 @@ public static class ProfileCodec
         catch (Exception e) when (e is JsonException or NotSupportedException or NullReferenceException) { throw new UserError("Повреждённый файл профиля Bebekon."); }
     }
 }
-public sealed record ConnectSpec(Server Server, Profile Profile, Settings Settings, int ProbePort, string ProbePassword);
+public sealed record ConnectSpec(Server Server, Profile Profile, Settings Settings, int ProbePort, string ProbePassword, List<Server>? RuleServers = null);
 public static class ConfigGenerator
 {
     public const string CoreVersion = "1.14.2";
@@ -60,12 +66,60 @@ public static class ConfigGenerator
     public static string Generate(ConnectSpec spec, bool probeOnly = false)
     {
         var s = spec.Server;
+        if (spec.ProbePort is < 1024 or > 65535 || spec.ProbePassword.Length < 24 || spec.Settings.Mtu is < 1280 or > 9000 || !Enum.IsDefined(spec.Settings.TunnelMode)) throw new UserError("Некорректные параметры подключения.");
+        RuleValidation.Validate(spec.Profile);
+        var vpn = Vpn(s, "vpn");
+        var outbounds = new JsonArray { vpn, new JsonObject { ["type"] = "direct", ["tag"] = "direct", ["domain_resolver"] = "direct-dns" } };
+        var dnsServers = new JsonArray { Dns("direct-dns", "direct"), Dns("vpn-dns", "vpn") };
+        var serverTags = new Dictionary<string, string> { [s.Id] = "vpn" };
+        if (!probeOnly)
+        {
+            var required = spec.Profile.Rules.Where(r => r.UseVpn && r.ServerId is not null).Select(r => r.ServerId!).Distinct().Where(id => id != s.Id).ToArray();
+            if (required.Length > 64) throw new UserError("В одном профиле можно использовать до 64 дополнительных серверов.");
+            foreach (var id in required)
+            {
+                var nodes = spec.RuleServers?.Where(n => n.Id == id).ToArray();
+                if (nodes is null || nodes.Length != 1) throw new UserError("Сервер одного из правил недоступен. Измените правило или выберите «Авто».");
+                var tag = "vpn-rule-" + serverTags.Count;
+                serverTags.Add(id, tag); outbounds.Add(Vpn(nodes[0], tag)); dnsServers.Add(Dns(tag + "-dns", tag));
+            }
+        }
+        var inbounds = new JsonArray { new JsonObject { ["type"] = "mixed", ["tag"] = "vpn-probe", ["listen"] = "127.0.0.1", ["listen_port"] = spec.ProbePort, ["users"] = new JsonArray { new JsonObject { ["username"] = "bebekon", ["password"] = spec.ProbePassword } } } };
+        if (!probeOnly)
+        {
+            if (spec.Settings.TunnelMode == TunnelMode.Tun) inbounds.Add(new JsonObject { ["type"] = "tun", ["tag"] = "tun-in", ["interface_name"] = "Bebekon", ["address"] = Strings(["172.29.255.1/30", "fd84:be:be::1/126"]), ["mtu"] = spec.Settings.Mtu, ["auto_route"] = true, ["strict_route"] = spec.Settings.DnsProtection && !spec.Settings.CompatibilityMode, ["dns_mode"] = "hijack", ["stack"] = "mixed" });
+            else inbounds.Add(new JsonObject { ["type"] = "mixed", ["tag"] = "proxy-in", ["listen"] = "127.0.0.1", ["listen_port"] = 17890 });
+        }
+        var routes = new JsonArray {
+            new JsonObject { ["inbound"] = Strings(["vpn-probe"]), ["action"] = "route", ["outbound"] = "vpn" },
+            new JsonObject { ["port"] = 53, ["action"] = "hijack-dns" },
+            new JsonObject { ["action"] = "sniff", ["sniffer"] = Strings(["http", "tls", "quic", "dns"]), ["timeout"] = "300ms" },
+            new JsonObject { ["protocol"] = "dns", ["action"] = "hijack-dns" }
+        };
+        var dnsRules = new JsonArray(); var sets = new JsonArray(); var setTags = new HashSet<string>();
+        foreach (var rule in probeOnly ? [] : spec.Profile.Rules)
+        {
+            if (rule.Kind is RuleKind.GeoSite or RuleKind.GeoIp)
+                foreach (var value in rule.Values) if (setTags.Add(GeoCatalog.Tag(rule.Kind, value))) sets.Add(GeoCatalog.Inline(rule.Kind, value));
+            var tag = !rule.UseVpn ? "direct" : rule.ServerId is null ? "vpn" : serverTags[rule.ServerId];
+            var match = Match(rule); match["action"] = "route"; match["outbound"] = tag; routes.Add(match);
+            if (rule.Kind is not (RuleKind.Network or RuleKind.GeoIp)) { var dm = Match(rule); dm["action"] = "route"; dm["server"] = tag == "vpn" ? "vpn-dns" : tag + "-dns"; dnsRules.Add(dm); }
+        }
+        var route = new JsonObject { ["rules"] = routes, ["final"] = spec.Profile.DefaultRoute == RouteTarget.Vpn || probeOnly ? "vpn" : "direct", ["auto_detect_interface"] = true, ["default_domain_resolver"] = "direct-dns" };
+        if (sets.Count > 0) route["rule_set"] = sets;
+        return new JsonObject {
+            ["log"] = new JsonObject { ["level"] = "info", ["timestamp"] = false, ["disabled"] = false },
+            ["dns"] = new JsonObject { ["servers"] = dnsServers, ["rules"] = dnsRules, ["final"] = spec.Profile.DefaultRoute == RouteTarget.Vpn || probeOnly ? "vpn-dns" : "direct-dns", ["reverse_mapping"] = true, ["cache_capacity"] = 4096, ["strategy"] = "prefer_ipv4" },
+            ["inbounds"] = inbounds, ["outbounds"] = outbounds, ["route"] = route
+        }.ToJsonString(Json.Options);
+    }
+    private static JsonObject Dns(string tag, string detour) => new() { ["type"] = "https", ["tag"] = tag, ["server"] = "1.1.1.1", ["detour"] = detour, ["tls"] = new JsonObject { ["server_name"] = "cloudflare-dns.com" } };
+    private static JsonObject Vpn(Server s, string tag)
+    {
         if (!s.Supported) throw new UserError(s.UnsupportedReason!);
         // Validate model received by the elevated service; it never accepts executable paths or raw config.
         if (!Guid.TryParse(s.Uuid, out _) || s.Port is < 1 or > 65535 || string.IsNullOrWhiteSpace(s.Host) || s.Transport is not ("tcp" or "grpc" or "ws" or "http" or "httpupgrade") || s.Security is not ("none" or "tls" or "reality")) throw new UserError("Некорректный сервер.");
-        if (spec.ProbePort is < 1024 or > 65535 || spec.ProbePassword.Length < 24 || spec.Settings.Mtu is < 1280 or > 9000 || !Enum.IsDefined(spec.Settings.TunnelMode)) throw new UserError("Некорректные параметры подключения.");
-        RuleValidation.Validate(spec.Profile);
-        var vpn = new JsonObject { ["type"] = "vless", ["tag"] = "vpn", ["server"] = s.Host, ["server_port"] = s.Port, ["uuid"] = s.Uuid, ["domain_resolver"] = "direct-dns", ["connect_timeout"] = "4s" };
+        var vpn = new JsonObject { ["type"] = "vless", ["tag"] = tag, ["server"] = s.Host, ["server_port"] = s.Port, ["uuid"] = s.Uuid, ["domain_resolver"] = "direct-dns", ["connect_timeout"] = "4s" };
         if (s.Flow.Length > 0) vpn["flow"] = s.Flow;
         if (s.Security != "none")
         {
@@ -82,39 +136,12 @@ public static class ConfigGenerator
             else { t["path"] = s.Path; if (s.TransportHost.Length > 0) { if (s.Transport == "ws") t["headers"] = new JsonObject { ["Host"] = s.TransportHost }; else if (s.Transport == "http") t["host"] = Strings([s.TransportHost]); else t["host"] = s.TransportHost; } }
             vpn["transport"] = t;
         }
-        var inbounds = new JsonArray { new JsonObject { ["type"] = "mixed", ["tag"] = "vpn-probe", ["listen"] = "127.0.0.1", ["listen_port"] = spec.ProbePort, ["users"] = new JsonArray { new JsonObject { ["username"] = "bebekon", ["password"] = spec.ProbePassword } } } };
-        if (!probeOnly)
-        {
-            if (spec.Settings.TunnelMode == TunnelMode.Tun) inbounds.Add(new JsonObject { ["type"] = "tun", ["tag"] = "tun-in", ["interface_name"] = "Bebekon", ["address"] = Strings(["172.29.255.1/30", "fd84:be:be::1/126"]), ["mtu"] = spec.Settings.Mtu, ["auto_route"] = true, ["strict_route"] = spec.Settings.DnsProtection && !spec.Settings.CompatibilityMode, ["dns_mode"] = "hijack", ["stack"] = "mixed" });
-            else inbounds.Add(new JsonObject { ["type"] = "mixed", ["tag"] = "proxy-in", ["listen"] = "127.0.0.1", ["listen_port"] = 17890 });
-        }
-        var routes = new JsonArray {
-            new JsonObject { ["inbound"] = Strings(["vpn-probe"]), ["action"] = "route", ["outbound"] = "vpn" },
-            new JsonObject { ["port"] = 53, ["action"] = "hijack-dns" },
-            new JsonObject { ["action"] = "sniff", ["sniffer"] = Strings(["http", "tls", "quic", "dns"]), ["timeout"] = "300ms" },
-            new JsonObject { ["protocol"] = "dns", ["action"] = "hijack-dns" }
-        };
-        var dnsRules = new JsonArray();
-        foreach (var rule in spec.Profile.Rules)
-        {
-            var match = Match(rule); match["action"] = "route"; match["outbound"] = rule.UseVpn ? "vpn" : "direct"; routes.Add(match);
-            if (rule.Kind != RuleKind.Network) { var dm = Match(rule); dm["action"] = "route"; dm["server"] = rule.UseVpn ? "vpn-dns" : "direct-dns"; dnsRules.Add(dm); }
-        }
-        var config = new JsonObject {
-            ["log"] = new JsonObject { ["level"] = "info", ["timestamp"] = false, ["disabled"] = false },
-            ["dns"] = new JsonObject { ["servers"] = new JsonArray {
-                new JsonObject { ["type"] = "https", ["tag"] = "direct-dns", ["server"] = "1.1.1.1", ["detour"] = "direct", ["tls"] = new JsonObject { ["server_name"] = "cloudflare-dns.com" } },
-                new JsonObject { ["type"] = "https", ["tag"] = "vpn-dns", ["server"] = "1.1.1.1", ["detour"] = "vpn", ["tls"] = new JsonObject { ["server_name"] = "cloudflare-dns.com" } }
-            }, ["rules"] = dnsRules, ["final"] = spec.Profile.DefaultRoute == RouteTarget.Vpn || probeOnly ? "vpn-dns" : "direct-dns", ["reverse_mapping"] = true, ["cache_capacity"] = 4096, ["strategy"] = "prefer_ipv4" },
-            ["inbounds"] = inbounds,
-            ["outbounds"] = new JsonArray { vpn, new JsonObject { ["type"] = "direct", ["tag"] = "direct", ["domain_resolver"] = "direct-dns" } },
-            ["route"] = new JsonObject { ["rules"] = routes, ["final"] = spec.Profile.DefaultRoute == RouteTarget.Vpn || probeOnly ? "vpn" : "direct", ["auto_detect_interface"] = true, ["default_domain_resolver"] = "direct-dns" }
-        };
-        return config.ToJsonString(Json.Options);
+        return vpn;
     }
     private static JsonObject Match(RoutingRule r)
     {
         var key = r.Kind switch { RuleKind.Site => "domain_suffix", RuleKind.Contains => "domain_keyword", RuleKind.Network => "ip_cidr", _ => "process_name" };
+        if (r.Kind is RuleKind.GeoSite or RuleKind.GeoIp) return new JsonObject { ["rule_set"] = Strings(r.Values.Select(v => GeoCatalog.Tag(r.Kind, v))) };
         if (r.Kind != RuleKind.Application) return new JsonObject { [key] = Strings(r.Values) };
         var paths = r.Values.Where(Path.IsPathFullyQualified).ToList(); var names = r.Values.Where(v => !Path.IsPathFullyQualified(v)).ToList();
         if (paths.Count > 0 && names.Count > 0) return new JsonObject { ["type"] = "logical", ["mode"] = "or", ["rules"] = new JsonArray { new JsonObject { ["process_path"] = Strings(paths) }, new JsonObject { ["process_name"] = Strings(names) } } };

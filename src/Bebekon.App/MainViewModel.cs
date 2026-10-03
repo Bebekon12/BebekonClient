@@ -130,7 +130,7 @@ public sealed class MainViewModel : Observable, IDisposable
         activeProfile = Data.Profiles.FirstOrDefault(p => p.Id == Data.SelectedProfileId) ?? Data.Profiles[0];
         selectedServer = Settings.RestoreServer ? Data.Servers.FirstOrDefault(s => s.Id == Data.SelectedServerId) : null;
         page = new HomePage(this);
-        Presets = System.Text.Json.JsonSerializer.Deserialize<List<Preset>>(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "resources", "services.json")), Json.Options)!;
+        Presets = PresetCatalog.Load();
         AttachProfile(); RefreshServers(); RefreshRules();
         Navigate = new Command(p => Go((string)p!)); CollapseSidebar = new Command(_ => SidebarCollapsed = !SidebarCollapsed);
         ToggleConnect = Async(_ => ToggleAsync(), () => !ConnectionBusy);
@@ -155,10 +155,10 @@ public sealed class MainViewModel : Observable, IDisposable
         EditSubscription = Async(async p => { var old = (Subscription)p!; var sub = Dialogs.Subscription(old); if (sub is null) return; var servers = await SubscriptionLoader.LoadAsync(sub.Source, lifetime.Token); old.Name = sub.Name; old.Source = sub.Source; ReplaceServers(old, servers); Save(); Notify(nameof(NoSubscriptions)); });
         RefreshSubscription = Async(p => RefreshSubAsync((Subscription)p!));
         DeleteSubscription = Async(async p => { var sub = (Subscription)p!; if (!Dialogs.Confirm(T("Удалить подписку?", "Delete subscription?"), sub.Name)) return; if (Connected && SelectedServer?.SubscriptionId == sub.Id) await DisconnectAsync(); Data.Subscriptions.Remove(sub); foreach (var s in Data.Servers.Where(s => s.SubscriptionId == sub.Id).ToArray()) Data.Servers.Remove(s); if (!Data.Servers.Contains(SelectedServer!)) SelectedServer = Data.Servers.FirstOrDefault(); Save(); RefreshServers(); Notify(nameof(NoSubscriptions)); });
-        AddRule = new Command(_ => { var rule = Dialogs.Rule(null); if (rule is not null) { ActiveProfile.Rules.Add(rule); RulesChanged(); } });
-        EditRule = new Command(p => { var rule = (RoutingRule)p!; var edit = Dialogs.Rule(rule); if (edit is null) return; var i = ActiveProfile.Rules.IndexOf(rule); rule.PropertyChanged -= OnRuleChanged; ActiveProfile.Rules[i] = edit; RulesChanged(); });
+        AddRule = new Command(_ => { var rule = Dialogs.Rule(null, Data.Servers); if (rule is not null) { ActiveProfile.Rules.Add(rule); RulesChanged(); } });
+        EditRule = new Command(p => { var rule = (RoutingRule)p!; var edit = Dialogs.Rule(rule, Data.Servers); if (edit is null) return; var i = ActiveProfile.Rules.IndexOf(rule); rule.PropertyChanged -= OnRuleChanged; ActiveProfile.Rules[i] = edit; RulesChanged(); });
         DeleteRule = new Command(p => { var rule = (RoutingRule)p!; rule.PropertyChanged -= OnRuleChanged; ActiveProfile.Rules.Remove(rule); RulesChanged(); });
-        AddPreset = new Command(_ => { var preset = Dialogs.Preset(Presets); if (preset is null) return; ActiveProfile.Rules.Add(new() { Name = preset.Name, Values = [..preset.Domains] }); RulesChanged(); });
+        AddPreset = new Command(_ => { var preset = Dialogs.Preset(Presets); if (preset is null) return; var count = PresetCatalog.Apply(preset, ActiveProfile); RulesChanged(); Banner = count == 0 ? T("Этот набор уже добавлен.", "This preset has already been added.") : T($"Добавлено правил: {count}.", $"Added {count} rules."); });
         AddApplication = Async(async _ => { var app = await Dialogs.ApplicationAsync(); if (app is null) return; ActiveProfile.Rules.Add(new() { Kind = RuleKind.Application, Name = app.Name, Values = [app.Path] }); RulesChanged(); });
         AddProfile = new Command(_ => { var name = Dialogs.Text(T("Создать профиль", "Create profile"), T("Название", "Name"), "Работа"); if (string.IsNullOrWhiteSpace(name)) return; var profile = new Profile { Name = name }; Data.Profiles.Add(profile); ActiveProfile = profile; Save(); });
         DeleteProfile = new Command(_ => { if (Data.Profiles.Count <= 1) { Banner = T("Нужен хотя бы один профиль.", "Keep at least one profile."); return; } if (!Dialogs.Confirm(T("Удалить профиль?", "Delete profile?"), ActiveProfile.Name)) return; var old = ActiveProfile; ActiveProfile = Data.Profiles.First(p => p != old); Data.Profiles.Remove(old); Save(); });
@@ -252,7 +252,7 @@ public sealed class MainViewModel : Observable, IDisposable
             if (SelectedServer is null) { Go("Subscriptions"); Banner = T("Добавьте подписку и выберите сервер.", "Add a subscription and choose a server."); return; }
             if (!SelectedServer.Supported) throw new UserError(SelectedServer.UnsupportedReason!);
             State = ConnectionState.Connecting; Banner = null; VpnIp = "—";
-            spec = new(SelectedServer, ActiveProfile, Settings, LatencyService.FreePort(), Convert.ToHexString(RandomNumberGenerator.GetBytes(24)));
+            spec = new(SelectedServer, ActiveProfile, Settings, LatencyService.FreePort(), Convert.ToHexString(RandomNumberGenerator.GetBytes(24)), Data.Servers.Where(s => ActiveProfile.Rules.Any(r => r.UseVpn && r.ServerId == s.Id)).ToList());
             spec = System.Text.Json.JsonSerializer.Deserialize<ConnectSpec>(System.Text.Json.JsonSerializer.Serialize(spec, Json.Options), Json.Options)!;
             var version = configurationVersion;
             store.SaveRuntime(ConfigGenerator.Generate(spec));
@@ -274,8 +274,8 @@ public sealed class MainViewModel : Observable, IDisposable
     private async Task EnsureServiceAsync()
     {
         await ServiceInstaller.EnsureInstalledAsync(() => Banner = T(
-            "Подтвердите запрос Windows: установка службы TUN требуется один раз.",
-            "Approve the Windows prompt: the TUN helper needs to be installed once."), lifetime.Token);
+            "Подтвердите запрос Windows: требуется установка или обновление службы TUN.",
+            "Approve the Windows prompt: the TUN helper needs installation or an update."), lifetime.Token);
         Banner = null;
     }
     public async Task DisconnectAsync()

@@ -14,7 +14,12 @@ public abstract class Observable : INotifyPropertyChanged
     public void Notify([CallerMemberName] string? name = null) => PropertyChanged?.Invoke(this, new(name));
 }
 public enum RouteTarget { Direct, Vpn }
-public enum RuleKind { Site, Contains, Application, Network }
+public enum RuleKind { Site, Contains, Application, Network, GeoSite, GeoIp }
+public enum LatencyQuality { Unknown, Good, Moderate, Poor }
+public static class LatencyDisplay
+{
+    public static LatencyQuality Quality(long? milliseconds) => milliseconds switch { null => LatencyQuality.Unknown, < 0 => LatencyQuality.Poor, <= 100 => LatencyQuality.Good, <= 200 => LatencyQuality.Moderate, _ => LatencyQuality.Poor };
+}
 public enum TunnelMode { Tun, Proxy }
 public enum ConnectionState { Disconnected, Connecting, Connected, Disconnecting, Error }
 public enum LatencyMode { Fast, Exact }
@@ -47,7 +52,8 @@ public sealed class Server : Observable
     [JsonIgnore] public string DisplayName => CountryInfo.DisplayName(Name);
     private string latency = "—";
     [JsonIgnore] public string Latency { get => latency; set => Set(ref latency, value); }
-    [JsonIgnore] public long? LatencyMs { get; set; }
+    private long? latencyMs;
+    [JsonIgnore] public long? LatencyMs { get => latencyMs; set => Set(ref latencyMs, value); }
     [JsonIgnore] public string Mark => Name.Length > 0 ? Name[..Math.Min(2, Name.Length)].ToUpperInvariant() : "↗";
 }
 public sealed class RoutingRule : Observable
@@ -56,11 +62,12 @@ public sealed class RoutingRule : Observable
     public string Name { get; set; } = "";
     public RuleKind Kind { get; set; }
     public List<string> Values { get; set; } = [];
+    public string? ServerId { get; set; }
     private bool useVpn = true;
     public bool UseVpn { get => useVpn; set { if (Set(ref useVpn, value)) { Notify(nameof(Target)); Notify(nameof(RouteLabel)); } } }
     [JsonIgnore] public RouteTarget Target => UseVpn ? RouteTarget.Vpn : RouteTarget.Direct;
     [JsonIgnore] public string RouteLabel => UseVpn ? "Через VPN" : "Без VPN";
-    [JsonIgnore] public string Description => Kind switch { RuleKind.Application => "Программа · " + string.Join(", ", Values.Select(System.IO.Path.GetFileName)), RuleKind.Network => "IP / подсеть · " + string.Join(", ", Values), RuleKind.Contains => "Адрес содержит · " + string.Join(", ", Values), _ => string.Join(", ", Values) };
+    [JsonIgnore] public string Description => Kind switch { RuleKind.Application => "Программа · " + string.Join(", ", Values.Select(System.IO.Path.GetFileName)), RuleKind.Network => "IP / подсеть · " + string.Join(", ", Values), RuleKind.GeoSite => "Сайты и сервисы · " + string.Join(", ", Values), RuleKind.GeoIp => "IP-адреса набора · " + string.Join(", ", Values), RuleKind.Contains => "Адрес содержит · " + string.Join(", ", Values), _ => "Сайт и поддомены · " + string.Join(", ", Values) };
     [JsonIgnore] public string Glyph => Kind switch { RuleKind.Application => "▦", RuleKind.Network => "⌘", _ => "◎" };
 }
 public sealed class Profile : Observable
@@ -109,7 +116,12 @@ public sealed class AppState
     public string? SelectedServerId { get; set; }
     public string? SelectedProfileId { get; set; }
 }
-public sealed record Preset(string Name, string Icon, List<string> Domains);
+public sealed record Preset(string Name, string Icon, List<string> Domains, List<RoutingRule>? Rules = null)
+{
+    [JsonIgnore] public int RuleCount => Rules?.Count ?? 1;
+    [JsonIgnore] public string Summary => Rules is null ? string.Join(", ", Domains) : $"{Rules.Count} правила · {Rules.Count(r => r.UseVpn)} через VPN · {Rules.Count(r => !r.UseVpn)} без VPN";
+    public List<RoutingRule> CreateRules() => Rules is null ? [new() { Name = Name, Values = [.. Domains] }] : Rules.OrderBy(r => r.UseVpn).Select(r => new RoutingRule { Name = r.Name, Kind = r.Kind, Values = [.. r.Values], UseVpn = r.UseVpn, ServerId = r.ServerId }).ToList();
+}
 public static class Json
 {
     public static readonly JsonSerializerOptions Options = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase, WriteIndented = true, Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) } };

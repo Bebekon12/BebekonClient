@@ -56,7 +56,7 @@ public sealed class IconView : FrameworkElement
             ["Site"] = "M21,12 A9,9 0 1 1 3,12 A9,9 0 1 1 21,12 M3,12 H21 M12,3 C7,8 7,16 12,21 C17,16 17,8 12,3",
             ["Contains"] = "M16,10 A6,6 0 1 1 4,10 A6,6 0 1 1 16,10 M14.5,14.5 L21,21",
         };
-        paths["Tun"] = paths["Shield"];
+        paths["Tun"] = paths["Shield"]; paths["GeoSite"] = paths["Servers"]; paths["GeoIp"] = paths["Network"];
         var result = new Dictionary<string, Geometry>(StringComparer.OrdinalIgnoreCase);
         foreach (var (key, data) in paths) { var shape = Geometry.Parse(data); shape.Freeze(); result[key] = shape; }
         return result;

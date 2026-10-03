@@ -4,11 +4,12 @@ public static class I18n
     public static bool English { get; private set; }
     public static string T(string ru, string en) => English ? en : ru;
     private static readonly (string Key, string Ru, string En)[] Labels = [
+        ("ApplicationShortcutDetail","Выбор программ","Choose applications"),("AdminShortcutDetail","Админ и сервисы","Admin and services"),
         ("AccentTitle","Акцентный цвет","Accent color"),("AccentDetail","Единая палитра кнопок, подсветки и переключателей.","A consistent palette for buttons, highlights and switches."),
         ("SubscriptionLink","Вставьте ссылку на подписку","Paste a subscription link"),("ImportLink","Добавить и применить","Add and apply"),("ImportingLink","Загружаем серверы…","Loading servers…"),
         ("Cyan","Бирюзовый","Turquoise"),("Blue","Голубой","Blue"),("Emerald","Изумрудный","Emerald"),("Violet","Лавандовый","Lavender"),
         ("AnimationTitle","Плавные анимации","Smooth animations"),("AnimationDetail","Переходы страниц и отклик элементов. Учитывает настройки Windows.","Page transitions and interaction feedback. Respects Windows settings."),
-        ("GlowTitle","Мягкое свечение","Soft glow"),("GlowDetail","Подсветка кнопки подключения. Пульсирует при активном VPN.","Connection button lighting. Pulses while VPN is connected."),
+        ("GlowTitle","Мягкое свечение","Soft glow"),("GlowDetail","Ореол логотипа и кнопки подключения. Пульсирует при активном VPN.","Logo and connection button halos. Pulses while VPN is connected."),
         ("PureBlackTitle","Чистый чёрный","Pure black"),("PureBlackDetail","Чёрный фон для OLED-экранов.","Black background for OLED displays."),
         ("LatencyHelp","VPN: время HTTPS-запроса через выбранный сервер. TCP: открытие порта; другой VPN может перехватить соединение и занизить результат.","VPN: HTTPS request time through the selected server. TCP: port connection; another VPN may intercept it and understate latency."),
         ("MinimizeWindow","Свернуть","Minimize"),("MaximizeWindow","Развернуть","Maximize"),("RestoreWindow","Восстановить","Restore"),("CloseWindow","Закрыть","Close"),

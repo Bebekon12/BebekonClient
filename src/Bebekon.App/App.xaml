@@ -4,6 +4,7 @@
    <ResourceDictionary.MergedDictionaries><ResourceDictionary Source="Theme.xaml"/></ResourceDictionary.MergedDictionaries>
    <BooleanToVisibilityConverter x:Key="BoolVisibility"/>
    <local:InverseBoolVisibilityConverter x:Key="InverseBoolVisibility"/>
+   <local:LatencyBrushConverter x:Key="LatencyBrush"/>
    <DataTemplate DataType="{x:Type local:HomePage}"><local:HomeView DataContext="{Binding Main}"/></DataTemplate>
    <DataTemplate DataType="{x:Type local:ServersPage}"><local:ServersView DataContext="{Binding Main}"/></DataTemplate>
    <DataTemplate DataType="{x:Type local:RulesPage}"><local:RulesView DataContext="{Binding Main}"/></DataTemplate>

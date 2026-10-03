@@ -35,6 +35,12 @@ if (-not [IO.Path]::GetFullPath($installRoot).StartsWith($programFilesRoot,[Stri
         if (Get-ChildItem -LiteralPath $root -Recurse -Force | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint }) { throw 'Reparse package files are forbidden.' }
     }
     Set-ProtectedHelperAcl (Get-Item -LiteralPath $protectedRoot)
+    # Release loaded executable/runtime files before replacing a portable helper.
+    $existingHelper = Get-Service -Name BebekonVPN -ErrorAction SilentlyContinue
+    if ($existingHelper -and $existingHelper.Status -ne 'Stopped') {
+        Stop-Service -Name BebekonVPN
+        $existingHelper.WaitForStatus('Stopped',[TimeSpan]::FromSeconds(20))
+    }
     Get-ChildItem -LiteralPath $installRoot | Copy-Item -Destination $protectedRoot -Recurse -Force
     Get-ChildItem -LiteralPath $protectedRoot -Recurse -Force | ForEach-Object { Set-ProtectedHelperAcl $_ }
     $exe = Join-Path $protectedRoot 'Bebekon.Service.exe'

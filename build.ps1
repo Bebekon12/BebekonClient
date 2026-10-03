@@ -46,6 +46,8 @@ Copy-Item -LiteralPath scripts -Destination $appPublishRoot -Recurse -Force
 Copy-Item -LiteralPath README.md,ARCHITECTURE.md,LICENSE -Destination $appPublishRoot -Force
 New-Item -ItemType Directory -Path (Join-Path $appPublishRoot 'docs') -Force | Out-Null
 Copy-Item -LiteralPath docs\VALIDATION.md -Destination (Join-Path $appPublishRoot 'docs') -Force
+New-Item -ItemType Directory -Path (Join-Path $appPublishRoot 'resources\geo') -Force | Out-Null
+Copy-Item -LiteralPath resources\geo\README.md,resources\geo\LICENSE-SagerNet,resources\geo\sources.json -Destination (Join-Path $appPublishRoot 'resources\geo') -Force
 Copy-Item -LiteralPath core\LICENSE,core\version.json -Destination (Join-Path $appPublishRoot 'core') -Force
 if (-not $SkipInstaller) {
     if (-not $InnoCompiler) {
