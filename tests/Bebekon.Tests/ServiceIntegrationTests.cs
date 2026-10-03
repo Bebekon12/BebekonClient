@@ -24,6 +24,9 @@ public class ServiceIntegrationTests
             var spec=new ConnectSpec(node,new(),new(){TunnelMode=TunnelMode.Proxy},LatencyService.FreePort(),new string('c',48));
             Assert.True((await Send(new("ValidateConfig",spec),timeout.Token)).Ok);
             var reply=await Send(new("StartCore",spec),timeout.Token);Assert.True(reply.Ok,reply.Message);Assert.Equal(ConnectionState.Connected,reply.Status.State);
+            ServiceResponse sampled;
+            do { await Task.Delay(100, timeout.Token); sampled = await Send(new("GetStatus"), timeout.Token); } while (sampled.Status.Traffic is null);
+            Assert.Equal(0, sampled.Status.Traffic.UploadBytes); Assert.Equal(0, sampled.Status.Traffic.DownloadBytes);
             using(var core=Process.GetProcessById(reply.Status.CorePid!.Value)){core.Kill();await core.WaitForExitAsync(timeout.Token);}
             await Task.Delay(100,timeout.Token);
             Assert.Equal(ConnectionState.Error,(await Send(new("GetStatus"),timeout.Token)).Status.State);

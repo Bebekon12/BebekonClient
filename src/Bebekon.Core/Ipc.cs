@@ -6,7 +6,7 @@ using System.Text.Json;
 namespace Bebekon.Core;
 
 public sealed record ServiceRequest(string Operation, ConnectSpec? Spec = null);
-public sealed record ServiceStatus(ConnectionState State, string? Error = null, DateTimeOffset? ConnectedAt = null, int? CorePid = null);
+public sealed record ServiceStatus(ConnectionState State, string? Error = null, DateTimeOffset? ConnectedAt = null, int? CorePid = null, TrafficSnapshot? Traffic = null);
 public sealed record ServiceResponse(bool Ok, ServiceStatus Status, string? Message = null);
 public static class PipeProtocol
 {
@@ -26,7 +26,11 @@ public static class PipeProtocol
         return JsonSerializer.Deserialize<T>(data, Json.Options) ?? throw new InvalidDataException("Empty frame.");
     }
 }
-public sealed class ServiceClient
+public interface IServiceClient
+{
+    Task<ServiceResponse> SendAsync(ServiceRequest request, bool startService = false, CancellationToken ct = default);
+}
+public sealed class ServiceClient : IServiceClient
 {
     public async Task<ServiceResponse> SendAsync(ServiceRequest request, bool startService = false, CancellationToken ct = default)
     {

@@ -4,6 +4,22 @@ using System.Windows.Media;
 namespace Bebekon.App;
 public static class Dialogs
 {
+    public static bool? RoutingMode(bool current)
+    {
+        var window = Shell(I18n.T("Режим маршрутизации", "Routing mode"), out var body);
+        bool? result = null;
+        body.Children.Add(new TextBlock { Text = I18n.T("Выберите, какой трафик направлять через VPN.", "Choose which traffic goes through VPN."), Style = (Style)Application.Current.Resources["Subtitle"], Margin = new(0, 0, 0, 18) });
+        foreach (var all in new[] { false, true })
+        {
+            var content = new StackPanel();
+            content.Children.Add(new TextBlock { Text = I18n.T(all ? "Весь ПК" : "По правилам", all ? "Entire PC" : "By rules"), FontSize = 16, FontWeight = FontWeights.SemiBold });
+            content.Children.Add(new TextBlock { Text = I18n.T(all ? "Все приложения и сайты через VPN" : "Выбранные сайты и приложения; остальное напрямую", all ? "All applications and websites use VPN" : "Selected sites and applications; everything else direct"), Style = (Style)Application.Current.Resources["Subtitle"], Margin = new(0, 5, 0, 0), TextWrapping = TextWrapping.Wrap });
+            var button = new Button { Content = content, Tag = all ? "EntirePC" : "ByRules", HorizontalContentAlignment = HorizontalAlignment.Left, MinHeight = 82, Padding = new(18, 14, 18, 14), Margin = new(0, 0, 0, 12) };
+            if (all == current) { button.BorderBrush = (Brush)Application.Current.Resources["Accent"]; button.Background = (Brush)Application.Current.Resources["AccentSoft"]; }
+            button.Click += (_, _) => { result = all; window.DialogResult = true; }; body.Children.Add(button);
+        }
+        return window.ShowDialog() == true ? result : null;
+    }
     internal static Action<Window>? RenderObserver { get; set; }
     internal static event Action? ModalStateChanged;
     private static int modalCount;

@@ -34,7 +34,33 @@ public sealed class LatencyBrushConverter : IValueConverter
     }
     public object ConvertBack(object value, Type type, object parameter, CultureInfo culture) => throw new NotSupportedException();
 }
-public partial class ServersView : UserControl { public ServersView() => InitializeComponent(); }
+public partial class ServersView : UserControl
+{
+    public static readonly DependencyProperty EmbeddedProperty = DependencyProperty.Register(nameof(Embedded), typeof(bool), typeof(ServersView), new PropertyMetadata(false));
+    public bool Embedded { get => (bool)GetValue(EmbeddedProperty); set => SetValue(EmbeddedProperty, value); }
+    public ServersView()
+    {
+        InitializeComponent();
+        ServerList.PreviewMouseWheel += (_, e) =>
+        {
+            if (!Embedded || FindScroll(ServerList) is not { } inner) return;
+            if (!(e.Delta > 0 && inner.VerticalOffset <= 0 || e.Delta < 0 && inner.VerticalOffset >= inner.ScrollableHeight)) return;
+            DependencyObject? parent = VisualTreeHelper.GetParent(this);
+            while (parent is not null && parent is not ScrollViewer) parent = VisualTreeHelper.GetParent(parent);
+            if (parent is ScrollViewer outer) { outer.ScrollToVerticalOffset(outer.VerticalOffset - e.Delta / 2.0); e.Handled = true; }
+        };
+    }
+    private static ScrollViewer? FindScroll(DependencyObject node)
+    {
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(node); i++)
+        {
+            var child = VisualTreeHelper.GetChild(node, i);
+            if (child is ScrollViewer scroll) return scroll;
+            if (FindScroll(child) is { } found) return found;
+        }
+        return null;
+    }
+}
 public partial class SubscriptionsView : UserControl { public SubscriptionsView() => InitializeComponent(); }
 public partial class SettingsView : UserControl
 {

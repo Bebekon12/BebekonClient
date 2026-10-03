@@ -49,6 +49,9 @@ public sealed class Server : Observable
     [JsonIgnore] public string Star => Favorite ? "★" : "☆";
     [JsonIgnore] public bool Supported => UnsupportedReason is null;
     [JsonIgnore] public string Protocol => "VLESS · " + (Transport == "grpc" ? "gRPC" : Transport.ToUpperInvariant());
+    private string subscriptionLabel = "";
+    [JsonIgnore] public string SubscriptionLabel { get => subscriptionLabel; set { if (Set(ref subscriptionLabel, value)) Notify(nameof(ConnectionLabel)); } }
+    [JsonIgnore] public string ConnectionLabel => SubscriptionLabel.Length == 0 ? Protocol : Protocol + " · " + SubscriptionLabel;
     [JsonIgnore] public string DisplayName => CountryInfo.DisplayName(Name);
     private string latency = "—";
     [JsonIgnore] public string Latency { get => latency; set => Set(ref latency, value); }

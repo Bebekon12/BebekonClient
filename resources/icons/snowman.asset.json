@@ -1,0 +1,7 @@
+{
+  "generator": "OpenAI built-in image_gen",
+  "asset": "snowman.png",
+  "background": "transparent",
+  "iconSizes": [16, 24, 32, 48, 64, 128, 256],
+  "prompt": "Use case: logo-brand. Asset type: Windows desktop VPN application icon and sidebar mascot. Create one polished, bold, easily recognizable icon: a friendly white snowman wearing dark navy sporty sunglasses and a flowing bright blue scarf, leaning forward and running fast, two compact snowball feet in a dynamic running stride, with two short blue speed streaks behind him. Cool white, ice blue, cyan and deep navy palette only. Crisp contemporary rounded illustrated forms, subtle blue shading for volume, strong silhouette legible at 32px, compact centered square composition with about 10% safe padding. Full character, no cropping. Transparent background, no tile, no text, no letters, no watermark, no extra objects. This replaces the logo of an elegant dark teal and cyan Windows VPN app."
+}

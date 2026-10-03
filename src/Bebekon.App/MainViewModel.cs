@@ -11,7 +11,8 @@ namespace Bebekon.App;
 public sealed class MainViewModel : Observable, IDisposable
 {
     private readonly StateStore store;
-    private readonly ServiceClient service = new();
+    private readonly IServiceClient service;
+    private readonly Func<ConnectSpec, CancellationToken, Task>? testProbe;
     private readonly LatencyService latency = new(Path.Combine(AppContext.BaseDirectory, "core", "sing-box.exe"));
     private readonly SafeLog log = new(Paths.Logs, "app");
     private readonly SemaphoreSlim connectionGate = new(1);
@@ -21,6 +22,9 @@ public sealed class MainViewModel : Observable, IDisposable
     private CancellationTokenSource? applyDelay;
     private CancellationTokenSource? networkDelay;
     private bool recovering;
+    private bool desiredConnected;
+    private CancellationTokenSource? connectionAttempt;
+    private string uplinkSignature = UplinkSignature();
     public AppState Data { get; }
     public Settings Settings => Data.Settings;
     public bool AnimationsEnabled { get => Settings.Animations; set { Settings.Animations = value; AppearanceChanged(nameof(AnimationsEnabled)); } }
@@ -42,7 +46,7 @@ public sealed class MainViewModel : Observable, IDisposable
     public GridLength SidebarWidth => new(SidebarCollapsed ? 76 : 214);
     public Visibility NavTextVisibility => SidebarCollapsed ? Visibility.Collapsed : Visibility.Visible;
     private Server? selectedServer;
-    public Server? SelectedServer { get => selectedServer; set { if (Set(ref selectedServer, value)) { Data.SelectedServerId = value?.Id; Notify(nameof(ServerLabel)); Save(); QueueApply(); } } }
+    public Server? SelectedServer { get => selectedServer; set { var changed = selectedServer?.Id != value?.Id || (selectedServer is not null && value is not null && ServerRefresh.ConnectionKey(selectedServer) != ServerRefresh.ConnectionKey(value)); if (Set(ref selectedServer, value)) { Data.SelectedServerId = value?.Id; Notify(nameof(ServerLabel)); Save(); if (changed) QueueApply(); } } }
     public string ServerLabel => SelectedServer?.DisplayName ?? T("Выберите сервер", "Choose a server");
     private Profile activeProfile;
     public Profile ActiveProfile { get => activeProfile; set { if (value is null || ReferenceEquals(activeProfile, value)) return; DetachProfile(activeProfile); Set(ref activeProfile, value); Data.SelectedProfileId = value.Id; AttachProfile(); RefreshRules(); Notify(nameof(ModeLabel)); Notify(nameof(IsWholePc)); Notify(nameof(EmptyRulesDetail)); Notify(nameof(StatusDetail)); Save(); QueueApply(); } }
@@ -52,7 +56,7 @@ public sealed class MainViewModel : Observable, IDisposable
     public ConnectionState State { get => state; private set { if (Set(ref state, value)) { NotifyStatus(); CommandManager.InvalidateRequerySuggested(); } } }
     public bool Connected => State == ConnectionState.Connected;
     public bool ConnectionBusy => State is ConnectionState.Connecting or ConnectionState.Disconnecting;
-    public string ConnectLabel => State switch { ConnectionState.Connecting => T("Подключаем…", "Connecting…"), ConnectionState.Disconnecting => T("Отключаем…", "Disconnecting…"), ConnectionState.Connected => T("Отключить", "Disconnect"), _ => T("Подключить", "Connect") };
+    public string ConnectLabel => State switch { ConnectionState.Connecting => T("Отменить", "Cancel"), ConnectionState.Disconnecting => T("Отключаем…", "Disconnecting…"), ConnectionState.Connected => T("Отключить", "Disconnect"), _ => T("Подключить", "Connect") };
     public string StatusLabel => State switch { ConnectionState.Connected => T("Защищено", "Protected"), ConnectionState.Connecting => T("Подключение", "Connecting"), ConnectionState.Disconnecting => T("Отключение", "Disconnecting"), ConnectionState.Error => T("Ошибка подключения", "Connection error"), _ => T("Готов к подключению", "Ready to connect") };
     public string StatusDetail => Connected ? Settings.TunnelMode == TunnelMode.Proxy ? T("Выбранный трафик приложений с прокси идёт через VPN", "Selected traffic from proxy-aware applications uses VPN") : IsWholePc ? T("Весь трафик идёт через VPN", "All traffic goes through VPN") : T("Выбранный трафик идёт через VPN", "Selected traffic goes through VPN") : T("Ваш интернет использует обычное подключение", "Your internet uses your normal connection");
     public string EmptyRulesDetail => IsWholePc ? T("Без правил весь трафик идёт через VPN", "Without rules all traffic goes through VPN") : T("Без правил весь трафик идёт напрямую", "Without rules all traffic goes direct");
@@ -62,10 +66,18 @@ public sealed class MainViewModel : Observable, IDisposable
     public string VpnIp { get => vpnIp; private set => Set(ref vpnIp, value); }
     private string session = "—";
     public string Session { get => session; private set => Set(ref session, value); }
+    private TrafficSnapshot? traffic;
+    public string DownloadRate => Rate(traffic?.DownloadBytesPerSecond);
+    public string UploadRate => Rate(traffic?.UploadBytesPerSecond);
+    public string DownloadTotal => Total(traffic?.DownloadBytes);
+    public string UploadTotal => Total(traffic?.UploadBytes);
+    private string Rate(double? bytes) => !Connected || bytes is null ? "—" : (bytes.Value * 8 / 1_000_000).ToString("0.00", System.Globalization.CultureInfo.CurrentCulture);
+    private static string Total(long? bytes) => bytes is null ? "—" : bytes >= 1_073_741_824 ? (bytes.Value / 1_073_741_824.0).ToString("0.00") + " GB" : (bytes.Value / 1_048_576.0).ToString("0.00") + " MB";
     private DateTimeOffset? started;
     private ConnectSpec? spec;
     private int monitorId;
     private int configurationVersion;
+    private int appliedConfigurationVersion = -1;
     private string? banner;
     public string? Banner { get => banner; set { if (Set(ref banner, value)) Notify(nameof(BannerVisibility)); } }
     public Visibility BannerVisibility => string.IsNullOrWhiteSpace(Banner) ? Visibility.Collapsed : Visibility.Visible;
@@ -94,6 +106,8 @@ public sealed class MainViewModel : Observable, IDisposable
     public ICommand SelectServer { get; }
     public ICommand FavoriteServer { get; }
     public ICommand PingAll { get; }
+    public ICommand PingServer { get; }
+    public ICommand ChangeRoutingMode { get; }
     public ICommand CancelPing { get; }
     public ICommand RefreshSubscriptions { get; }
     public ICommand AddSubscription { get; }
@@ -122,8 +136,10 @@ public sealed class MainViewModel : Observable, IDisposable
     public ICommand DismissBanner { get; }
     public event Action? StatusChanged;
 
-    public MainViewModel(StateStore? storage = null)
+    public MainViewModel(StateStore? storage = null) : this(storage, new ServiceClient(), null) { }
+    internal MainViewModel(StateStore? storage, IServiceClient client, Func<ConnectSpec, CancellationToken, Task>? probe)
     {
+        service = client; testProbe = probe;
         store = storage ?? new(); Data = store.Load();
         Settings.TunnelMode = TunnelMode.Tun;
         if (storage is null) Settings.StartWithWindows = AutoStart.IsEnabled;
@@ -133,10 +149,12 @@ public sealed class MainViewModel : Observable, IDisposable
         Presets = PresetCatalog.Load();
         AttachProfile(); RefreshServers(); RefreshRules();
         Navigate = new Command(p => Go((string)p!)); CollapseSidebar = new Command(_ => SidebarCollapsed = !SidebarCollapsed);
-        ToggleConnect = Async(_ => ToggleAsync(), () => !ConnectionBusy);
+        ToggleConnect = new Command(_ => _ = ToggleSafelyAsync(), () => State != ConnectionState.Disconnecting);
         SelectServer = new Command(p => { var node = (Server)p!; if (!node.Supported) Banner = node.UnsupportedReason; else SelectedServer = node; });
         FavoriteServer = new Command(p => { var s = (Server)p!; s.Favorite = !s.Favorite; Save(); });
         PingAll = Async(_ => ScanAsync(true), () => !Scanning);
+        PingServer = Async(async p => { if ((p as Server ?? SelectedServer) is { } node) await MeasureServerAsync(node, true, lifetime.Token); }, () => !Scanning);
+        ChangeRoutingMode = new Command(_ => { var mode = Dialogs.RoutingMode(IsWholePc); if (mode is { } all) IsWholePc = all; });
         CancelPing = new Command(_ => { scanGeneration++; scan?.Cancel(); });
         RefreshSubscriptions = Async(async _ => { foreach (var sub in Data.Subscriptions.ToArray()) await RefreshSubAsync(sub); });
         AddSubscription = Async(async _ => { var sub = Dialogs.Subscription(null); if (sub is null) return; var servers = await SubscriptionLoader.LoadAsync(sub.Source, lifetime.Token); Data.Subscriptions.Add(sub); ReplaceServers(sub, servers); Save(); Go("Servers"); });
@@ -207,72 +225,131 @@ public sealed class MainViewModel : Observable, IDisposable
     private async Task RunScanAsync(bool force)
     {
         if (Scanning) return; Scanning = true; scan?.Dispose(); scan = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token); var token = scan.Token; var mode = LatencyIndex == 0 ? LatencyMode.Fast : LatencyMode.Exact;
-        try { await Task.WhenAll(Data.Servers.ToArray().Select(async s => { var result = await latency.MeasureAsync(s, mode, force, token); token.ThrowIfCancellationRequested(); if (mode != (LatencyIndex == 0 ? LatencyMode.Fast : LatencyMode.Exact)) return; if (mode == LatencyMode.Exact && !s.Supported) s.Latency = "—"; else s.Latency = result.Milliseconds is { } ms ? (mode == LatencyMode.Fast ? "TCP · " : "") + ms + T(" мс", " ms") : T("Недоступен", "Unavailable"); s.LatencyMs = result.Milliseconds; })); RefreshServers(); }
+        var nodes = Data.Servers.ToArray();
+        foreach (var node in nodes) { node.Latency = T("В очереди", "Queued"); node.LatencyMs = null; }
+        try { await Task.WhenAll(nodes.Select(s => MeasureServerAsync(s, force, token))); RefreshServers(); }
         catch (OperationCanceledException) { }
-        finally { Scanning = false; }
+        finally { foreach (var node in nodes.Where(n => n.Latency is "В очереди" or "Queued" or "Проверка…" or "Checking…")) node.Latency = "—"; Scanning = false; }
+    }
+    private async Task MeasureServerAsync(Server node, bool force, CancellationToken token)
+    {
+        var mode = LatencyIndex == 0 ? LatencyMode.Fast : LatencyMode.Exact;
+        var result = await latency.MeasureAsync(node, mode, force, token, () => { node.LatencyMs = null; node.Latency = T("Проверка…", "Checking…"); });
+        token.ThrowIfCancellationRequested();
+        if (mode != (LatencyIndex == 0 ? LatencyMode.Fast : LatencyMode.Exact)) return;
+        node.Latency = mode == LatencyMode.Exact && !node.Supported ? "—" : result.Milliseconds is { } ms
+            ? (mode == LatencyMode.Fast ? "TCP · " : "") + ms + T(" мс", " ms")
+            : result.TimedOut ? T("Таймаут", "Timeout") : T("Недоступен", "Unavailable");
+        node.LatencyMs = result.Milliseconds ?? (node.Supported ? -1 : null);
     }
     private async Task RefreshSubAsync(Subscription sub) { var servers = await SubscriptionLoader.LoadAsync(sub.Source, lifetime.Token); ReplaceServers(sub, servers); Save(); }
-    private void ReplaceServers(Subscription sub, List<Server> incoming)
+    internal void ReplaceServers(Subscription sub, List<Server> incoming)
     {
-        var oldId = SelectedServer?.Id; var fav = Data.Servers.Where(s => s.Favorite).Select(s => s.Id).ToHashSet();
+        var oldId = SelectedServer?.Id;
+        var merged = ServerRefresh.Merge(sub.Id, Data.Servers, incoming, oldId);
         foreach (var s in Data.Servers.Where(s => s.SubscriptionId == sub.Id).ToArray()) Data.Servers.Remove(s);
-        foreach (var s in incoming) { s.SubscriptionId = sub.Id; s.Favorite = fav.Contains(s.Id); Data.Servers.Add(s); }
-        sub.Updated = DateTimeOffset.Now; sub.ServerCount = incoming.Count; SelectedServer = Data.Servers.FirstOrDefault(s => s.Id == oldId) ?? Data.Servers.FirstOrDefault(s => s.Supported);
+        foreach (var s in merged) Data.Servers.Add(s);
+        sub.Updated = DateTimeOffset.Now; sub.ServerCount = incoming.Count;
+        SelectedServer = oldId is null ? Data.Servers.FirstOrDefault(s => s.Supported) : Data.Servers.FirstOrDefault(s => s.Id == oldId) ?? SelectedServer;
         RefreshServers(); Notify(nameof(NoSubscriptions)); Data.Subscriptions = new(Data.Subscriptions); Notify(nameof(Data));
     }
     public void RefreshServers()
     {
-        IEnumerable<Server> servers = Data.Servers.Where(s => s.Name.Contains(ServerSearch, StringComparison.OrdinalIgnoreCase));
-        servers = SortIndex == 0 ? servers.OrderBy(s => s.LatencyMs ?? long.MaxValue).ThenBy(s => s.Name) : servers.OrderBy(s => s.Name);
+        foreach (var server in Data.Servers) server.SubscriptionLabel = Data.Subscriptions.FirstOrDefault(s => s.Id == server.SubscriptionId)?.Name ?? "";
+        IEnumerable<Server> servers = Data.Servers.Where(s => s.Name.Contains(ServerSearch, StringComparison.OrdinalIgnoreCase) || s.SubscriptionLabel.Contains(ServerSearch, StringComparison.OrdinalIgnoreCase));
+        servers = SortIndex == 0 ? servers.OrderBy(s => s.LatencyMs is >= 0 ? s.LatencyMs : long.MaxValue).ThenBy(s => s.Name) : servers.OrderBy(s => s.Name);
         var array = servers.ToArray(); ServerRows.Clear(); for (var i = 0; i < array.Length; i += ListMode ? 1 : 2) ServerRows.Add(new(array[i], !ListMode && i + 1 < array.Length ? array[i + 1] : null)); Notify(nameof(ServerCount)); Notify(nameof(NoServers));
     }
     private void RefreshRules() { VisibleRules.Clear(); foreach (var r in ActiveProfile.Rules.Where(r => r.Name.Contains(RuleSearch, StringComparison.OrdinalIgnoreCase) || r.Description.Contains(RuleSearch, StringComparison.OrdinalIgnoreCase))) VisibleRules.Add(r); Notify(nameof(RuleCount)); Notify(nameof(NoRules)); }
     private void AttachProfile() { foreach (var r in ActiveProfile.Rules) { r.PropertyChanged -= OnRuleChanged; r.PropertyChanged += OnRuleChanged; } }
     private void DetachProfile(Profile p) { foreach (var r in p.Rules) r.PropertyChanged -= OnRuleChanged; }
     private void OnRuleChanged(object? sender, PropertyChangedEventArgs e) { if (e.PropertyName == nameof(RoutingRule.UseVpn)) { Save(); QueueApply(); } }
-    private void RulesChanged() { AttachProfile(); RefreshRules(); Save(); QueueApply(); }
+    internal void RulesChanged() { AttachProfile(); RefreshRules(); Save(); QueueApply(); }
     public void Reorder(RoutingRule source, RoutingRule target) { var a = ActiveProfile.Rules.IndexOf(source); var b = ActiveProfile.Rules.IndexOf(target); if (a < 0 || b < 0 || a == b) return; ActiveProfile.Rules.Move(a, b); RulesChanged(); }
     private void QueueApply()
     {
         configurationVersion++;
-        if (!Connected) return; applyDelay?.Cancel(); applyDelay?.Dispose(); applyDelay = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token); _ = ApplyLaterAsync(applyDelay.Token);
+        ScheduleApply();
+    }
+    private void ScheduleApply()
+    {
+        if (!desiredConnected) return;
+        applyDelay?.Cancel(); applyDelay?.Dispose(); applyDelay = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+        _ = ApplyLaterAsync(applyDelay.Token);
     }
     private async Task ApplyLaterAsync(CancellationToken token)
     {
-        try { await Task.Delay(650, token); if (!Connected) return; await DisconnectAsync(); await ConnectAsync(); }
-        catch (OperationCanceledException) { } catch (Exception e) { Report(e); }
-    }
-    private async Task ToggleAsync() { if (Connected) await DisconnectAsync(); else await ConnectAsync(); }
-    public async Task ConnectAsync()
-    {
-        if (!await connectionGate.WaitAsync(0)) return;
         try
         {
-            if (Connected) return;
-            if (SelectedServer is null) { Go("Subscriptions"); Banner = T("Добавьте подписку и выберите сервер.", "Add a subscription and choose a server."); return; }
+            await Task.Delay(650, token); await connectionGate.WaitAsync(token);
+            try
+            {
+                token.ThrowIfCancellationRequested();
+                if (!desiredConnected || appliedConfigurationVersion == configurationVersion) return;
+                await StopConnectionCoreAsync();
+                // Keep the gate across stop/start; later edits are captured by the new snapshot.
+                if (desiredConnected) await ConnectCoreAsync();
+            }
+            finally { connectionGate.Release(); }
+        }
+        catch (OperationCanceledException) { } catch (Exception e) { Report(e); }
+    }
+    private async Task ToggleSafelyAsync() { try { if (desiredConnected || Connected) await DisconnectAsync(); else await ConnectAsync(); } catch (Exception e) { Report(e); } }
+    public async Task ConnectAsync()
+    {
+        desiredConnected = true;
+        await connectionGate.WaitAsync(lifetime.Token);
+        try { if (desiredConnected && !Connected) await ConnectCoreAsync(); }
+        finally { connectionGate.Release(); }
+    }
+    private async Task ConnectCoreAsync()
+    {
+        monitorId++; networkDelay?.Cancel();
+        connectionAttempt?.Dispose(); connectionAttempt = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+        var token = connectionAttempt.Token;
+        try
+        {
+            if (SelectedServer is null) { desiredConnected = false; Go("Subscriptions"); Banner = T("Добавьте подписку и выберите сервер.", "Add a subscription and choose a server."); return; }
             if (!SelectedServer.Supported) throw new UserError(SelectedServer.UnsupportedReason!);
-            State = ConnectionState.Connecting; Banner = null; VpnIp = "—";
+            State = ConnectionState.Connecting; Banner = null; VpnIp = "—"; SetTraffic(null);
             spec = new(SelectedServer, ActiveProfile, Settings, LatencyService.FreePort(), Convert.ToHexString(RandomNumberGenerator.GetBytes(24)), Data.Servers.Where(s => ActiveProfile.Rules.Any(r => r.UseVpn && r.ServerId == s.Id)).ToList());
             spec = System.Text.Json.JsonSerializer.Deserialize<ConnectSpec>(System.Text.Json.JsonSerializer.Serialize(spec, Json.Options), Json.Options)!;
             var version = configurationVersion;
             store.SaveRuntime(ConfigGenerator.Generate(spec));
             await EnsureServiceAsync();
-            var reply = await service.SendAsync(new("StartCore", spec), true, lifetime.Token);
+            token.ThrowIfCancellationRequested();
+            var reply = await service.SendAsync(new("StartCore", spec), true, token);
             if (!reply.Ok) throw new UserError(reply.Message ?? reply.Status.Error ?? "Не удалось подключиться.");
-            using (var http = LatencyService.ProbeClient(spec)) { using var probe = await http.GetAsync("https://www.gstatic.com/generate_204", lifetime.Token); probe.EnsureSuccessStatusCode(); }
-            if (Settings.TunnelMode == TunnelMode.Proxy) SystemProxy.Enable();
+            await ProbeConnectionAsync(spec, token);
+            token.ThrowIfCancellationRequested();
+            if (spec.Settings.TunnelMode == TunnelMode.Proxy && testProbe is null) SystemProxy.Enable();
+            appliedConfigurationVersion = version;
             ApplyStatus(reply.Status); _ = MonitorAsync();
-            try { VpnIp = await LatencyService.VpnIpAsync(spec, lifetime.Token); } catch { VpnIp = "—"; }
-            if (version != configurationVersion) QueueApply();
+            // IP lookup is cosmetic; don't hold the connection gate for its HTTP timeout.
+            if (testProbe is null) _ = UpdateIpAsync(spec, monitorId, token);
+            if (version != configurationVersion) ScheduleApply();
         }
         catch
         {
-            try { await service.SendAsync(new("StopCore")); } catch { } SystemProxy.Restore(); State = ConnectionState.Error; throw;
+            try { await service.SendAsync(new("StopCore"), true); } catch { }
+            if (testProbe is null) SystemProxy.Restore();
+            SetTraffic(null); State = token.IsCancellationRequested ? ConnectionState.Disconnected : ConnectionState.Error;
+            if (!token.IsCancellationRequested) { desiredConnected = false; throw; }
         }
-        finally { connectionGate.Release(); }
+    }
+    private async Task ProbeConnectionAsync(ConnectSpec current, CancellationToken token)
+    {
+        if (testProbe is not null) { await testProbe(current, token); return; }
+        using var http = LatencyService.ProbeClient(current);
+        using var response = await http.GetAsync("https://www.gstatic.com/generate_204", token); response.EnsureSuccessStatusCode();
+    }
+    private async Task UpdateIpAsync(ConnectSpec current, int generation, CancellationToken token)
+    {
+        try { var value = await LatencyService.VpnIpAsync(current, token); if (generation == monitorId && Connected) VpnIp = value; } catch { }
     }
     private async Task EnsureServiceAsync()
     {
+        if (testProbe is not null) return;
         await ServiceInstaller.EnsureInstalledAsync(() => Banner = T(
             "Подтвердите запрос Windows: требуется установка или обновление службы TUN.",
             "Approve the Windows prompt: the TUN helper needs installation or an update."), lifetime.Token);
@@ -280,41 +357,85 @@ public sealed class MainViewModel : Observable, IDisposable
     }
     public async Task DisconnectAsync()
     {
+        desiredConnected = false; applyDelay?.Cancel(); networkDelay?.Cancel(); connectionAttempt?.Cancel(); monitorId++;
         await connectionGate.WaitAsync();
-        try { monitorId++; State = ConnectionState.Disconnecting; var reply = await service.SendAsync(new("StopCore"), ct: lifetime.Token); if (!reply.Ok) throw new UserError(reply.Message ?? "Не удалось остановить VPN."); ApplyStatus(reply.Status); VpnIp = "—"; Session = "—"; }
+        try { await StopConnectionCoreAsync(); }
         catch { State = ConnectionState.Error; throw; }
-        finally { SystemProxy.Restore(); connectionGate.Release(); }
+        finally { connectionGate.Release(); }
+    }
+    private async Task StopConnectionCoreAsync()
+    {
+        monitorId++; networkDelay?.Cancel(); connectionAttempt?.Cancel(); State = ConnectionState.Disconnecting;
+        try
+        {
+            var reply = await service.SendAsync(new("StopCore"), true, lifetime.Token);
+            if (!reply.Ok) throw new UserError(reply.Message ?? "Не удалось остановить VPN.");
+            ApplyStatus(reply.Status);
+        }
+        finally { if (testProbe is null) SystemProxy.Restore(); SetTraffic(null); VpnIp = "—"; Session = "—"; }
     }
     private async Task MonitorAsync()
     {
         var id = ++monitorId;
-        try { while (id == monitorId && Connected && !lifetime.IsCancellationRequested) { await Task.Delay(1000, lifetime.Token); if (id != monitorId || !Connected) break; var response = await service.SendAsync(new("GetStatus"), ct: lifetime.Token); if (id != monitorId) break; ApplyStatus(response.Status); if (started is { } time) Session = (DateTimeOffset.UtcNow - time).ToString(@"hh\:mm\:ss"); if (!Connected) SystemProxy.Restore(); } }
-        catch (OperationCanceledException) { } catch (Exception e) { if (id == monitorId) { SystemProxy.Restore(); State = ConnectionState.Error; Report(e); } }
+        try { while (id == monitorId && Connected && !lifetime.IsCancellationRequested) { await Task.Delay(1000, lifetime.Token); if (id != monitorId || !Connected) break; var response = await service.SendAsync(new("GetStatus"), ct: lifetime.Token); if (id != monitorId) break; ApplyStatus(response.Status); if (started is { } time) Session = (DateTimeOffset.UtcNow - time).ToString(@"hh\:mm\:ss"); if (!Connected && testProbe is null) SystemProxy.Restore(); } }
+        catch (OperationCanceledException) { } catch (Exception e) { if (id == monitorId) { if (testProbe is null) SystemProxy.Restore(); State = ConnectionState.Error; SetTraffic(null); Report(e); } }
     }
-    private void ApplyStatus(ServiceStatus s) { State = s.State; started = s.ConnectedAt; if (s.Error is not null) Banner = s.Error; }
-    private void NotifyStatus() { foreach (var n in new[] { nameof(Connected), nameof(ConnectionBusy), nameof(ConnectLabel), nameof(StatusLabel), nameof(StatusDetail), nameof(FooterLabel), nameof(FooterMode) }) Notify(n); StatusChanged?.Invoke(); }
+    private void ApplyStatus(ServiceStatus s) { State = s.State; started = s.ConnectedAt; SetTraffic(s.State == ConnectionState.Connected ? s.Traffic : null); if (s.Error is not null) Banner = s.Error; }
+    private void SetTraffic(TrafficSnapshot? value) { traffic = value; foreach (var name in new[] { nameof(DownloadRate), nameof(UploadRate), nameof(DownloadTotal), nameof(UploadTotal) }) Notify(name); }
+    private void NotifyStatus() { foreach (var n in new[] { nameof(Connected), nameof(ConnectionBusy), nameof(ConnectLabel), nameof(StatusLabel), nameof(StatusDetail), nameof(FooterLabel), nameof(FooterMode), nameof(DownloadRate), nameof(UploadRate) }) Notify(n); StatusChanged?.Invoke(); }
     public void Report(Exception e) { log.Write("Operation failed: " + e.GetType().Name); Banner = e is UserError ? e.Message : e is OperationCanceledException ? T("Время ожидания истекло.", "Operation timed out.") : T("Не удалось выполнить действие. Проверьте подключение и параметры.", "Action failed. Check your connection and settings."); }
     private void Save() { try { store.Save(Data); } catch (Exception e) { Report(e); } }
     private static void OpenFolder(string dir) { Directory.CreateDirectory(dir); Process.Start(new ProcessStartInfo("explorer.exe") { ArgumentList = { dir }, UseShellExecute = true }); }
-    private void OnPower(object sender, PowerModeChangedEventArgs e) { if (e.Mode == PowerModes.Resume) ScheduleNetworkCheck(); }
-    private void OnNetwork(object? sender, NetworkAvailabilityEventArgs e) { if (e.IsAvailable) OnPower(this, new(PowerModes.Resume)); }
+    private void OnPower(object sender, PowerModeChangedEventArgs e) { if (e.Mode == PowerModes.Resume) ScheduleNetworkCheck(true); }
+    private void OnNetwork(object? sender, NetworkAvailabilityEventArgs e) { if (e.IsAvailable) ScheduleNetworkCheck(); }
     private void OnAddress(object? sender, EventArgs e) => ScheduleNetworkCheck();
-    private void ScheduleNetworkCheck() => Application.Current.Dispatcher.InvokeAsync(async () =>
+    private void ScheduleNetworkCheck(bool force = false) => Application.Current.Dispatcher.InvokeAsync(async () =>
     {
-        if (!Connected || recovering) return;
+        var currentUplink = UplinkSignature(); var changed = currentUplink != uplinkSignature; uplinkSignature = currentUplink;
+        if ((!force && !changed) || !desiredConnected || !Connected || recovering) return;
         networkDelay?.Cancel(); networkDelay?.Dispose(); networkDelay = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token); var token = networkDelay.Token;
-        try { await Task.Delay(1000, token); await RecoverAsync(); } catch (OperationCanceledException) { }
+        var generation = monitorId;
+        try { await Task.Delay(2000, token); await RecoverAsync(generation, token); } catch (OperationCanceledException) { }
     });
-    private async Task RecoverAsync()
+    internal Task CheckRecoveryAsync() => RecoverAsync(monitorId, lifetime.Token);
+    private async Task RecoverAsync(int generation, CancellationToken token)
     {
-        if (recovering || !Connected) return; recovering = true;
+        if (recovering || !Connected || !desiredConnected || generation != monitorId) return; recovering = true;
         try
         {
-            try { var reply = await service.SendAsync(new("GetStatus")); if (reply.Status.State != ConnectionState.Connected) throw new UserError("VPN needs reconnect."); if (spec is not null) { using var client = LatencyService.ProbeClient(spec); using var r = await client.GetAsync("https://www.gstatic.com/generate_204", lifetime.Token); r.EnsureSuccessStatusCode(); } }
-            catch { try { await DisconnectAsync(); } catch { State = ConnectionState.Error; } await ConnectAsync(); }
+            for (var attempt = 0; attempt < 2; attempt++)
+            {
+                try
+                {
+                    var reply = await service.SendAsync(new("GetStatus"), ct: token);
+                    if (reply.Status.State != ConnectionState.Connected) throw new UserError("VPN needs reconnect.");
+                    if (spec is not null) await ProbeConnectionAsync(spec, token);
+                    return;
+                }
+                catch (Exception e) when (e is not OperationCanceledException || !token.IsCancellationRequested)
+                {
+                    if (generation != monitorId || !desiredConnected || !Connected) return;
+                    if (attempt == 0) await Task.Delay(1500, token);
+                }
+            }
+            await connectionGate.WaitAsync(token);
+            try { if (generation == monitorId && desiredConnected && Connected) { await StopConnectionCoreAsync(); if (desiredConnected) await ConnectCoreAsync(); } }
+            finally { connectionGate.Release(); }
         }
+        catch (OperationCanceledException) { }
         catch (Exception e) { Report(e); }
         finally { recovering = false; }
     }
-    public void Dispose() { Save(); lifetime.Cancel(); scan?.Cancel(); applyDelay?.Cancel(); networkDelay?.Cancel(); SystemEvents.PowerModeChanged -= OnPower; NetworkChange.NetworkAvailabilityChanged -= OnNetwork; NetworkChange.NetworkAddressChanged -= OnAddress; }
+    private static string UplinkSignature()
+    {
+        try
+        {
+            return string.Join("|", NetworkInterface.GetAllNetworkInterfaces().Where(n => n.OperationalStatus == OperationalStatus.Up && n.NetworkInterfaceType is NetworkInterfaceType.Ethernet or NetworkInterfaceType.Wireless80211)
+                .Where(n => !new[] { "tun", "virtual", "hyper-v", "loopback" }.Any(word => n.Description.Contains(word, StringComparison.OrdinalIgnoreCase)) && n.Name != "Bebekon")
+                .Select(n => (n.Id, Properties: n.GetIPProperties())).Where(n => n.Properties.GatewayAddresses.Count > 0)
+                .Select(n => n.Id + ":" + string.Join(",", n.Properties.UnicastAddresses.Select(a => a.Address.ToString()).Order())).Order());
+        }
+        catch (NetworkInformationException) { return ""; }
+    }
+    public void Dispose() { Save(); desiredConnected = false; lifetime.Cancel(); connectionAttempt?.Cancel(); scan?.Cancel(); applyDelay?.Cancel(); networkDelay?.Cancel(); SystemEvents.PowerModeChanged -= OnPower; NetworkChange.NetworkAvailabilityChanged -= OnNetwork; NetworkChange.NetworkAddressChanged -= OnAddress; }
 }

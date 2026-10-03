@@ -31,6 +31,7 @@ internal sealed class VpnService : ServiceBase
     private readonly SemaphoreSlim gate = new(1);
     private readonly CancellationTokenSource lifetime = new();
     private CoreProcess? core;
+    private CoreTraffic? traffic;
     private ConnectSpec? last;
     private volatile ConnectionState state;
     private string? error;
@@ -68,7 +69,7 @@ internal sealed class VpnService : ServiceBase
     {
         // Exited notification can arrive after a status request. Check before snapshotting.
         if (state == ConnectionState.Connected && core?.Running != true) { state = ConnectionState.Error; error = "Ядро VPN завершилось. Подключитесь заново."; connectedAt = null; File.Delete(Path.Combine(root, "sing-box.json")); }
-        return new(state, error, connectedAt, core?.Pid);
+        return new(state, error, connectedAt, core?.Pid, state == ConnectionState.Connected ? traffic?.Snapshot : null);
     }
     private async Task ServeAsync(CancellationToken ct)
     {
@@ -124,15 +125,16 @@ internal sealed class VpnService : ServiceBase
     {
         if (core?.Running == true) throw new UserError("VPN уже подключён.");
         state = ConnectionState.Connecting; error = null; core?.Dispose();
-        var config = ConfigGenerator.Generate(spec); var path = Path.Combine(root, "sing-box.json");
+        traffic?.Dispose(); traffic = new CoreTraffic();
+        var config = traffic.AddToConfig(ConfigGenerator.Generate(spec)); var path = Path.Combine(root, "sing-box.json");
         await File.WriteAllTextAsync(path, config, ct); core = NewCore();
         var launchedCore = core;
         core.Exited += () => { if (ReferenceEquals(core, launchedCore) && state is ConnectionState.Connected or ConnectionState.Connecting) { state = ConnectionState.Error; error = "Ядро VPN завершилось. Подключитесь заново."; connectedAt = null; log.Write("Core exited unexpectedly."); File.Delete(path); } };
-        await core.StartAsync(path, ct); last = spec; connectedAt = DateTimeOffset.UtcNow; state = ConnectionState.Connected;
+        await core.StartAsync(path, ct); traffic.Start(); last = spec; connectedAt = DateTimeOffset.UtcNow; state = ConnectionState.Connected;
     }
     private void StopCore()
     {
-        state = ConnectionState.Disconnecting; core?.Dispose(); core = null; state = ConnectionState.Disconnected; connectedAt = null; error = null;
+        state = ConnectionState.Disconnecting; traffic?.Dispose(); traffic = null; core?.Dispose(); core = null; state = ConnectionState.Disconnected; connectedAt = null; error = null;
         File.Delete(Path.Combine(root, "sing-box.json")); log.Write("Core stopped; runtime config removed.");
     }
     private async Task IdleStopAsync(CancellationToken ct)

@@ -35,6 +35,12 @@ For a dev connection, install the published service first. `Bebekon.Service.exe 
 
 Version 0.1.6 fixes a false service-identity rejection when the ordinary UI cannot inspect a LocalSystem process. No elevation is needed for the new SCM status check. `dotnet run --file tools/verify-service.cs -c Release` explicitly tests five authenticated status requests against an installed helper assigned to the current ordinary user. Add `-- --probe` to validate the saved profile and test HTTPS/IP through a temporary proxy core; it stops the core afterward and does not change Windows routes, proxy or saved state.
 
+## Version 0.1.7
+
+Home now shows live download/upload rates and totals, and the server and mode cards are clickable. Scroll down for all subscription servers, search by server/subscription, sort, favorites, individual/batch ping and refresh. The list is virtualized, and the wheel returns to the dashboard at its edges. The white-and-blue running snowman is used in the sidebar, EXE, tray and installer; its source and generation prompt are in resources/icons.
+
+Refreshing subscriptions preserves the selected logical server, favorites and valid ping results across renaming/reordered parameters. A removed selection stays in the list instead of switching automatically. Real credential/endpoint changes apply once to the same logical selection. Recovery observes physical uplink changes and resume, ignores self-generated tunnel events, and requires two failed checks before restarting.
+
 ## Using it
 
 1. Add Ultima's subscription URL (HTTPS recommended), direct VLESS link, or a URL returning plain/Base64 VLESS links or JSON Xray configurations. The provider URL does not need to be converted to a different format.
@@ -50,7 +56,7 @@ Measured pings use green (≤100 ms), orange (101–200 ms) and red (>200 ms); u
 
 An off rule means **Direct**, not disabled. Higher rules win. Drag a rule row to reorder. Exact process paths are used when known; an executable name is the fallback when only a name is entered. Each profile owns its ordered list and default route. Import/export is this application's JSON, without subscription secrets.
 
-Changes to server, profile, rule, routing mode, or saved DNS settings regenerate the core configuration and reconnect. Applying changes closes existing connections; it does not migrate sockets. Proxy mode configures Windows' per-user system proxy on 127.0.0.1:17890 and restores the prior settings on disconnect/next startup. Per-process routing requires TUN.
+Changes to server, profile, rule, routing mode, or saved DNS settings regenerate the core configuration and reconnect. Rapid edits are coalesced into a serialized stop/start operation; edits during startup are applied afterward. Manual disconnect cancels pending reconfiguration, and stale recovery/IP/status results cannot overwrite a newer session. Applying changes closes existing connections; it does not migrate sockets. Proxy mode configures Windows' per-user system proxy on 127.0.0.1:17890 and restores the prior settings on disconnect/next startup. Per-process routing requires TUN.
 
 Appearance settings apply immediately: four coordinated accent palettes, smooth interaction/page/sidebar animations, connection glow and an OLED black background. Motion respects the Windows animation preference and can be disabled. State-bound looping animations stop when their view is hidden, minimized or unloaded. Country flags are bundled locally from [Flagpedia / FlagCDN](https://flagpedia.net/download/api), recognizing ISO codes, emoji and Russian/English provider labels; a flag reflects the provider label, not verified geolocation. Subscriptions can be pasted directly into the inline field or added through the named-subscription dialog.
 ## Core and DNS
@@ -62,14 +68,14 @@ Pinned official stable **sing-box 1.14.2**, Windows amd64. Archive SHA256 is in 
 - Direct and VPN DNS are separate typed HTTPS servers. Domain DNS rules follow the user order; selective final DNS is Direct, entire-PC final DNS is VPN.
 - Native Windows DNS protection uses strict_route; Docker/VM compatibility relaxes strict_route.
 - GeoSite and GeoIP use trusted embedded inline rule sets, without legacy geoip/geosite fields or deprecated inbound sniff configuration. No MITM, certificate bypass, telemetry or geolocation service.
-- Exact ping (the default) is a median of three small HTTPS requests through an authenticated local SOCKS5 probe into an isolated real VLESS outbound. TCP (port) measures TCP connection time; another active VPN may intercept that handshake and understate remote latency. The caches are distinct, 3-minute TTL, concurrency 2 for exact probes and 6 for TCP. Checks can be cancelled. Nodes never show invented latency.
-- VPN IP comes from api.ipify.org through a forced VPN probe inbound, irrespective of user rules. This shares only the egress IP with the IP-check endpoint. No subscription/UUID is sent to it. Throughput stays “—”: no fabricated speed or location.
+- Exact ping (the default) is a median of three small HTTPS requests through an authenticated local SOCKS5 probe into an isolated real VLESS outbound. TCP (port) measures TCP connection time; another active VPN may intercept that handshake and understate remote latency. The caches are distinct, 3-minute TTL, concurrency 2 for exact probes and 6 for TCP. Every active measurement has one five-second deadline, including startup and all three requests; queued probes are labelled separately. Failures/timeouts are red. Click a ping on Home or a server card to recalculate it. Checks can be cancelled. Nodes never show invented latency.
+- VPN IP comes from api.ipify.org through a forced VPN probe inbound, irrespective of user rules. This shares only the egress IP with the IP-check endpoint. No subscription/UUID is sent to it. IP lookup runs outside the connection gate. Live speed and session totals come from actual core byte counters, including VPN and Direct routes. Samples refresh once per second; missing/stale counters show “—”, and disconnect resets them.
 
 ## Storage and security
 
 %LOCALAPPDATA%/BebekonVPN/state.dpapi contains the whole user state protected with DPAPI CurrentUser. Runtime mirror: runtime/sing-box.dpapi. Logs: logs/app.log, logs/core.log, logs/service.log. Rotation: 1MB, 3 archives. Raw core messages are not persisted, because they can contain private destinations; diagnostics intentionally disclose less detail.
 
-Service runtime and service/core logs are in %PROGRAMDATA%/BebekonVPN, protected to SYSTEM/Administrators. The service writes its own fixed sing-box.json and removes it on disconnect/core exit. It never accepts raw JSON, executable paths, arbitrary config paths or command-line arguments from the UI. Local pipe ACL allows only the installation owner and SYSTEM, denies network logons, and additionally checks the impersonated SID. The UI verifies the pipe server's PID against the registered Running own-process service using SCM query-status access. Core children belong to kill-on-close jobs.
+Service runtime and service/core logs are in %PROGRAMDATA%/BebekonVPN, protected to SYSTEM/Administrators. The service writes its own fixed sing-box.json and removes it on disconnect/core exit. It never accepts raw JSON, executable paths, arbitrary config paths or command-line arguments from the UI. Local pipe ACL allows only the installation owner and SYSTEM, denies network logons, and additionally checks the impersonated SID. The UI verifies the pipe server's PID against the registered Running own-process service using SCM query-status access. Core children belong to kill-on-close jobs. Traffic sampling uses a service-private loopback Clash API port and a new 256-bit bearer secret per session. The secret stays in service memory/protected runtime config, never IPC, user state or logs. Only aggregate counters cross IPC; no web dashboard is configured.
 
 ## Validation and current limits
 
@@ -83,7 +89,7 @@ Measured on Windows 11 x64: version 0.1.5 Release self-contained UI in an ordina
 
 The desired ≤90MB UI target is **not met**. No process is hidden or trimmed. CPU is normalized to the whole machine. Screenshot rendering allocates extra surfaces and is excluded from idle measurements. Real provider/TUN combined memory is unmeasured.
 
-129 automated tests cover plain/Base64/JSON Xray subscription parsing, models, DPAPI, priority, generated config checks, actual loopback VLESS traffic, HTTP Host sniffing, helper/core crash detection, job cleanup, elevation command boundaries and service identity rejection cases. A supplied Ultima subscription was also imported live: nine supported nodes, nine configurations accepted by the official core, and a successful forced-VPN HTTPS probe through gRPC/Reality. Version 0.1.6 also verified authenticated commands and a live saved-profile HTTPS/IP probe through the installed LocalSystem helper from an ordinary UI identity. Full TUN/browser acceptance remains in docs/VALIDATION.md.
+135 automated tests cover plain/Base64/JSON Xray subscription parsing, models, DPAPI, priority, generated config checks, actual loopback VLESS traffic, HTTP Host sniffing, helper/core crash detection, job cleanup, elevation command boundaries and service identity rejection cases. A supplied Ultima subscription was also imported live: nine supported nodes, nine configurations accepted by the official core, and a successful forced-VPN HTTPS probe through gRPC/Reality. Version 0.1.6 also verified authenticated commands and a live saved-profile HTTPS/IP probe through the installed LocalSystem helper from an ordinary UI identity. Full TUN/browser acceptance remains in docs/VALIDATION.md.
 
 Known limits:
 

@@ -4,6 +4,9 @@ public static class I18n
     public static bool English { get; private set; }
     public static string T(string ru, string en) => English ? en : ru;
     private static readonly (string Key, string Ru, string En)[] Labels = [
+        ("AllServersTitle","Все серверы","All servers"),("AllServersDetail","Все подписки · выбор сервера и проверка пинга","All subscriptions · choose a server and check latency"),
+        ("PingAgain","Проверить пинг заново · до 5 секунд","Refresh latency · up to 5 seconds"),("ChangeMode","Изменить режим","Change mode"),
+        ("DownloadTraffic","Получено","Downloaded"),("UploadTraffic","Отправлено","Uploaded"),("TrafficHelp","Скорость и объём трафика, обработанного ядром VPN, включая прямые маршруты.","Traffic handled by the VPN core, including direct routes."),
         ("ApplicationShortcutDetail","Выбор программ","Choose applications"),("AdminShortcutDetail","Админ и сервисы","Admin and services"),
         ("AccentTitle","Акцентный цвет","Accent color"),("AccentDetail","Единая палитра кнопок, подсветки и переключателей.","A consistent palette for buttons, highlights and switches."),
         ("SubscriptionLink","Вставьте ссылку на подписку","Paste a subscription link"),("ImportLink","Добавить и применить","Add and apply"),("ImportingLink","Загружаем серверы…","Loading servers…"),

@@ -6,33 +6,39 @@ using System.Security.Cryptography;
 
 namespace Bebekon.Core;
 
-public sealed record LatencyResult(long? Milliseconds, LatencyMode Mode, DateTimeOffset MeasuredAt);
+public sealed record LatencyResult(long? Milliseconds, LatencyMode Mode, DateTimeOffset MeasuredAt, bool TimedOut = false);
 public sealed class LatencyService(string executable)
 {
     private readonly ConcurrentDictionary<string, LatencyResult> cache = new();
     private readonly SemaphoreSlim fastLimit = new(6);
     private readonly SemaphoreSlim exactLimit = new(2);
-    public async Task<LatencyResult> MeasureAsync(Server server, LatencyMode mode, bool force, CancellationToken ct)
+    public static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(5);
+    public async Task<LatencyResult> MeasureAsync(Server server, LatencyMode mode, bool force, CancellationToken ct, Action? started = null)
     {
-        var key = server.Id + mode;
+        var key = server.Id + mode + ServerRefresh.ConnectionKey(server);
         if (!force && cache.TryGetValue(key, out var prior) && DateTimeOffset.UtcNow - prior.MeasuredAt < TimeSpan.FromMinutes(3)) return prior;
         var limit = mode == LatencyMode.Fast ? fastLimit : exactLimit;
         await limit.WaitAsync(ct);
         try
         {
+            started?.Invoke();
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            deadline.CancelAfter(ProbeTimeout);
+            var probeToken = deadline.Token;
             long? ms = null;
             try
             {
                 if (mode == LatencyMode.Fast)
                 {
                     var times = new List<long>();
-                    for (var i = 0; i < 3; i++) { using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct); timeout.CancelAfter(3000); using var tcp = new TcpClient(); var sw = Stopwatch.StartNew(); await tcp.ConnectAsync(server.Host, server.Port, timeout.Token); times.Add(sw.ElapsedMilliseconds); }
+                    for (var i = 0; i < 3; i++) { using var tcp = new TcpClient(); var sw = Stopwatch.StartNew(); await tcp.ConnectAsync(server.Host, server.Port, probeToken); times.Add(sw.ElapsedMilliseconds); }
                     times.Sort(); ms = times[1];
                 }
-                else if (server.Supported) ms = await ExactAsync(server, ct);
+                else if (server.Supported) ms = await ExactAsync(server, probeToken);
             }
             catch (Exception e) when (e is SocketException or HttpRequestException or OperationCanceledException or UserError or IOException) { ct.ThrowIfCancellationRequested(); }
-            var result = new LatencyResult(ms, mode, DateTimeOffset.UtcNow); cache[key] = result; return result;
+            ct.ThrowIfCancellationRequested();
+            var result = new LatencyResult(ms, mode, DateTimeOffset.UtcNow, deadline.IsCancellationRequested); cache[key] = result; return result;
         }
         finally { limit.Release(); }
     }
@@ -46,7 +52,7 @@ public sealed class LatencyService(string executable)
         {
             File.WriteAllText(path, ConfigGenerator.Generate(spec, true));
             using var core = new CoreProcess(executable, new(Paths.Logs, "core")); await core.StartAsync(path, ct);
-            using var http = ProbeClient(spec); var times = new List<long>();
+            using var http = ProbeClient(spec); http.Timeout = Timeout.InfiniteTimeSpan; var times = new List<long>();
             for (var i = 0; i < 3; i++) { var sw = Stopwatch.StartNew(); using var request = new HttpRequestMessage(HttpMethod.Get, "https://www.gstatic.com/generate_204"); using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct); response.EnsureSuccessStatusCode(); times.Add(sw.ElapsedMilliseconds); }
             times.Sort(); return times[1];
         }

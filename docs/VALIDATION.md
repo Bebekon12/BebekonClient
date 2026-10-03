@@ -5,7 +5,7 @@ Environment: Windows 11 x64, .NET SDK 10.0.300, runtime 10.0.8, sing-box 1.14.2.
 ## Executed
 
 - Release solution compilation.
-- 129 parser/model/storage/config and real-core tests, including JSON Xray subscription import, gRPC/Reality schema acceptance, parallel logging, multilingual country labels, the helper crash suite, elevation command boundaries and pipe/service identity checks.
+- 135 parser/model/storage/config and real-core tests, including JSON Xray subscription import, gRPC/Reality schema acceptance, parallel logging, multilingual country labels, the helper crash suite, elevation command boundaries and pipe/service identity checks.
 - WPF smoke harness checks that startup selects TUN even after a saved Proxy session. Elevated registration uses the original user's SID and literal argument list; partial packages are rejected before elevation. Actual UAC acceptance/cancellation and protected service installation remain manual checks.
 - Official `sing-box check` accepted generated TCP, Reality, gRPC, WebSocket, HTTPUpgrade configurations.
 - Real local VLESS fixture confirmed: selected domain exits via VLESS; unmatched domain Direct; Entire PC default VPN; authenticated forced VPN probe; HTTP Host sniffing routes an IP-addressed request by its hostname.
@@ -41,6 +41,13 @@ Environment: Windows 11 x64, .NET SDK 10.0.300, runtime 10.0.8, sing-box 1.14.2.
 - The fixed client, running without elevation, completed five authenticated GetStatus requests to the actual installed protected LocalSystem helper (0.1.5). It then validated the saved server/profile, launched the real core, received forced-VPN HTTPS HTTP 204 and a valid egress IP, and stopped the core with Disconnected/no-core status. Reproduction: `dotnet run --file tools/verify-service.cs -c Release -- --probe`. Private connection details are not printed. The probe uses a separate authenticated local port, does not change Windows proxy/routes or saved user state, and requires an idle helper.
 - SnowVPN's TUN is active on this machine. The installed-helper probe therefore used proxy mode; independent TUN/browser routing acceptance remains pending.
 - Published self-contained 0.1.6 Core also completed five verified status requests to the installed LocalSystem helper without elevation. The published App passed the complete WPF smoke suite: five pages at 100/125/150/175% render scales, five dialogs, minimum size, tray/caption controls, settings, routing editor, admin preset and virtualization checks. Release tests: 129 passed, zero failed/skipped.
+
+## Version 0.1.7
+
+- Six new core tests verify refresh identity/favorites/ping preservation, removal without automatic replacement, credential rotation, independent subscriptions, the five-second silent-peer deadline/cancellation, and actual bidirectional traffic counters. The real sing-box fixture downloads 256 KiB through its proxy, observes nonzero upload/download rates and totals, and confirms unauthenticated statistics access returns HTTP 401. Helper integration also receives traffic snapshots via IPC.
+- WPF connection regressions use synthetic storage and fake IPC: unchanged refresh makes no restart; three rapid site additions produce one restart containing all rules; the connection stays stable beyond five seconds; a stale failing recovery cannot restart the new session; manual off cancels a queued update; edits during startup apply afterward; cancelling startup remains disconnected. Transitions never overlap, and traffic direction/unit conversion is checked.
+- Home checks cover the embedded full server list, navigation from its server card, routing-mode dialog action and ping-click result. All five pages render at 100/125/150/175% and minimum window size; existing rule editor, tray, captions and animation checks remain. The snowman source is generated with built-in image_gen, exported to a seven-size ICO and embedded as a decoded-size PNG for the sidebar. Prompt provenance: resources/icons/snowman.asset.json.
+- The website report is covered by deterministic connection/routing regressions. Physical TUN/browser reproduction with the user's live website, adapter changes and ECH/DoH remains in manual acceptance below; simulated IPC is not labelled as a live TUN check.
 
 ## Required manual acceptance — pending
 

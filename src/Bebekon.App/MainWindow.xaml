@@ -7,7 +7,7 @@
     <StackPanel Orientation="Horizontal" Margin="6,0,0,0" VerticalAlignment="Top">
      <Grid Width="38" Height="38">
       <Ellipse x:Name="LogoHalo" Width="68" Height="68" Margin="-15" Fill="{DynamicResource Halo}" Opacity="0.55" IsHitTestVisible="False" Visibility="{Binding GlowEnabled, Converter={StaticResource BoolVisibility}}"/>
-     <Border Width="38" Height="38" CornerRadius="12" Background="{DynamicResource AccentGradient}"><Viewbox Margin="9"><Canvas Width="24" Height="24"><Path Stroke="#073139" StrokeThickness="2.5" Data="M 6,20 A 10,10 0 1 1 20,6 M 6,18 L 17,7"/><Ellipse Fill="#073139" Width="5" Height="5" Canvas.Left="15" Canvas.Top="4"/></Canvas></Viewbox></Border>
+     <Image Width="46" Height="46" Margin="-4" RenderOptions.BitmapScalingMode="HighQuality"><Image.Source><BitmapImage UriSource="/Bebekon.App;component/resources/snowman.png" DecodePixelWidth="128"/></Image.Source></Image>
      </Grid>
      <TextBlock Text="Bebekon VPN" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center" Margin="11,0,0,0" Visibility="{Binding NavTextVisibility}"/>
     </StackPanel>

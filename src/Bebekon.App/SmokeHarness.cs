@@ -22,6 +22,7 @@ internal static class SmokeHarness
         var data = new AppState();
         foreach (var name in new[] { "🇱🇻 Латвия", "DE Германия", "EU Hysteria", "LT Литва", "LT Литва — YouTube", "LV Латвия #2", "NL Нидерланды", "NL Нидерланды #2", "SE Швеция" }) data.Servers.Add(VlessParser.Parse("vless://" + Guid.NewGuid() + "@127.0.0.1:9?security=none&type=tcp#" + Uri.EscapeDataString(name)));
         data.Subscriptions.Add(new() { Name = "UI test fixture", Source = "https://example.invalid/private-token", ServerCount = data.Servers.Count });
+        foreach (var server in data.Servers) server.SubscriptionId = data.Subscriptions[0].Id;
         data.SelectedServerId = data.Servers[0].Id;
         data.Profiles[0].Rules.Add(new() { Name = "OpenAI / ChatGPT", Values = ["openai.com", "chatgpt.com", "oaistatic.com", "oaiusercontent.com"] });
         data.Profiles[0].Rules.Add(new() { Name = "Claude / Anthropic", Values = ["claude.ai", "anthropic.com"] });
@@ -39,6 +40,8 @@ internal static class SmokeHarness
         await Task.Delay(400); var report = new List<string> { "Startup selects TUN after a saved proxy session." };
         CheckTrayMenu(window, vm, report);
         await CheckCaptionButtonsAsync(window, vm, report);
+        await ConnectionChecks.RunAsync(Path.Combine(Root, "connection-regression"));
+        report.Add("Connection regressions: stable refreshed selection; coalesced rule edits; stable beyond 5 seconds; stale recovery ignored; manual off/cancel wins; edits during startup applied; traffic directions and units.");
         vm.Go("Servers"); vm.LatencyIndex = 0; vm.LatencyIndex = 1; vm.LatencyIndex = 0; vm.CancelPing.Execute(null); vm.Go("Home");
         await Task.Delay(400);
         if (vm.Scanning) throw new InvalidOperationException("Rapid mode changes and navigation must cancel pending scans.");
@@ -48,6 +51,8 @@ internal static class SmokeHarness
         foreach (var page in new[] { "Home", "Servers", "Rules", "Subscriptions", "Settings" })
         {
             vm.Go(page); await vm.StopScansAsync(); await Task.Delay(300); window.UpdateLayout();
+            foreach (var (node, ms) in vm.Data.Servers.Zip(new long?[] { 25, 125, 310, 68, 91, 165, 240, null, 80 })) { node.LatencyMs = ms; node.Latency = ms is null ? "—" : ms + " ms"; }
+            window.UpdateLayout();
             CheckGeometry(window, page);
             if (page == "Servers" && Descendants(window).OfType<FlagView>().Count(flag => flag.IsVisible) != vm.Data.Servers.Count) throw new InvalidOperationException("Odd server lists must not render an empty card.");
             foreach (var scale in new[] { 1.0, 1.25, 1.5, 1.75 })
@@ -57,6 +62,31 @@ internal static class SmokeHarness
             }
             report.Add(page + " rendered at 100/125/150/175%.");
         }
+        vm.Go("Home"); window.UpdateLayout();
+        var home = Descendants(window).OfType<HomeView>().Single();
+        var homeServers = (ServersView)home.FindName("HomeServers");
+        if (!homeServers.Embedded || Descendants(homeServers).OfType<ListBox>().Single().Items.Count != vm.ServerRows.Count)
+            throw new InvalidOperationException("Home must contain all subscription server rows.");
+        var scrollHome = Descendants(home).OfType<ScrollViewer>().First(); scrollHome.ScrollToBottom(); await Task.Delay(200); window.UpdateLayout();
+        Capture(window, "Home-Servers");
+        scrollHome.ScrollToTop(); window.UpdateLayout();
+        ((Button)home.FindName("OpenServersCard")).Command.Execute("Servers");
+        if (vm.PageName != "Servers") throw new InvalidOperationException("Home server card must navigate.");
+        await vm.StopScansAsync(); vm.Go("Home"); window.UpdateLayout(); home = Descendants(window).OfType<HomeView>().Single();
+        Dialogs.RenderObserver = dialog => dialog.Dispatcher.BeginInvoke(new Action(() =>
+        {
+            var target = Descendants(dialog).OfType<Button>().Single(b => Equals(b.Tag, "EntirePC"));
+            target.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        }));
+        try { ((Button)home.FindName("ModeCard")).Command.Execute(null); }
+        finally { Dialogs.RenderObserver = null; }
+        if (!vm.IsWholePc) throw new InvalidOperationException("Home mode card must change routing.");
+        vm.IsWholePc = false;
+        vm.LatencyIndex = 0; ((Button)home.FindName("HomePing")).Command.Execute(null);
+        using (var pingTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(7)))
+            while (vm.SelectedServer?.LatencyMs != -1) await Task.Delay(30, pingTimeout.Token);
+        vm.LatencyIndex = 1;
+        report.Add("Home: scrollable all-subscription server list and controls; server navigation; routing-mode dialog; clickable ping and red unavailable state.");
         vm.Go("Settings"); await Task.Delay(200); window.UpdateLayout();
         var settings = Descendants(window).OfType<SettingsView>().Single();
         var settingsSearch = (TextBox)settings.FindName("SettingsSearch");
