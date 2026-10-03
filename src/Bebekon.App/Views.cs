@@ -16,12 +16,13 @@ public partial class HomeView : UserControl
     }
     private void OnState(object? sender, System.ComponentModel.PropertyChangedEventArgs e) { if (e.PropertyName is nameof(MainViewModel.Connected) or nameof(MainViewModel.ConnectionBusy) or nameof(MainViewModel.UpdateOverlayOpen)) UpdateGlow(); }
     private void OwnerStateChanged(object? sender, EventArgs e) => UpdateGlow();
-    private void StopMotion() { PowerHalo.BeginAnimation(OpacityProperty, null); Orbit.BeginAnimation(RotateTransform.AngleProperty, null); }
+    private void StopMotion() { PowerHalo.BeginAnimation(OpacityProperty, null); Orbit.BeginAnimation(RotateTransform.AngleProperty, null); SpeedShift.BeginAnimation(TranslateTransform.XProperty, null); }
     private void UpdateGlow()
     {
         StopMotion(); PowerHalo.Visibility = ThemeManager.Glow ? Visibility.Visible : Visibility.Hidden;
         if (!IsVisible || owner?.WindowState == WindowState.Minimized || Dialogs.ModalOpen || vm?.UpdateOverlayOpen == true || !Motion.Enabled) return;
-        if (ThemeManager.Glow && vm?.Connected == true) PowerHalo.BeginAnimation(OpacityProperty, new System.Windows.Media.Animation.DoubleAnimation(.3, .6, TimeSpan.FromSeconds(2.4)) { AutoReverse = true, RepeatBehavior = System.Windows.Media.Animation.RepeatBehavior.Forever });
+        if (ThemeManager.Glow && vm?.Connected == true) PowerHalo.BeginAnimation(OpacityProperty, new System.Windows.Media.Animation.DoubleAnimation(.12, .24, TimeSpan.FromSeconds(2.8)) { AutoReverse = true, RepeatBehavior = System.Windows.Media.Animation.RepeatBehavior.Forever });
+        if (vm?.Connected == true) SpeedShift.BeginAnimation(TranslateTransform.XProperty, new System.Windows.Media.Animation.DoubleAnimation(0, 12, TimeSpan.FromSeconds(2.8)) { AutoReverse = true, RepeatBehavior = System.Windows.Media.Animation.RepeatBehavior.Forever });
         if (vm?.ConnectionBusy == true) Orbit.BeginAnimation(RotateTransform.AngleProperty, new System.Windows.Media.Animation.DoubleAnimation(0, 360, TimeSpan.FromSeconds(1.7)) { RepeatBehavior = System.Windows.Media.Animation.RepeatBehavior.Forever });
     }
 }

@@ -94,6 +94,7 @@ public sealed class Subscription
 }
 public sealed class Settings
 {
+    public int DesignVersion { get; set; }
     public bool CheckForUpdates { get; set; } = true;
     public string UpdateSource { get; set; } = "";
     public string Language { get; set; } = "Русский";
@@ -109,7 +110,7 @@ public sealed class Settings
     public bool Animations { get; set; } = true;
     public bool GlowEffects { get; set; } = true;
     public bool PureBlack { get; set; }
-    public string AccentColor { get; set; } = "Cyan";
+    public string AccentColor { get; set; } = "Blue";
 }
 public sealed class AppState
 {

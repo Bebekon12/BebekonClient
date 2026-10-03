@@ -15,18 +15,20 @@ public static class ThemeManager
         Animations = settings.Animations; Glow = settings.GlowEffects;
         var (first, last, soft, border) = settings.AccentColor switch
         {
-            "Blue" => ("#66C7FF", "#478DEF", "#102E40", "#285577"),
-            "Emerald" => ("#5CE5BF", "#30BFA4", "#10372F", "#286456"),
-            "Violet" => ("#B4A1FF", "#7B83F6", "#272A44", "#4F527E"),
-            _ => ("#32E0DB", "#3AA6F4", "#103438", "#236269")
+            "Blue" => ("#75ACFF", "#286BF5", "#132B4D", "#284C77"),
+            "Emerald" => ("#5CE5BF", "#30BFA4", "#122C30", "#285D59"),
+            "Violet" => ("#B4A1FF", "#7B83F6", "#232741", "#4F527E"),
+            _ => ("#52DDE8", "#358DEE", "#122C3D", "#295775")
         };
         var resources = Application.Current.Resources;
         resources["Accent"] = Solid(first); resources["AccentSoft"] = Solid(soft); resources["AccentBorder"] = Solid(border);
-        resources["AccentGradient"] = Gradient(first, last, new(1, .7));
-        resources["FeatureGradient"] = Gradient(soft, settings.PureBlack ? "#101C27" : "#0D222C", new(1, .5));
+        resources["AccentGradient"] = Gradient(settings.AccentColor == "Blue" ? "#2671E8" : first, last, new(1, .7));
+        resources["OnAccent"] = Solid(settings.AccentColor == "Blue" ? "#FFFFFF" : "#081523");
+        resources["FeatureGradient"] = Gradient(soft, settings.PureBlack ? "#101827" : "#101E34", new(1, .5));
+        resources["PanelGradient"] = Gradient(settings.PureBlack ? "#101723" : "#111E31", settings.PureBlack ? "#0C111B" : "#0C1727", new(1, 1));
         resources["PowerGradient"] = Gradient(first, last, new(.85, .15));
-        resources["Background"] = Solid(settings.PureBlack ? "#000000" : "#06151C");
-        resources["Sidebar"] = Solid(settings.PureBlack ? "#090F14" : "#0E1D24");
+        resources["Background"] = Solid(settings.PureBlack ? "#000000" : "#080F1C");
+        resources["Sidebar"] = Solid(settings.PureBlack ? "#090E17" : "#0B1525");
         var halo = new RadialGradientBrush(); halo.GradientStops.Add(new(ColorOf(first), 0)); halo.GradientStops.Add(new(Color.FromArgb(0, ColorOf(first).R, ColorOf(first).G, ColorOf(first).B), 1)); halo.Freeze(); resources["Halo"] = halo;
         Motion.ResetAll(); Changed?.Invoke();
     }

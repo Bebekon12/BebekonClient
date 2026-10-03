@@ -17,6 +17,7 @@ public sealed class IconView : FrameworkElement
     {
         var paths = new Dictionary<string, string>
         {
+            ["Home"] = "M3,11 L12,3 L21,11 M5,9 V21 H10 V15 H14 V21 H19 V9",
             ["Shield"] = "M12,3 L20,6 V12 C20,17 16,20 12,22 C8,20 4,17 4,12 V6 Z M12,4 V20",
             ["Servers"] = "M21,12 A9,9 0 1 1 3,12 A9,9 0 1 1 21,12 M3,12 H21 M12,3 C7,8 7,16 12,21 C17,16 17,8 12,3 M5,6.5 H19 M5,17.5 H19",
             ["Rules"] = "M5,4 V20 M12,4 V20 M19,4 V20 M2,8 H8 M9,15 H15 M16,10 H22",

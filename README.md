@@ -39,11 +39,15 @@ Version 0.1.6 fixes a false service-identity rejection when the ordinary UI cann
 
 Download the installer or portable archive from [GitHub Releases](https://github.com/Bebekon12/BebekonClient/releases/latest). Version 0.1.9 and later use the signed [GitHub update feed](https://github.com/Bebekon12/BebekonClient/releases/latest/download/update.json) by default. Settings → Updates checks at startup and every six hours; apply an offered update to keep subscriptions, rules and settings. A Windows UAC prompt is still required for the protected helper. Version 0.1.8 can obtain 0.1.9 through the local feed on the build PC, or switch its source to the GitHub feed manually.
 
-## Version 0.1.8
+## Version 0.1.11 · Night Track
+
+The selected third design is now the application interface: a deep navy palette, the running snowman on a luminous alpine road, a large connection action and a unified server/routing/TUN control dock. Settings, rules, subscriptions, dialogs and update screens use the same palette. Traffic charts show up to 48 measured samples in each direction and clear after disconnection. The server table includes subscriptions, protocols, favorites and full-color ping results; card layout remains available. Existing settings adopt blue once, and subsequent custom accent choices persist. See [design and asset provenance](docs/DESIGN.md).
+
+## Version 0.1.10 · Updates
 
 Version 0.1.10 shows an in-app update popup with **Update / Not now**, release notes and animated download/verification progress. Not now defers that version until the next launch; Settings → Updates can reopen it. After Windows approval, Setup upgrades in place and restarts the app as administrator under the same account. Other-admin credentials fall back to the original user's session to retain access to their encrypted settings. Subscriptions, rules, settings and the helper owner are preserved. See [publishing updates](docs/UPDATES.md). Version 0.1.9 can install 0.1.10 through its existing Updates page; subsequent releases use the new popup.
 
-Ping results retain their green/orange/red colors while busy, and previous measurements remain until replaced. The connection button has a dark layered face, gradient rim, hover/press feedback, keyboard focus and a distinct connected state.
+Ping results retain their green/orange/red colors while busy, and previous measurements remain until replaced. The primary connection action retains hover/press feedback, keyboard focus and explicit connection/cancellation labels.
 
 ## Version 0.1.7
 
@@ -56,7 +60,7 @@ Refreshing subscriptions preserves the selected logical server, favorites and va
 1. Add Ultima's subscription URL (HTTPS recommended), direct VLESS link, or a URL returning plain/Base64 VLESS links or JSON Xray configurations. The provider URL does not need to be converted to a different format.
 2. Choose a supported server. The client explicitly marks unsupported transports.
 3. Open Rules, leave **By rules**, add OpenAI / ChatGPT, Claude / Anthropic and Telegram.exe.
-4. Connect. A real HTTPS probe through the selected server must succeed before the UI shows Protected.
+4. Connect. A real HTTPS probe through the selected server must succeed before the UI shows Connected.
 
 Choose **Rules → Add preset → Правила админа** to add the 42 rules from the supplied screenshots: 36 VPN and 6 Direct entries. Direct exceptions are inserted first; applying the preset again does not duplicate it. `store.supercell.com` is represented as a domain suffix because it is a website, not an executable. The two case variants of Telegram.exe from the reference list are preserved.
 
@@ -89,17 +93,17 @@ Service runtime and service/core logs are in %PROGRAMDATA%/BebekonVPN, protected
 
 ## Validation and current limits
 
-Measured on Windows 11 x64: version 0.1.5 Release self-contained UI in an ordinary disconnected idle process before render captures, without Working Set trimming. The helper figure is the earlier isolated helper benchmark; actual connected TUN memory is still pending:
+Measured on Windows 11 x64: version 0.1.11 Release self-contained UI in a separate disconnected fixture before render captures, without explicit GC or Working Set trimming. The helper figure is the earlier isolated helper benchmark; actual connected TUN memory is still pending:
 
 | State/process | Working Set | Private memory | CPU |
 |---|---:|---:|---:|
-| UI, disconnected idle | 152.4 MB | 112.0 MB | 0.000% over 5s |
+| UI, disconnected idle | 172.5 MB | 130.8 MB | 0.078% visible / 0.026% hidden over 5s each |
 | Helper harness, no core | 35.3 MB | 8.3 MB | 0.00% over 5s |
 | Connected UI + service + core | pending | pending | pending |
 
 The desired ≤90MB UI target is **not met**. No process is hidden or trimmed. CPU is normalized to the whole machine. Screenshot rendering allocates extra surfaces and is excluded from idle measurements. Real provider/TUN combined memory is unmeasured.
 
-150 automated tests cover plain/Base64/JSON Xray subscription parsing, models, DPAPI, priority, generated config checks, actual loopback VLESS traffic, HTTP Host sniffing, helper/core crash detection, job cleanup, elevation command boundaries and service identity rejection cases. A supplied Ultima subscription was also imported live: nine supported nodes, nine configurations accepted by the official core, and a successful forced-VPN HTTPS probe through gRPC/Reality. Version 0.1.6 also verified authenticated commands and a live saved-profile HTTPS/IP probe through the installed LocalSystem helper from an ordinary UI identity. Full TUN/browser acceptance remains in docs/VALIDATION.md.
+154 automated tests cover plain/Base64/JSON Xray subscription parsing, models, DPAPI, priority, generated config checks, actual loopback VLESS traffic, HTTP Host sniffing, helper/core crash detection, job cleanup, elevation command boundaries and service identity rejection cases. A supplied Ultima subscription was also imported live: nine supported nodes, nine configurations accepted by the official core, and a successful forced-VPN HTTPS probe through gRPC/Reality. Version 0.1.6 also verified authenticated commands and a live saved-profile HTTPS/IP probe through the installed LocalSystem helper from an ordinary UI identity. Full TUN/browser acceptance remains in docs/VALIDATION.md.
 
 Known limits:
 

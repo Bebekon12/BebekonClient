@@ -4,6 +4,8 @@ public static class I18n
     public static bool English { get; private set; }
     public static string T(string ru, string en) => English ? en : ru;
     private static readonly (string Key, string Ru, string En)[] Labels = [
+        ("ConnectionOverview","Ваше подключение","Your connection"),("SelectedServerTitle","Выбранный сервер","Selected server"),("RoutingModeTitle","Режим маршрутизации","Routing mode"),("NetworkComponents","Сетевые компоненты","Network components"),
+        ("ProtocolColumn","Протокол","Protocol"),("ServerColumn","Сервер","Server"),("LatencyColumn","Пинг","Latency"),("On","Вкл.","On"),("Off","Выкл.","Off"),("ConfigureDns","Настроить DNS","Configure DNS"),
         ("UpdateLater","Не сейчас","Not now"),("UpdateNow","Обновить","Update"),("DownloadProgressLabel","Прогресс загрузки обновления","Update download progress"),
         ("UpdateRestartHelp","Подписки и правила сохранятся. После обновления приложение откроется от администратора; VPN будет отключён на время установки.","Subscriptions and rules are kept. The app restarts as administrator; VPN disconnects during installation."),
         ("UpdateStepDownload","1 · Загрузка","1 · Download"),("UpdateStepVerify","2 · Проверка","2 · Verify"),("UpdateStepRestart","3 · Перезапуск","3 · Restart"),

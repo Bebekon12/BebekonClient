@@ -11,6 +11,7 @@
     <Content Include="../../core/sing-box.exe" Link="core/sing-box.exe" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="../../resources/icons/bebekon.ico" Link="resources/bebekon.ico" CopyToOutputDirectory="PreserveNewest" />
     <Resource Include="../../resources/icons/snowman.png" Link="resources/snowman.png" />
+    <Resource Include="../../resources/design/night-track.png" Link="resources/night-track.png" />
     <Content Include="../../resources/flags/*.png" Link="resources/flags/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

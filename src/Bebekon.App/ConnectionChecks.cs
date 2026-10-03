@@ -19,6 +19,7 @@ internal static class ConnectionChecks
         });
         await vm.ConnectAsync(); Require(vm.Connected && service.Starts == 1, "Initial connection");
         Require(vm.UploadRate == 1.0.ToString("0.00") && vm.DownloadRate == 2.0.ToString("0.00"), "Real unit conversion and independent directions");
+        Require(vm.UploadHistory.Count > 0 && vm.UploadHistory[^1] == 1 && vm.DownloadHistory[^1] == 2, "Measured samples feed the correct chart direction");
 
         var renamed = VlessParser.Parse("vless://11111111-1111-1111-1111-111111111111@127.0.0.1:9?type=tcp&security=none#Renamed");
         vm.ReplaceServers(subscription, [renamed]);
@@ -40,6 +41,7 @@ internal static class ConnectionChecks
         // Manual off takes precedence over an already scheduled settings change.
         vm.IsWholePc = false; await vm.DisconnectAsync(); await Task.Delay(800);
         Require(service.Starts == 3 && !vm.Connected && vm.DownloadRate == "—", "Manual off cancels pending apply and resets counters");
+        Require(vm.DownloadHistory.Count == 0 && vm.UploadHistory.Count == 0, "Disconnected traffic history is cleared");
 
         // Editing during startup must apply once, after the old snapshot completes.
         blockedProbe = new(TaskCreationOptions.RunContinuationsAsynchronously); var startupProbe = blockedProbe;

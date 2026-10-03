@@ -43,7 +43,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
     public string PageName { get => pageName; private set => Set(ref pageName, value); }
     private bool collapsed;
     public bool SidebarCollapsed { get => collapsed; set { if (Set(ref collapsed, value)) { Notify(nameof(SidebarWidth)); Notify(nameof(NavTextVisibility)); } } }
-    public GridLength SidebarWidth => new(SidebarCollapsed ? 76 : 214);
+    public GridLength SidebarWidth => new(SidebarCollapsed ? 76 : 200);
     public Visibility NavTextVisibility => SidebarCollapsed ? Visibility.Collapsed : Visibility.Visible;
     private Server? selectedServer;
     public Server? SelectedServer { get => selectedServer; set { var changed = selectedServer?.Id != value?.Id || (selectedServer is not null && value is not null && ServerRefresh.ConnectionKey(selectedServer) != ServerRefresh.ConnectionKey(value)); if (Set(ref selectedServer, value)) { Data.SelectedServerId = value?.Id; Notify(nameof(ServerLabel)); Save(); if (changed) QueueApply(); } } }
@@ -57,7 +57,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
     public bool Connected => State == ConnectionState.Connected;
     public bool ConnectionBusy => State is ConnectionState.Connecting or ConnectionState.Disconnecting;
     public string ConnectLabel => State switch { ConnectionState.Connecting => T("Отменить", "Cancel"), ConnectionState.Disconnecting => T("Отключаем…", "Disconnecting…"), ConnectionState.Connected => T("Отключить", "Disconnect"), _ => T("Подключить", "Connect") };
-    public string StatusLabel => State switch { ConnectionState.Connected => T("Защищено", "Protected"), ConnectionState.Connecting => T("Подключение", "Connecting"), ConnectionState.Disconnecting => T("Отключение", "Disconnecting"), ConnectionState.Error => T("Ошибка подключения", "Connection error"), _ => T("Готов к подключению", "Ready to connect") };
+    public string StatusLabel => State switch { ConnectionState.Connected => T("Подключено", "Connected"), ConnectionState.Connecting => T("Подключение", "Connecting"), ConnectionState.Disconnecting => T("Отключение", "Disconnecting"), ConnectionState.Error => T("Ошибка подключения", "Connection error"), _ => T("Не подключено", "Not connected") };
     public string StatusDetail => Connected ? Settings.TunnelMode == TunnelMode.Proxy ? T("Выбранный трафик приложений с прокси идёт через VPN", "Selected traffic from proxy-aware applications uses VPN") : IsWholePc ? T("Весь трафик идёт через VPN", "All traffic goes through VPN") : T("Выбранный трафик идёт через VPN", "Selected traffic goes through VPN") : T("Ваш интернет использует обычное подключение", "Your internet uses your normal connection");
     public string EmptyRulesDetail => IsWholePc ? T("Без правил весь трафик идёт через VPN", "Without rules all traffic goes through VPN") : T("Без правил весь трафик идёт напрямую", "Without rules all traffic goes direct");
     public string FooterLabel => Connected ? T("онлайн", "online") : T("офлайн", "offline");
@@ -67,6 +67,8 @@ public sealed partial class MainViewModel : Observable, IDisposable
     private string session = "—";
     public string Session { get => session; private set => Set(ref session, value); }
     private TrafficSnapshot? traffic;
+    public IReadOnlyList<double> DownloadHistory { get; private set; } = Array.Empty<double>();
+    public IReadOnlyList<double> UploadHistory { get; private set; } = Array.Empty<double>();
     public string DownloadRate => Rate(traffic?.DownloadBytesPerSecond);
     public string UploadRate => Rate(traffic?.UploadBytesPerSecond);
     public string DownloadTotal => Total(traffic?.DownloadBytes);
@@ -88,7 +90,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
     public int SortIndex { get => sortIndex; set { if (Set(ref sortIndex, value)) RefreshServers(); } }
     private int latencyIndex = 1;
     public int LatencyIndex { get => latencyIndex; set { if (Set(ref latencyIndex, value)) { scan?.Cancel(); foreach (var s in Data.Servers) { s.Latency = "—"; s.LatencyMs = null; } RefreshServers(); if (PageName == "Servers") _ = ScanSafelyAsync(); } } }
-    private bool listMode;
+    private bool listMode = true;
     public bool ListMode { get => listMode; set { if (Set(ref listMode, value)) { Notify(nameof(SecondColumn)); RefreshServers(); } } }
     public GridLength SecondColumn => new(ListMode ? 0 : 1, GridUnitType.Star);
     private bool scanning;
@@ -141,6 +143,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
     {
         service = client; testProbe = probe;
         store = storage ?? new(); Data = store.Load();
+        if (Settings.DesignVersion < 1) { Settings.AccentColor = "Blue"; Settings.DesignVersion = 1; store.Save(Data); }
         Settings.TunnelMode = TunnelMode.Tun;
         if (storage is null) Settings.StartWithWindows = AutoStart.IsEnabled;
         activeProfile = Data.Profiles.FirstOrDefault(p => p.Id == Data.SelectedProfileId) ?? Data.Profiles[0];
@@ -383,7 +386,18 @@ public sealed partial class MainViewModel : Observable, IDisposable
         catch (OperationCanceledException) { } catch (Exception e) { if (id == monitorId) { if (testProbe is null) SystemProxy.Restore(); State = ConnectionState.Error; SetTraffic(null); Report(e); } }
     }
     private void ApplyStatus(ServiceStatus s) { State = s.State; started = s.ConnectedAt; SetTraffic(s.State == ConnectionState.Connected ? s.Traffic : null); if (s.Error is not null) Banner = s.Error; }
-    private void SetTraffic(TrafficSnapshot? value) { traffic = value; foreach (var name in new[] { nameof(DownloadRate), nameof(UploadRate), nameof(DownloadTotal), nameof(UploadTotal) }) Notify(name); }
+    private void SetTraffic(TrafficSnapshot? value)
+    {
+        if (value is null) { DownloadHistory = Array.Empty<double>(); UploadHistory = Array.Empty<double>(); }
+        else if (traffic?.SampledAt != value.SampledAt)
+        {
+            // One bounded history per direction, sampled from the core rather than decorative data.
+            DownloadHistory = DownloadHistory.TakeLast(47).Append(Math.Max(0, value.DownloadBytesPerSecond * 8 / 1_000_000)).ToArray();
+            UploadHistory = UploadHistory.TakeLast(47).Append(Math.Max(0, value.UploadBytesPerSecond * 8 / 1_000_000)).ToArray();
+        }
+        traffic = value;
+        foreach (var name in new[] { nameof(DownloadRate), nameof(UploadRate), nameof(DownloadTotal), nameof(UploadTotal), nameof(DownloadHistory), nameof(UploadHistory) }) Notify(name);
+    }
     private void NotifyStatus() { foreach (var n in new[] { nameof(Connected), nameof(ConnectionBusy), nameof(ConnectLabel), nameof(StatusLabel), nameof(StatusDetail), nameof(FooterLabel), nameof(FooterMode), nameof(DownloadRate), nameof(UploadRate) }) Notify(n); StatusChanged?.Invoke(); }
     public void Report(Exception e) { log.Write("Operation failed: " + e.GetType().Name); Banner = e is UserError ? e.Message : e is OperationCanceledException ? T("Время ожидания истекло.", "Operation timed out.") : T("Не удалось выполнить действие. Проверьте подключение и параметры.", "Action failed. Check your connection and settings."); }
     private void Save() { try { store.Save(Data); } catch (Exception e) { Report(e); } }

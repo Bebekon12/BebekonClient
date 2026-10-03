@@ -60,6 +60,17 @@ Version 0.1.8 adds 15 update tests (150 total): signed local feed and package do
 - Update offer, 57% download, verification, restart and cancellation/retry states rendered at 100/175% pixel scale and 860×660. Both decision buttons retain 46px height and fit inside the window. Download progress and spinner were inspected; reduced motion and hidden-window animation stop are asserted. These are presentation fixtures and do not execute an installer.
 - Inno Setup compiled the same-user elevated restart and other-admin original-user fallback. HANDOFF=2 requires the client's acceptance marker after the parent exits; legacy clients retain their previous handoff. End-to-end UAC acceptance/cancellation, actual installed-file replacement and privilege level after restart remain manual acceptance; no working installation was replaced by smoke tests.
 
+## Version 0.1.11 · Night Track
+
+- Release build: 154 tests passed, zero failures/skips; the appearance-default expectation now reflects the selected blue design. App/helper publish and Inno Setup compilation succeeded.
+- The published self-contained WPF app passed the complete smoke suite. New coverage verifies one-time adoption of the blue theme, persistence of later custom accents, 48-sample traffic limits, duplicate-timestamp rejection, chart binding and clearing on disconnection.
+- Connecting, connected, error and disconnected Home states were rendered; connected and English layouts also render at 860×660. All five pages render at 100/125/150/175% pixel scale; settings, server colors, shared dialogs, update progress and minimum-size actions were inspected. These are isolated presentation fixtures, not a live TUN session.
+- Connection rotation is replaced by subtle track motion when connected. Reduced motion, hidden-window animation stop, sidebar widths and existing navigation/mode/ping actions pass. Existing serialized-connection/rule-edit regressions are retained.
+- The hero illustration is embedded from the workspace and decoded to 1536px width; asset prompt/references are recorded in resources/design/night-track.asset.json. Text and controls remain native WPF. No invented server-load values or chart timers were added.
+- Separate published disconnected idle fixture before captures or explicit GC: visible CPU 0.078%, hidden CPU 0.026% over 5 seconds each; visible Working Set 172.5 MB / private 130.8 MB. The 90 MB UI target remains missed; real connected TUN memory remains unmeasured.
+- The first development render run hit a foreground-activation timing assertion in the existing update harness. Waiting for WPF's idle dispatcher before checking the automatic prompt resolved it; the published suite passed. Production foreground/tray eligibility is unchanged.
+- No installed helper or working app was replaced. Full UAC update acceptance and live TUN/browser routing remain in manual acceptance below.
+
 ## Required manual acceptance — pending
 
 Version 0.1.9 changes the bundled update channel to GitHub Releases with a version-specific installer URL. The existing signed-update tests and published UI smoke suite are rerun for this release; the smoke checks the candidate local manifest before public release. Post-publication checks must verify the public latest feed, RSA signature, asset sizes and installer hash.

@@ -1,4 +1,4 @@
-param([string]$InnoCompiler, [switch]$SkipInstaller, [string]$PublishFolder = 'artifacts\release', [string]$UpdateFeedUrl = 'https://github.com/Bebekon12/BebekonClient/releases/latest/download/update.json', [string]$InstallerUrl, [string]$ReleaseNotes = 'Окно обновления внутри приложения, плавный прогресс загрузки и автоматический перезапуск от администратора.')
+param([string]$InnoCompiler, [switch]$SkipInstaller, [string]$PublishFolder = 'artifacts\release', [string]$UpdateFeedUrl = 'https://github.com/Bebekon12/BebekonClient/releases/latest/download/update.json', [string]$InstallerUrl, [string]$ReleaseNotes = 'Новый дизайн Night Track: снеговик на ночной трассе, синяя палитра, единый блок подключения и графики трафика.')
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $projectRoot = $PSScriptRoot

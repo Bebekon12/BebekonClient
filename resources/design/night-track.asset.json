@@ -1,0 +1,24 @@
+{
+  "asset": "night-track.png",
+  "generator": "Built-in image_gen.imagegen",
+  "created": "2026-10-03",
+  "usage": "Embedded hero illustration for the selected Night Track design; all labels, controls and graphs are native WPF elements.",
+  "references": [
+    {
+      "role": "User-selected design concept #3, generated in this conversation",
+      "source": "exec-4b51208d-1c13-41e1-95d4-4e77070e9379.png"
+    },
+    {
+      "role": "Existing Bebekon snowman mascot",
+      "source": "../icons/snowman.png"
+    }
+  ],
+  "prompt": "Use case: illustration-story / product UI asset. Create a NEW standalone panoramic background illustration for the hero panel of Bebekon VPN, inspired by the supplied references. Image 1 is a style/composition reference of the selected dark dashboard; Image 2 is the exact brand snowman mascot reference. Output only illustration, absolutely NO text, letters, UI controls, panels, borders, logos, watermarks or typography. Very wide 3:1 horizontal image, about 1536x512. The leftmost 45% is calm, nearly uniform midnight navy #0C1729 negative space for live UI text; transition subtly into the scene on the right. On the right half: the friendly white snowman from Image 2 wearing navy-blue sporty sunglasses and a flowing bright-blue scarf, smiling, leaning forward running toward the right, entire compact figure and feet visible, occupying about 36% of the total image height and positioned around 79% of image width. A luminous icy-blue curving road/track winds from background mountains toward the lower right foreground; subdued dark blue angular alpine mountains and silhouettes of conifers, snow mist and small blue speed streaks. Match the beautifully restrained premium 3D-illustrated snow-and-speed aesthetic of the hero in Image 1, but use the exact white/blue snowman colors from Image 2 including blue nose. No orange accents, no violet, no huge full-screen glow. Keep edges dark, enough safe margin that image cropping in a resizable desktop panel will not cut off the snowman. Beautiful cool blue illumination, realistic depth but clean simplified forms. The art will be placed behind editable WPF controls; do not bake any words or screen information into it.",
+  "output": {
+    "width": 2172,
+    "height": 724,
+    "format": "PNG",
+    "transparent": false
+  },
+  "runtimeDecodeWidth": 1536
+}

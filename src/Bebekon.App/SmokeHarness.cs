@@ -28,8 +28,13 @@ internal static class SmokeHarness
         data.Profiles[0].Rules.Add(new() { Name = "Claude / Anthropic", Values = ["claude.ai", "anthropic.com"] });
         data.Profiles[0].Rules.Add(new() { Name = "Telegram", Kind = RuleKind.Application, Values = ["Telegram.exe"] });
         data.Settings.TunnelMode = TunnelMode.Proxy;
+        data.Settings.AccentColor = "Cyan"; data.Settings.DesignVersion = 0;
         store.Save(data);
         var vm = new MainViewModel(store);
+        if (vm.AccentColor != "Blue" || store.Load().Settings.DesignVersion != 1) throw new InvalidOperationException("Existing settings must adopt the Night Track theme once.");
+        vm.AccentColor = "Violet"; vm.Dispose(); vm = new MainViewModel(store);
+        if (vm.AccentColor != "Violet") throw new InvalidOperationException("A later custom accent must survive restart.");
+        vm.AccentColor = "Blue";
         if (vm.Settings.TunnelMode != TunnelMode.Tun) throw new InvalidOperationException("Startup must select TUN even after a prior proxy session.");
         if (vm.LatencyIndex != 1) throw new InvalidOperationException("Exact VPN latency must be the default.");
         foreach (var server in vm.Data.Servers) if (CountryInfo.Resolve(server.Name) is not { } code || FlagView.GetImage(code) is null) throw new InvalidOperationException("Every known fixture country must have a bundled flag.");
@@ -87,6 +92,7 @@ internal static class SmokeHarness
             while (vm.SelectedServer?.LatencyMs != -1) await Task.Delay(30, pingTimeout.Token);
         vm.LatencyIndex = 1;
         report.Add("Home: scrollable all-subscription server list and controls; server navigation; routing-mode dialog; clickable ping and red unavailable state.");
+        await CheckHomeStatesAsync(window, vm, report);
         vm.Go("Settings"); await Task.Delay(200); window.UpdateLayout();
         var settings = Descendants(window).OfType<SettingsView>().Single();
         var settingsSearch = (TextBox)settings.FindName("SettingsSearch");
@@ -135,7 +141,7 @@ internal static class SmokeHarness
         vm.SidebarCollapsed = true; await Task.Delay(300);
         if (Math.Abs(((Border)window.FindName("SidebarHost")).ActualWidth - 76) > .1) throw new InvalidOperationException("Sidebar must settle at its collapsed width.");
         vm.SidebarCollapsed = false; await Task.Delay(300);
-        if (Math.Abs(((Border)window.FindName("SidebarHost")).ActualWidth - 214) > .1) throw new InvalidOperationException("Sidebar must restore its expanded width.");
+        if (Math.Abs(((Border)window.FindName("SidebarHost")).ActualWidth - 200) > .1) throw new InvalidOperationException("Sidebar must restore its expanded width.");
         if (vm.ImportQuickSubscription.CanExecute(null)) throw new InvalidOperationException("Empty quick subscription must be disabled.");
         var originalSubscriptions = vm.Data.Subscriptions.Count; var originalServers = vm.Data.Servers.Count;
         vm.QuickSource = $"vless://{Guid.NewGuid()}@127.0.0.1:9?security=none&type=tcp#Quick-import-fixture";
@@ -274,12 +280,14 @@ internal static class SmokeHarness
         var candidate = new AvailableUpdate(new(next, "fixture.exe", 90 * 1048576, new string('0', 64), "Более плавная работа приложения и улучшения подключения.\nНастройки, подписки и правила будут сохранены."), "fixture.exe");
         window.Hide(); vm.SetAvailableUpdate(candidate);
         if (vm.UpdateOverlayOpen) throw new InvalidOperationException("Updates must not open a window while the app is in the tray.");
-        window.Show(); window.Activate(); window.TryShowUpdate();
+        window.Show(); window.Activate();
+        await window.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
+        window.TryShowUpdate();
         await Task.Delay(350); window.UpdateLayout();
         var overlay = (UpdateOverlay)window.FindName("UpdatePopup");
         var surface = (Grid)window.FindName("AppSurface");
         if (!vm.UpdateOverlayOpen || !overlay.IsVisible || surface.IsEnabled || surface.Effect is not System.Windows.Media.Effects.BlurEffect)
-            throw new InvalidOperationException("The foreground update offer must be modal with a blurred, disabled background.");
+            throw new InvalidOperationException($"The foreground update offer must be modal with a blurred, disabled background. Active={window.IsActive}, visible={window.IsVisible}, open={vm.UpdateOverlayOpen}, overlay={overlay.IsVisible}, enabled={surface.IsEnabled}, effect={surface.Effect?.GetType().Name ?? "none"}.");
         Capture(window, "Update-Available");
         var oldWidth = window.Width; var oldHeight = window.Height; window.Width = 860; window.Height = 660; window.UpdateLayout();
         foreach (var name in new[] { "LaterButton", "UpdateButton" })
@@ -323,6 +331,50 @@ internal static class SmokeHarness
         vm.DeferUpdate.Execute(null); vm.SetAvailableUpdate(null);
         window.Width = oldWidth; window.Height = oldHeight; window.UpdateLayout();
         report.Add("Updates: tray deferral, automatic foreground offer, Not now/session suppression, explicit reopen, new release, modal blur, 46px actions at minimum size, progress/stages, reduced motion, hidden animation stop and retry UI. No installer launched.");
+    }
+    private static async Task CheckHomeStatesAsync(MainWindow window, MainViewModel vm, List<string> report)
+    {
+        // Presentation fixtures use actual traffic snapshots without starting a tunnel.
+        static void Set(MainViewModel target, string name, object value) => typeof(MainViewModel).GetProperty(name)!.SetValue(target, value);
+        static void Traffic(MainViewModel target, TrafficSnapshot? value) => typeof(MainViewModel).GetMethod("SetTraffic", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.Invoke(target, [value]);
+        vm.Go("Home"); await vm.StopScansAsync(); window.UpdateLayout();
+        foreach (var (node, ms) in vm.Data.Servers.Zip(new long?[] { 25, 125, 310, 68, 91, 165, 240, null, 80 })) { node.LatencyMs = ms; node.Latency = ms is null ? "—" : ms + " ms"; }
+        var home = Descendants(window).OfType<HomeView>().Single();
+        var orbit = (RotateTransform)home.FindName("Orbit"); var shift = (TranslateTransform)home.FindName("SpeedShift");
+        Set(vm, nameof(vm.State), ConnectionState.Connecting);
+        await Task.Delay(180); window.UpdateLayout(); Capture(window, "Home-Connecting");
+        if (Motion.Enabled && !orbit.HasAnimatedProperties) throw new InvalidOperationException("Connecting must show a moving progress indicator.");
+        Set(vm, nameof(vm.State), ConnectionState.Connected); Set(vm, nameof(vm.VpnIp), "203.0.113.42"); Set(vm, nameof(vm.Session), "00:16:42");
+        TrafficSnapshot? sample = null;
+        var start = DateTimeOffset.UtcNow.AddSeconds(-60);
+        for (var i = 0; i < 60; i++)
+        {
+            sample = new((1.8 + Math.Cos(i * .45) * .6) * 125_000, (24 + Math.Sin(i * .35) * 8) * 125_000, 27_000_000, 410_000_000, start.AddSeconds(i));
+            Traffic(vm, sample);
+        }
+        Traffic(vm, sample);
+        if (vm.DownloadHistory.Count != 48 || vm.UploadHistory.Count != 48) throw new InvalidOperationException("Traffic histories must retain only 48 samples and ignore a repeated timestamp.");
+        await Task.Delay(200); window.UpdateLayout();
+        foreach (var chart in Descendants(home).OfType<TrafficChart>())
+            if (chart.Samples?.Count != 48 || chart.ActualWidth <= 0 || chart.ActualHeight <= 0) throw new InvalidOperationException("Traffic charts must display their measured direction.");
+        if (Motion.Enabled && (!shift.HasAnimatedProperties || orbit.HasAnimatedProperties)) throw new InvalidOperationException("Connected motion must replace the loading spinner.");
+        Capture(window, "Home-Connected");
+        var oldWidth = window.Width; var oldHeight = window.Height;
+        window.Width = window.MinWidth; window.Height = window.MinHeight; window.UpdateLayout(); Capture(window, "Home-Connected-Minimum");
+        var connect = (Button)home.FindName("ConnectPower");
+        if (connect.ActualWidth < 218 || connect.ActualHeight < 54) throw new InvalidOperationException("The primary action must keep its full area at minimum size.");
+        I18n.Set("English"); window.UpdateLayout(); Capture(window, "Home-English-Minimum"); I18n.Set("Русский");
+        window.Width = oldWidth; window.Height = oldHeight;
+        vm.AnimationsEnabled = false;
+        if (shift.HasAnimatedProperties || orbit.HasAnimatedProperties) throw new InvalidOperationException("Home motion must respect reduced motion.");
+        vm.AnimationsEnabled = true; window.Hide();
+        if (shift.HasAnimatedProperties || orbit.HasAnimatedProperties) throw new InvalidOperationException("Home motion must stop while hidden.");
+        window.Show(); window.Activate(); await Task.Delay(100);
+        Set(vm, nameof(vm.State), ConnectionState.Error); Traffic(vm, null); Set(vm, nameof(vm.VpnIp), "—"); Set(vm, nameof(vm.Session), "—");
+        window.UpdateLayout(); Capture(window, "Home-Error");
+        Set(vm, nameof(vm.State), ConnectionState.Disconnected);
+        if (vm.DownloadHistory.Count != 0 || vm.UploadHistory.Count != 0 || shift.HasAnimatedProperties || orbit.HasAnimatedProperties) throw new InvalidOperationException("Disconnected home must clear session traffic and stop motion.");
+        report.Add("Night Track: one-time theme migration preserves later accent choices; connecting/connected/error and English/minimum layouts; real-direction charts capped at 48 unique samples; reduced motion and hidden animation stop.");
     }
     private static void Capture(Window window, string name)
     {

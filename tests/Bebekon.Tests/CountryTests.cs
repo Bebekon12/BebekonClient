@@ -32,6 +32,6 @@ public class CountryTests
     {
         var settings = System.Text.Json.JsonSerializer.Deserialize<Settings>("{\"mtu\":1500}", Json.Options)!;
         Assert.True(settings.Animations); Assert.True(settings.GlowEffects);
-        Assert.Equal("Cyan", settings.AccentColor); Assert.False(settings.PureBlack);
+        Assert.Equal("Blue", settings.AccentColor); Assert.False(settings.PureBlack);
     }
 }
