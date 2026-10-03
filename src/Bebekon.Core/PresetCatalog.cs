@@ -8,7 +8,8 @@ public static class PresetCatalog
     {
         using var services = typeof(PresetCatalog).Assembly.GetManifestResourceStream("Bebekon.Core.Presets.json")!;
         using var admin = typeof(PresetCatalog).Assembly.GetManifestResourceStream("Bebekon.Core.Admin.json")!;
-        return [JsonSerializer.Deserialize<Preset>(admin, Json.Options)!, .. JsonSerializer.Deserialize<List<Preset>>(services, Json.Options)!];
+        using var russia = typeof(PresetCatalog).Assembly.GetManifestResourceStream("Bebekon.Core.Russia.json")!;
+        return [JsonSerializer.Deserialize<Preset>(admin, Json.Options)!, JsonSerializer.Deserialize<Preset>(russia, Json.Options)!, .. JsonSerializer.Deserialize<List<Preset>>(services, Json.Options)!];
     }
     // Compare against the existing profile, preserving intentional duplicates within the screenshot preset.
     public static int Apply(Preset preset, Profile profile)

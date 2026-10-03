@@ -9,5 +9,6 @@
     <EmbeddedResource Include="../../resources/geo/*-*.json" LogicalName="Bebekon.Core.Geo.%(Filename)%(Extension)" />
     <EmbeddedResource Include="../../resources/presets/services.json" LogicalName="Bebekon.Core.Presets.json" />
     <EmbeddedResource Include="../../resources/presets/admin.json" LogicalName="Bebekon.Core.Admin.json" />
+    <EmbeddedResource Include="../../resources/presets/russia.json" LogicalName="Bebekon.Core.Russia.json" />
   </ItemGroup>
 </Project>

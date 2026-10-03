@@ -2,6 +2,16 @@
   "generator": "OpenAI built-in image_gen",
   "asset": "snowman.png",
   "background": "transparent",
-  "iconSizes": [16, 24, 32, 48, 64, 128, 256],
-  "prompt": "Use case: logo-brand. Asset type: Windows desktop VPN application icon and sidebar mascot. Create one polished, bold, easily recognizable icon: a friendly white snowman wearing dark navy sporty sunglasses and a flowing bright blue scarf, leaning forward and running fast, two compact snowball feet in a dynamic running stride, with two short blue speed streaks behind him. Cool white, ice blue, cyan and deep navy palette only. Crisp contemporary rounded illustrated forms, subtle blue shading for volume, strong silhouette legible at 32px, compact centered square composition with about 10% safe padding. Full character, no cropping. Transparent background, no tile, no text, no letters, no watermark, no extra objects. This replaces the logo of an elegant dark teal and cyan Windows VPN app."
+  "iconSizes": [
+    16,
+    24,
+    32,
+    48,
+    64,
+    128,
+    256
+  ],
+  "edit": "Add only a dark navy trilby hat to the existing mascot; preserve white/blue colors, glasses, scarf and running pose.",
+  "prompt": "Use case: precise-object-edit / logo-brand. Edit target: Image 1, the existing transparent Bebekon VPN snowman logo. Supporting style input: Image 2 shows ONLY the kind of hat to add. Change ONLY this: add a small dark navy-black short-crowned fedora/trilby hat with a pinched crown and slightly curved brim, tilted playfully forward, seated naturally on the top of the existing snowman's head, like the hat silhouette in Image 2. Keep everything else from Image 1 unchanged: exact running pose and figure proportions, original sporty blue sunglasses, blue nose and smile, white snowy body, blue flowing scarf, both arms and feet, black-blue buttons, existing cyan-blue speed streaks, lighting, illustration style, blue/white color palette, silhouette and placement. Do NOT recreate the low-resolution mascot from Image 2; transfer only its hat idea. Do not make the face skeletal or serious. Keep the original mascot size, centering, full figure and clear safe margins. Do not crop the hat or feet. The new hat should have subtle cool blue edge highlights so it is legible on a dark navy desktop interface, without adding any other accessories or colors. Output a crisp high resolution square PNG with genuine transparent background; no backdrop, tile, text, watermark, UI, badge, or border. Preserve the existing transparency. Retain all original pixels outside the local hat edit as closely as possible.",
+  "source": "Existing Bebekon snowman + user's hat reference, 2026-10-04"
 }

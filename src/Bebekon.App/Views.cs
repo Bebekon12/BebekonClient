@@ -35,31 +35,24 @@ public sealed class LatencyBrushConverter : IValueConverter
     }
     public object ConvertBack(object value, Type type, object parameter, CultureInfo culture) => throw new NotSupportedException();
 }
+public sealed class ViewContext : Freezable
+{
+    public static readonly DependencyProperty DataProperty = DependencyProperty.Register(nameof(Data), typeof(object), typeof(ViewContext));
+    public object Data { get => GetValue(DataProperty); set => SetValue(DataProperty, value); }
+    protected override Freezable CreateInstanceCore() => new ViewContext();
+}
 public partial class ServersView : UserControl
 {
     public static readonly DependencyProperty EmbeddedProperty = DependencyProperty.Register(nameof(Embedded), typeof(bool), typeof(ServersView), new PropertyMetadata(false));
+    public static readonly DependencyProperty ToolbarOnlyProperty = DependencyProperty.Register(nameof(ToolbarOnly), typeof(bool), typeof(ServersView), new PropertyMetadata(false));
+    public static readonly DependencyProperty CompactProperty = DependencyProperty.Register(nameof(Compact), typeof(bool), typeof(ServersView), new PropertyMetadata(false));
     public bool Embedded { get => (bool)GetValue(EmbeddedProperty); set => SetValue(EmbeddedProperty, value); }
+    public bool ToolbarOnly { get => (bool)GetValue(ToolbarOnlyProperty); set => SetValue(ToolbarOnlyProperty, value); }
+    public bool Compact { get => (bool)GetValue(CompactProperty); private set => SetValue(CompactProperty, value); }
     public ServersView()
     {
         InitializeComponent();
-        ServerList.PreviewMouseWheel += (_, e) =>
-        {
-            if (!Embedded || FindScroll(ServerList) is not { } inner) return;
-            if (!(e.Delta > 0 && inner.VerticalOffset <= 0 || e.Delta < 0 && inner.VerticalOffset >= inner.ScrollableHeight)) return;
-            DependencyObject? parent = VisualTreeHelper.GetParent(this);
-            while (parent is not null && parent is not ScrollViewer) parent = VisualTreeHelper.GetParent(parent);
-            if (parent is ScrollViewer outer) { outer.ScrollToVerticalOffset(outer.VerticalOffset - e.Delta / 2.0); e.Handled = true; }
-        };
-    }
-    private static ScrollViewer? FindScroll(DependencyObject node)
-    {
-        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(node); i++)
-        {
-            var child = VisualTreeHelper.GetChild(node, i);
-            if (child is ScrollViewer scroll) return scroll;
-            if (FindScroll(child) is { } found) return found;
-        }
-        return null;
+        SizeChanged += (_, _) => Compact = ActualWidth < 780;
     }
 }
 public partial class SubscriptionsView : UserControl { public SubscriptionsView() => InitializeComponent(); }
@@ -98,13 +91,14 @@ public partial class RulesView : UserControl
     private void RulesMode(object sender, RoutedEventArgs e) { if (DataContext is MainViewModel vm) vm.IsWholePc = false; }
     private void BeginDrag(object sender, MouseButtonEventArgs e)
     {
+        if (DataContext is not MainViewModel { RuleSortIndex: 1 }) { source = null; return; }
         dragStart = e.GetPosition(this);
         var original = e.OriginalSource as DependencyObject;
         while (original is not null) { if (original is System.Windows.Controls.Primitives.ButtonBase) { source = null; return; } if (original is ListBoxItem item) { source = item.DataContext as RoutingRule; return; } original = VisualTreeHelper.GetParent(original); }
         source = null;
     }
     private void MoveDrag(object sender, System.Windows.Input.MouseEventArgs e) { if (e.LeftButton != MouseButtonState.Pressed || source is null || (e.GetPosition(this) - dragStart).Length < 10) return; var rule = source; source = null; System.Windows.DragDrop.DoDragDrop(this, rule, DragDropEffects.Move); }
-    private void DropRule(object sender, System.Windows.DragEventArgs e) { var element = e.OriginalSource as DependencyObject; while (element is not null && element is not ListBoxItem) element = VisualTreeHelper.GetParent(element); if (element is ListBoxItem { DataContext: RoutingRule target } && e.Data.GetData(typeof(RoutingRule)) is RoutingRule origin && DataContext is MainViewModel vm) vm.Reorder(origin, target); }
+    private void DropRule(object sender, System.Windows.DragEventArgs e) { var element = e.OriginalSource as DependencyObject; while (element is not null && element is not ListBoxItem) element = VisualTreeHelper.GetParent(element); if (element is ListBoxItem { DataContext: RoutingRule target } && e.Data.GetData(typeof(RoutingRule)) is RoutingRule origin && DataContext is MainViewModel { RuleSortIndex: 1 } vm) vm.Reorder(origin, target); }
 }
 public sealed class SelectionConverter : IMultiValueConverter
 {

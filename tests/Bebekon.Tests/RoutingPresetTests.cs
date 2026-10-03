@@ -85,6 +85,7 @@ public sealed class RoutingPresetTests
         try
         {
             var p = new Profile(); PresetCatalog.Apply(PresetCatalog.Load()[0], p);
+            PresetCatalog.Apply(PresetCatalog.Load().Single(preset => preset.Name.StartsWith("Россия")), p);
             foreach (var tag in GeoCatalog.Available(RuleKind.GeoIp)) p.Rules.Add(new() { Name = tag, Kind = RuleKind.GeoIp, Values = [tag] });
             foreach (var tag in GeoCatalog.Available(RuleKind.GeoSite)) p.Rules.Add(new() { Name = tag, Kind = RuleKind.GeoSite, Values = [tag] });
             var second = CoreTests.Node(); second.Id = Guid.NewGuid().ToString("N"); p.Rules.Add(new() { Name = "Pinned", Values = ["example.net"], ServerId = second.Id });

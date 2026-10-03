@@ -1,4 +1,4 @@
-param([string]$InnoCompiler, [switch]$SkipInstaller, [string]$PublishFolder = 'artifacts\release', [string]$UpdateFeedUrl = 'https://github.com/Bebekon12/BebekonClient/releases/latest/download/update.json', [string]$InstallerUrl, [string]$ReleaseNotes = 'Новый дизайн Night Track: снеговик на ночной трассе, синяя палитра, единый блок подключения и графики трафика.')
+param([string]$InnoCompiler, [switch]$SkipInstaller, [string]$PublishFolder = 'artifacts\release', [string]$UpdateFeedUrl = 'https://github.com/Bebekon12/BebekonClient/releases/latest/download/update.json', [string]$InstallerUrl, [string]$ReleaseNotes = 'Общая прокрутка главной, четыре метода пинга, новые правила для России, исправления меню и снеговик в шляпе.')
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $projectRoot = $PSScriptRoot
@@ -45,7 +45,7 @@ foreach ($file in Get-ChildItem -LiteralPath $servicePublishRoot -File -Recurse)
 Copy-Item -LiteralPath scripts -Destination $appPublishRoot -Recurse -Force
 Copy-Item -LiteralPath README.md,ARCHITECTURE.md,LICENSE -Destination $appPublishRoot -Force
 New-Item -ItemType Directory -Path (Join-Path $appPublishRoot 'docs') -Force | Out-Null
-Copy-Item -LiteralPath docs\VALIDATION.md,docs\UPDATES.md -Destination (Join-Path $appPublishRoot 'docs') -Force
+Copy-Item -LiteralPath docs\VALIDATION.md,docs\UPDATES.md,docs\DESIGN.md,docs\CLIENT-REVIEW.md,docs\RUSSIA-RULES.md -Destination (Join-Path $appPublishRoot 'docs') -Force
 New-Item -ItemType Directory -Path (Join-Path $appPublishRoot 'resources\geo') -Force | Out-Null
 Copy-Item -LiteralPath resources\geo\README.md,resources\geo\LICENSE-SagerNet,resources\geo\sources.json -Destination (Join-Path $appPublishRoot 'resources\geo') -Force
 Copy-Item -LiteralPath core\LICENSE,core\version.json -Destination (Join-Path $appPublishRoot 'core') -Force

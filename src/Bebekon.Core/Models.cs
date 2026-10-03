@@ -22,7 +22,7 @@ public static class LatencyDisplay
 }
 public enum TunnelMode { Tun, Proxy }
 public enum ConnectionState { Disconnected, Connecting, Connected, Disconnecting, Error }
-public enum LatencyMode { Fast, Exact }
+public enum LatencyMode { Tcp, HttpsGet, HttpsHead, Icmp }
 
 public sealed class Server : Observable
 {
@@ -62,6 +62,7 @@ public sealed class Server : Observable
 public sealed class RoutingRule : Observable
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public DateTimeOffset? CreatedAt { get; set; }
     public string Name { get; set; } = "";
     public RuleKind Kind { get; set; }
     public List<string> Values { get; set; } = [];
@@ -95,6 +96,7 @@ public sealed class Subscription
 public sealed class Settings
 {
     public int DesignVersion { get; set; }
+    public LatencyMode LatencyMode { get; set; } = LatencyMode.HttpsGet;
     public bool CheckForUpdates { get; set; } = true;
     public string UpdateSource { get; set; } = "";
     public string Language { get; set; } = "Русский";
@@ -122,11 +124,11 @@ public sealed class AppState
     public string? SelectedServerId { get; set; }
     public string? SelectedProfileId { get; set; }
 }
-public sealed record Preset(string Name, string Icon, List<string> Domains, List<RoutingRule>? Rules = null)
+public sealed record Preset(string Name, string Icon, List<string> Domains, List<RoutingRule>? Rules = null, string? Description = null)
 {
     [JsonIgnore] public int RuleCount => Rules?.Count ?? 1;
-    [JsonIgnore] public string Summary => Rules is null ? string.Join(", ", Domains) : $"{Rules.Count} правила · {Rules.Count(r => r.UseVpn)} через VPN · {Rules.Count(r => !r.UseVpn)} без VPN";
-    public List<RoutingRule> CreateRules() => Rules is null ? [new() { Name = Name, Values = [.. Domains] }] : Rules.OrderBy(r => r.UseVpn).Select(r => new RoutingRule { Name = r.Name, Kind = r.Kind, Values = [.. r.Values], UseVpn = r.UseVpn, ServerId = r.ServerId }).ToList();
+    [JsonIgnore] public string Summary => Description ?? (Rules is null ? string.Join(", ", Domains) : $"{Rules.Count} правила · {Rules.Count(r => r.UseVpn)} через VPN · {Rules.Count(r => !r.UseVpn)} без VPN");
+    public List<RoutingRule> CreateRules() => Rules is null ? [new() { CreatedAt = DateTimeOffset.UtcNow, Name = Name, Values = [.. Domains] }] : Rules.OrderBy(r => r.UseVpn).Select(r => new RoutingRule { CreatedAt = DateTimeOffset.UtcNow, Name = r.Name, Kind = r.Kind, Values = [.. r.Values], UseVpn = r.UseVpn, ServerId = r.ServerId }).ToList();
 }
 public static class Json
 {

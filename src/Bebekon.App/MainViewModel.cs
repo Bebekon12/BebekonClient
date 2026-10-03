@@ -13,12 +13,16 @@ public sealed partial class MainViewModel : Observable, IDisposable
     private readonly StateStore store;
     private readonly IServiceClient service;
     private readonly Func<ConnectSpec, CancellationToken, Task>? testProbe;
+    private readonly Func<Server, LatencyMode, bool, CancellationToken, Action?, Task<LatencyResult>>? testLatency;
     private readonly LatencyService latency = new(Path.Combine(AppContext.BaseDirectory, "core", "sing-box.exe"));
     private readonly SafeLog log = new(Paths.Logs, "app");
     private readonly SemaphoreSlim connectionGate = new(1);
     private readonly CancellationTokenSource lifetime = new();
     private CancellationTokenSource? scan;
     private Task? activeScan;
+    private int latencyGeneration;
+    private int latencyRequest;
+    private readonly Dictionary<string, int> latestLatencyRequests = [];
     private CancellationTokenSource? applyDelay;
     private CancellationTokenSource? networkDelay;
     private bool recovering;
@@ -63,7 +67,12 @@ public sealed partial class MainViewModel : Observable, IDisposable
     public string FooterLabel => Connected ? T("онлайн", "online") : T("офлайн", "offline");
     public string FooterMode => Connected ? Settings.TunnelMode == TunnelMode.Tun ? "TUN" : T("Прокси", "Proxy") : T("Нет подключения", "Disconnected");
     private string vpnIp = "—";
-    public string VpnIp { get => vpnIp; private set => Set(ref vpnIp, value); }
+    public string VpnIp { get => vpnIp; private set { if (Set(ref vpnIp, value)) Notify(nameof(PublicIpLabel)); } }
+    public string PublicIpLabel => T("Публичный IP VPN", "VPN public IP") + (System.Net.IPAddress.TryParse(VpnIp, out var address) ? " · " + (address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork ? "IPv4" : "IPv6") : "");
+    private LocalAddressSnapshot localAddresses = NetworkAddresses.Read();
+    public string LocalIp => localAddresses.Address ?? "—";
+    public string LocalIpLabel => T(localAddresses.Private ? "Приватный IP" : "Локальный IP", localAddresses.Private ? "Private IP" : "Local IP");
+    public string LocalIpDetail => localAddresses.Detail;
     private string session = "—";
     public string Session { get => session; private set => Set(ref session, value); }
     private TrafficSnapshot? traffic;
@@ -86,10 +95,13 @@ public sealed partial class MainViewModel : Observable, IDisposable
     private string serverSearch = "", ruleSearch = "";
     public string ServerSearch { get => serverSearch; set { if (Set(ref serverSearch, value)) RefreshServers(); } }
     public string RuleSearch { get => ruleSearch; set { if (Set(ref ruleSearch, value)) RefreshRules(); } }
+    private int ruleSortIndex;
+    public int RuleSortIndex { get => ruleSortIndex; set { if (Set(ref ruleSortIndex, value)) { RefreshRules(); Notify(nameof(RulesOrderHint)); } } }
+    public string RulesOrderHint => RuleSortIndex == 0 ? T("Сначала новые. Для изменения порядка выполнения выберите «По приоритету».", "Newest first. Choose ‘By priority’ to change execution order.") : T("Правила сверху имеют приоритет. Перетащите строку, чтобы изменить порядок.", "Top rules have priority. Drag a row to change execution order.");
     private int sortIndex;
     public int SortIndex { get => sortIndex; set { if (Set(ref sortIndex, value)) RefreshServers(); } }
     private int latencyIndex = 1;
-    public int LatencyIndex { get => latencyIndex; set { if (Set(ref latencyIndex, value)) { scan?.Cancel(); foreach (var s in Data.Servers) { s.Latency = "—"; s.LatencyMs = null; } RefreshServers(); if (PageName == "Servers") _ = ScanSafelyAsync(); } } }
+    public int LatencyIndex { get => latencyIndex; set { if (value is < 0 or > 3) return; if (Set(ref latencyIndex, value)) { latencyGeneration++; scan?.Cancel(); Settings.LatencyMode = (LatencyMode)value; Save(); foreach (var s in Data.Servers) { s.Latency = "—"; s.LatencyMs = null; } RefreshServers(); if (PageName == "Servers") _ = ScanSafelyAsync(); } } }
     private bool listMode = true;
     public bool ListMode { get => listMode; set { if (Set(ref listMode, value)) { Notify(nameof(SecondColumn)); RefreshServers(); } } }
     public GridLength SecondColumn => new(ListMode ? 0 : 1, GridUnitType.Star);
@@ -139,10 +151,11 @@ public sealed partial class MainViewModel : Observable, IDisposable
     public event Action? StatusChanged;
 
     public MainViewModel(StateStore? storage = null) : this(storage, new ServiceClient(), null) { }
-    internal MainViewModel(StateStore? storage, IServiceClient client, Func<ConnectSpec, CancellationToken, Task>? probe)
+    internal MainViewModel(StateStore? storage, IServiceClient client, Func<ConnectSpec, CancellationToken, Task>? probe, Func<Server, LatencyMode, bool, CancellationToken, Action?, Task<LatencyResult>>? latencyProbe = null)
     {
-        service = client; testProbe = probe;
+        service = client; testProbe = probe; testLatency = latencyProbe;
         store = storage ?? new(); Data = store.Load();
+        latencyIndex = Enum.IsDefined(Settings.LatencyMode) ? (int)Settings.LatencyMode : 1;
         if (Settings.DesignVersion < 1) { Settings.AccentColor = "Blue"; Settings.DesignVersion = 1; store.Save(Data); }
         Settings.TunnelMode = TunnelMode.Tun;
         if (storage is null) Settings.StartWithWindows = AutoStart.IsEnabled;
@@ -180,7 +193,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
         EditRule = new Command(p => { var rule = (RoutingRule)p!; var edit = Dialogs.Rule(rule, Data.Servers); if (edit is null) return; var i = ActiveProfile.Rules.IndexOf(rule); rule.PropertyChanged -= OnRuleChanged; ActiveProfile.Rules[i] = edit; RulesChanged(); });
         DeleteRule = new Command(p => { var rule = (RoutingRule)p!; rule.PropertyChanged -= OnRuleChanged; ActiveProfile.Rules.Remove(rule); RulesChanged(); });
         AddPreset = new Command(_ => { var preset = Dialogs.Preset(Presets); if (preset is null) return; var count = PresetCatalog.Apply(preset, ActiveProfile); RulesChanged(); Banner = count == 0 ? T("Этот набор уже добавлен.", "This preset has already been added.") : T($"Добавлено правил: {count}.", $"Added {count} rules."); });
-        AddApplication = Async(async _ => { var app = await Dialogs.ApplicationAsync(); if (app is null) return; ActiveProfile.Rules.Add(new() { Kind = RuleKind.Application, Name = app.Name, Values = [app.Path] }); RulesChanged(); });
+        AddApplication = Async(async _ => { var app = await Dialogs.ApplicationAsync(); if (app is null) return; ActiveProfile.Rules.Add(new() { CreatedAt = DateTimeOffset.UtcNow, Kind = RuleKind.Application, Name = app.Name, Values = [app.Path] }); RulesChanged(); });
         AddProfile = new Command(_ => { var name = Dialogs.Text(T("Создать профиль", "Create profile"), T("Название", "Name"), "Работа"); if (string.IsNullOrWhiteSpace(name)) return; var profile = new Profile { Name = name }; Data.Profiles.Add(profile); ActiveProfile = profile; Save(); });
         DeleteProfile = new Command(_ => { if (Data.Profiles.Count <= 1) { Banner = T("Нужен хотя бы один профиль.", "Keep at least one profile."); return; } if (!Dialogs.Confirm(T("Удалить профиль?", "Delete profile?"), ActiveProfile.Name)) return; var old = ActiveProfile; ActiveProfile = Data.Profiles.First(p => p != old); Data.Profiles.Remove(old); Save(); });
         ExportProfile = new Command(_ => { var dialog = new Microsoft.Win32.SaveFileDialog { Filter = "Bebekon profile (*.json)|*.json", FileName = ActiveProfile.Name + ".json" }; if (dialog.ShowDialog() == true) File.WriteAllText(dialog.FileName, ProfileCodec.Export(ActiveProfile)); });
@@ -229,7 +242,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
     }
     private async Task RunScanAsync(bool force)
     {
-        if (Scanning) return; Scanning = true; scan?.Dispose(); scan = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token); var token = scan.Token; var mode = LatencyIndex == 0 ? LatencyMode.Fast : LatencyMode.Exact;
+        if (Scanning) return; Scanning = true; scan?.Dispose(); scan = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token); var token = scan.Token;
         var nodes = Data.Servers.ToArray();
         foreach (var node in nodes) if (node.LatencyMs is null) node.Latency = T("В очереди", "Queued");
         try { await Task.WhenAll(nodes.Select(s => MeasureServerAsync(s, force, token))); RefreshServers(); }
@@ -238,14 +251,20 @@ public sealed partial class MainViewModel : Observable, IDisposable
     }
     private async Task MeasureServerAsync(Server node, bool force, CancellationToken token)
     {
-        var mode = LatencyIndex == 0 ? LatencyMode.Fast : LatencyMode.Exact;
-        var result = await latency.MeasureAsync(node, mode, force, token, () => { if (node.LatencyMs is null) node.Latency = T("Проверка…", "Checking…"); });
+        var mode = (LatencyMode)LatencyIndex;
+        var generation = latencyGeneration;
+        var request = ++latencyRequest;
+        latestLatencyRequests[node.Id] = request;
+        var identity = ServerRefresh.ConnectionKey(node);
+        bool Current() => generation == latencyGeneration && latestLatencyRequests.GetValueOrDefault(node.Id) == request && (Data.Servers.Contains(node) || ReferenceEquals(SelectedServer, node)) && identity == ServerRefresh.ConnectionKey(node);
+        var result = await (testLatency ?? latency.MeasureAsync)(node, mode, force, token, () => { if (Current() && node.LatencyMs is null) node.Latency = T("Проверка…", "Checking…"); });
         token.ThrowIfCancellationRequested();
-        if (mode != (LatencyIndex == 0 ? LatencyMode.Fast : LatencyMode.Exact)) return;
-        node.Latency = mode == LatencyMode.Exact && !node.Supported ? "—" : result.Milliseconds is { } ms
-            ? (mode == LatencyMode.Fast ? "TCP · " : "") + ms + T(" мс", " ms")
+        if (!Current()) return;
+        var supported = node.Supported || mode is LatencyMode.Tcp or LatencyMode.Icmp;
+        node.Latency = !supported ? "—" : result.Milliseconds is { } ms
+            ? ms + T(" мс", " ms")
             : result.TimedOut ? T("Таймаут", "Timeout") : T("Недоступен", "Unavailable");
-        node.LatencyMs = result.Milliseconds ?? (node.Supported ? -1 : null);
+        node.LatencyMs = result.Milliseconds ?? (supported ? -1 : null);
     }
     private async Task RefreshSubAsync(Subscription sub) { var servers = await SubscriptionLoader.LoadAsync(sub.Source, lifetime.Token); ReplaceServers(sub, servers); Save(); }
     internal void ReplaceServers(Subscription sub, List<Server> incoming)
@@ -265,7 +284,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
         servers = SortIndex == 0 ? servers.OrderBy(s => s.LatencyMs is >= 0 ? s.LatencyMs : long.MaxValue).ThenBy(s => s.Name) : servers.OrderBy(s => s.Name);
         var array = servers.ToArray(); ServerRows.Clear(); for (var i = 0; i < array.Length; i += ListMode ? 1 : 2) ServerRows.Add(new(array[i], !ListMode && i + 1 < array.Length ? array[i + 1] : null)); Notify(nameof(ServerCount)); Notify(nameof(NoServers));
     }
-    private void RefreshRules() { VisibleRules.Clear(); foreach (var r in ActiveProfile.Rules.Where(r => r.Name.Contains(RuleSearch, StringComparison.OrdinalIgnoreCase) || r.Description.Contains(RuleSearch, StringComparison.OrdinalIgnoreCase))) VisibleRules.Add(r); Notify(nameof(RuleCount)); Notify(nameof(NoRules)); }
+    private void RefreshRules() { VisibleRules.Clear(); var rules = ActiveProfile.Rules.Where(r => r.Name.Contains(RuleSearch, StringComparison.OrdinalIgnoreCase) || r.Description.Contains(RuleSearch, StringComparison.OrdinalIgnoreCase)); if (RuleSortIndex == 0) rules = rules.OrderByDescending(r => r.CreatedAt); foreach (var r in rules) VisibleRules.Add(r); Notify(nameof(RuleCount)); Notify(nameof(NoRules)); }
     private void AttachProfile() { foreach (var r in ActiveProfile.Rules) { r.PropertyChanged -= OnRuleChanged; r.PropertyChanged += OnRuleChanged; } }
     private void DetachProfile(Profile p) { foreach (var r in p.Rules) r.PropertyChanged -= OnRuleChanged; }
     private void OnRuleChanged(object? sender, PropertyChangedEventArgs e) { if (e.PropertyName == nameof(RoutingRule.UseVpn)) { Save(); QueueApply(); } }
@@ -407,6 +426,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
     private void OnAddress(object? sender, EventArgs e) => ScheduleNetworkCheck();
     private void ScheduleNetworkCheck(bool force = false) => Application.Current.Dispatcher.InvokeAsync(async () =>
     {
+        localAddresses = NetworkAddresses.Read(); Notify(nameof(LocalIp)); Notify(nameof(LocalIpLabel)); Notify(nameof(LocalIpDetail));
         var currentUplink = UplinkSignature(); var changed = currentUplink != uplinkSignature; uplinkSignature = currentUplink;
         if ((!force && !changed) || !desiredConnected || !Connected || recovering) return;
         networkDelay?.Cancel(); networkDelay?.Dispose(); networkDelay = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token); var token = networkDelay.Token;
@@ -447,7 +467,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
         try
         {
             return string.Join("|", NetworkInterface.GetAllNetworkInterfaces().Where(n => n.OperationalStatus == OperationalStatus.Up && n.NetworkInterfaceType is NetworkInterfaceType.Ethernet or NetworkInterfaceType.Wireless80211)
-                .Where(n => !new[] { "tun", "virtual", "hyper-v", "loopback" }.Any(word => n.Description.Contains(word, StringComparison.OrdinalIgnoreCase)) && n.Name != "Bebekon")
+                .Where(n => !new[] { "tun", "tap", "vpn", "virtual", "hyper-v", "loopback", "wireguard", "zerotier", "tailscale", "hamachi" }.Any(word => (n.Name + " " + n.Description).Contains(word, StringComparison.OrdinalIgnoreCase)) && n.Name != "Bebekon")
                 .Select(n => (n.Id, Properties: n.GetIPProperties())).Where(n => n.Properties.GatewayAddresses.Count > 0)
                 .Select(n => n.Id + ":" + string.Join(",", n.Properties.UnicastAddresses.Select(a => a.Address.ToString()).Order())).Order());
         }

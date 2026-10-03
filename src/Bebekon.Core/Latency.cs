@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
+using System.Net.NetworkInformation;
 using System.Security.Cryptography;
 
 namespace Bebekon.Core;
@@ -15,9 +16,11 @@ public sealed class LatencyService(string executable)
     public static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(5);
     public async Task<LatencyResult> MeasureAsync(Server server, LatencyMode mode, bool force, CancellationToken ct, Action? started = null)
     {
+        ct.ThrowIfCancellationRequested();
         var key = server.Id + mode + ServerRefresh.ConnectionKey(server);
         if (!force && cache.TryGetValue(key, out var prior) && DateTimeOffset.UtcNow - prior.MeasuredAt < TimeSpan.FromMinutes(3)) return prior;
-        var limit = mode == LatencyMode.Fast ? fastLimit : exactLimit;
+        if (!Enum.IsDefined(mode)) throw new ArgumentOutOfRangeException(nameof(mode));
+        var limit = mode is LatencyMode.Tcp or LatencyMode.Icmp ? fastLimit : exactLimit;
         await limit.WaitAsync(ct);
         try
         {
@@ -26,24 +29,42 @@ public sealed class LatencyService(string executable)
             deadline.CancelAfter(ProbeTimeout);
             var probeToken = deadline.Token;
             long? ms = null;
+            var probeTimedOut = false;
             try
             {
-                if (mode == LatencyMode.Fast)
+                if (mode == LatencyMode.Tcp)
                 {
                     var times = new List<long>();
                     for (var i = 0; i < 3; i++) { using var tcp = new TcpClient(); var sw = Stopwatch.StartNew(); await tcp.ConnectAsync(server.Host, server.Port, probeToken); times.Add(sw.ElapsedMilliseconds); }
                     times.Sort(); ms = times[1];
                 }
-                else if (server.Supported) ms = await ExactAsync(server, probeToken);
+                else if (mode == LatencyMode.Icmp)
+                {
+                    var addresses = await Dns.GetHostAddressesAsync(server.Host, probeToken);
+                    var address = addresses.FirstOrDefault(a => a.AddressFamily == AddressFamily.InterNetwork) ?? addresses.FirstOrDefault();
+                    if (address is not null)
+                    {
+                        var times = new List<long>();
+                        for (var i = 0; i < 3; i++)
+                        {
+                            using var ping = new Ping();
+                            var reply = await ping.SendPingAsync(address, ProbeTimeout, cancellationToken: probeToken);
+                            if (reply.Status != IPStatus.Success) { probeTimedOut = reply.Status == IPStatus.TimedOut; break; }
+                            times.Add(reply.RoundtripTime);
+                        }
+                        if (times.Count == 3) { times.Sort(); ms = times[1]; }
+                    }
+                }
+                else if (server.Supported) ms = await ExactAsync(server, mode == LatencyMode.HttpsHead ? HttpMethod.Head : HttpMethod.Get, probeToken);
             }
-            catch (Exception e) when (e is SocketException or HttpRequestException or OperationCanceledException or UserError or IOException) { ct.ThrowIfCancellationRequested(); }
+            catch (Exception e) when (e is SocketException or PingException or HttpRequestException or OperationCanceledException or UserError or IOException) { ct.ThrowIfCancellationRequested(); }
             ct.ThrowIfCancellationRequested();
-            var result = new LatencyResult(ms, mode, DateTimeOffset.UtcNow, deadline.IsCancellationRequested); cache[key] = result; return result;
+            var result = new LatencyResult(ms, mode, DateTimeOffset.UtcNow, deadline.IsCancellationRequested || probeTimedOut); cache[key] = result; return result;
         }
         finally { limit.Release(); }
     }
     public static int FreePort() { using var listener = new TcpListener(IPAddress.Loopback, 0); listener.Start(); return ((IPEndPoint)listener.LocalEndpoint).Port; }
-    private async Task<long?> ExactAsync(Server server, CancellationToken ct)
+    private async Task<long?> ExactAsync(Server server, HttpMethod method, CancellationToken ct)
     {
         var root = Path.Combine(Paths.UserRoot, "runtime", "probe-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(root);
         var spec = new ConnectSpec(server, new(), new(), FreePort(), Convert.ToHexString(RandomNumberGenerator.GetBytes(24)));
@@ -52,11 +73,22 @@ public sealed class LatencyService(string executable)
         {
             File.WriteAllText(path, ConfigGenerator.Generate(spec, true));
             using var core = new CoreProcess(executable, new(Paths.Logs, "core")); await core.StartAsync(path, ct);
-            using var http = ProbeClient(spec); http.Timeout = Timeout.InfiniteTimeSpan; var times = new List<long>();
-            for (var i = 0; i < 3; i++) { var sw = Stopwatch.StartNew(); using var request = new HttpRequestMessage(HttpMethod.Get, "https://www.gstatic.com/generate_204"); using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct); response.EnsureSuccessStatusCode(); times.Add(sw.ElapsedMilliseconds); }
-            times.Sort(); return times[1];
+            using var http = ProbeClient(spec); http.Timeout = Timeout.InfiniteTimeSpan;
+            return await MeasureHttpAsync(http, method, ct);
         }
         finally { Directory.Delete(root, true); }
+    }
+    internal static async Task<long> MeasureHttpAsync(HttpClient http, HttpMethod method, CancellationToken ct)
+    {
+        var times = new List<long>();
+        for (var i = 0; i < 3; i++)
+        {
+            var sw = Stopwatch.StartNew();
+            using var request = new HttpRequestMessage(method, "https://www.gstatic.com/generate_204");
+            using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+            response.EnsureSuccessStatusCode(); times.Add(sw.ElapsedMilliseconds);
+        }
+        times.Sort(); return times[1];
     }
     public static HttpClient ProbeClient(ConnectSpec spec) => new(new SocketsHttpHandler { Proxy = new WebProxy("socks5://127.0.0.1:" + spec.ProbePort) { Credentials = new NetworkCredential("bebekon", spec.ProbePassword) }, UseProxy = true, AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(4) };
     public static async Task<string> VpnIpAsync(ConnectSpec spec, CancellationToken ct)

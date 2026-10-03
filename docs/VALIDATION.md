@@ -71,6 +71,19 @@ Version 0.1.8 adds 15 update tests (150 total): signed local feed and package do
 - The first development render run hit a foreground-activation timing assertion in the existing update harness. Waiting for WPF's idle dispatcher before checking the automatic prompt resolved it; the published suite passed. Production foreground/tray eligibility is unchanged.
 - No installed helper or working app was replaced. Full UAC update acceptance and live TUN/browser routing remain in manual acceptance below.
 
+## Version 0.1.12 — 2026-10-04
+
+- Release build and self-contained app/helper publish succeeded, with zero compiler warnings/errors. All 173 core tests passed with no failures/skips.
+- GET and HEAD are verified independently: three requests use the selected verb, HTTP failures are rejected, and cancellation interrupts a pending response. Real isolated core probes against a silent local VLESS peer time out within the five-second active budget for both methods. Caller cancellation remains distinct.
+- Real Windows loopback ICMP succeeds independently of a closed TCP port. TCP cached results remain method-specific; changed connection parameters invalidate reuse. Cancelled callers cannot receive a cached result.
+- The Russia preset adds 18 validated rules, preserves an existing Direct exception, reapplication adds none, and timestamps round-trip through profile export/import. Official sing-box accepts the combined Russia/admin/embedded GeoSite and GeoIP configuration.
+- Controlled WPF latency regressions verify GET → HEAD → GET rejects the old GET answer, replaced server instances reject late results, and a retained selected node removed from a subscription still permits manual ping.
+- The published self-contained 0.1.12 app passed the complete WPF smoke suite. Home retains empty-list subscription guidance and has one visible vertical scroll surface; 1000 extra servers realize fewer than 80 containers at the bottom. The server and routing dock share style, height and vertical origin. Compact toolbars wrap without compressing their square actions.
+- Collapsed sidebar geometry checks keep the logo, halo and footer badge inside the 76px host. Newest-first rule display does not alter execution priority; edits preserve creation timestamps and priority view shows the actual execution order.
+- All five pages render at 100/125/150/175% and at 860×660. Connected and English minimum Home, collapsed sidebar, server quality colors, settings, shared dialogs and update progress were visually inspected. These are render-scale fixtures, not physical per-monitor DPI changes.
+- Existing refresh-selection stability, coalesced routing changes, startup edits, delayed stale recovery and manual disconnect/cancel regression checks remain passing. The working installation and actual system routes were not replaced.
+- Public release verification is performed after publication: signed latest feed, older/current version comparison, published asset sizes/digests and actual installer download/hash. Full installer/UAC/TUN acceptance remains pending below.
+
 ## Required manual acceptance — pending
 
 Version 0.1.9 changes the bundled update channel to GitHub Releases with a version-specific installer URL. The existing signed-update tests and published UI smoke suite are rerun for this release; the smoke checks the candidate local manifest before public release. Post-publication checks must verify the public latest feed, RSA signature, asset sizes and installer hash.

@@ -106,7 +106,7 @@ internal sealed class RuleEditor : StackPanel
         var values = ValueField.Text.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
         var name = NameField.Text.Trim();
         if (name.Length == 0 && values.Count > 0) name = Kind == RuleKind.Application ? Path.GetFileNameWithoutExtension(values[0]) : values[0];
-        var result = new RoutingRule { Id = original?.Id ?? Guid.NewGuid().ToString("N"), Name = name, Kind = Kind, Values = values, UseVpn = UseVpn, ServerId = UseVpn ? (ServerField.SelectedItem as RuleServerChoice)?.Id : null };
+        var result = new RoutingRule { Id = original?.Id ?? Guid.NewGuid().ToString("N"), CreatedAt = original is null ? DateTimeOffset.UtcNow : original.CreatedAt, Name = name, Kind = Kind, Values = values, UseVpn = UseVpn, ServerId = UseVpn ? (ServerField.SelectedItem as RuleServerChoice)?.Id : null };
         RuleValidation.Validate(result); return result;
     }
 }

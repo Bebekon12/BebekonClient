@@ -36,7 +36,7 @@ internal static class SmokeHarness
         if (vm.AccentColor != "Violet") throw new InvalidOperationException("A later custom accent must survive restart.");
         vm.AccentColor = "Blue";
         if (vm.Settings.TunnelMode != TunnelMode.Tun) throw new InvalidOperationException("Startup must select TUN even after a prior proxy session.");
-        if (vm.LatencyIndex != 1) throw new InvalidOperationException("Exact VPN latency must be the default.");
+        if (vm.LatencyIndex != 1) throw new InvalidOperationException("Recommended HTTPS GET latency must be the default.");
         foreach (var server in vm.Data.Servers) if (CountryInfo.Resolve(server.Name) is not { } code || FlagView.GetImage(code) is null) throw new InvalidOperationException("Every known fixture country must have a bundled flag.");
         return vm;
     }
@@ -46,13 +46,14 @@ internal static class SmokeHarness
         CheckTrayMenu(window, vm, report);
         await CheckCaptionButtonsAsync(window, vm, report);
         await ConnectionChecks.RunAsync(Path.Combine(Root, "connection-regression"));
+        await CheckStaleLatencyAsync(report);
         report.Add("Connection regressions: stable refreshed selection; coalesced rule edits; stable beyond 5 seconds; stale recovery ignored; manual off/cancel wins; edits during startup applied; traffic directions and units.");
-        vm.Go("Servers"); vm.LatencyIndex = 0; vm.LatencyIndex = 1; vm.LatencyIndex = 0; vm.CancelPing.Execute(null); vm.Go("Home");
+        vm.Go("Servers"); vm.LatencyIndex = 0; vm.LatencyIndex = 1; vm.LatencyIndex = 2; vm.LatencyIndex = 3; vm.LatencyIndex = 0; vm.CancelPing.Execute(null); vm.Go("Home");
         await Task.Delay(400);
         if (vm.Scanning) throw new InvalidOperationException("Rapid mode changes and navigation must cancel pending scans.");
         vm.LatencyIndex = 1;
         foreach (var (node, ms) in vm.Data.Servers.Zip(new long?[] { 25, 125, 310, 68, 91, 165, 240, null, 80 })) { node.LatencyMs = ms; node.Latency = ms is null ? "—" : ms + " ms"; }
-        report.Add("Bundled flags, exact default and rapid scan mode/navigation cancellation passed.");
+        report.Add("Bundled flags, HTTPS GET default and four-method scan/navigation cancellation passed.");
         foreach (var page in new[] { "Home", "Servers", "Rules", "Subscriptions", "Settings" })
         {
             vm.Go(page); await vm.StopScansAsync(); await Task.Delay(300); window.UpdateLayout();
@@ -70,11 +71,15 @@ internal static class SmokeHarness
         vm.Go("Home"); window.UpdateLayout();
         var home = Descendants(window).OfType<HomeView>().Single();
         var homeServers = (ServersView)home.FindName("HomeServers");
-        if (!homeServers.Embedded || Descendants(homeServers).OfType<ListBox>().Single().Items.Count != vm.ServerRows.Count)
-            throw new InvalidOperationException("Home must contain all subscription server rows.");
+        var homeList = (ListBox)home.FindName("HomeScroll");
+        if (!homeServers.Embedded || !homeServers.ToolbarOnly || homeList.Items.Count != vm.ServerRows.Count + 1)
+            throw new InvalidOperationException("Home must contain one overview and all subscription server rows.");
+        if (Descendants(home).OfType<ScrollViewer>().Count(v => v.IsVisible && v.ComputedVerticalScrollBarVisibility == Visibility.Visible) != 1) throw new InvalidOperationException("Home must have one shared scroll surface.");
         var scrollHome = Descendants(home).OfType<ScrollViewer>().First(); scrollHome.ScrollToBottom(); await Task.Delay(200); window.UpdateLayout();
         Capture(window, "Home-Servers");
-        scrollHome.ScrollToTop(); window.UpdateLayout();
+        scrollHome.ScrollToTop(); await Task.Delay(100); window.UpdateLayout();
+        var serverDock = (Button)home.FindName("OpenServersCard"); var modeDock = (Button)home.FindName("ModeCard");
+        if (Math.Abs(serverDock.ActualHeight - modeDock.ActualHeight) > .1 || Math.Abs(serverDock.TranslatePoint(new(), home).Y - modeDock.TranslatePoint(new(), home).Y) > .1 || !ReferenceEquals(serverDock.Style, modeDock.Style)) throw new InvalidOperationException("Home server and routing surfaces must have identical height, alignment and hover style.");
         ((Button)home.FindName("OpenServersCard")).Command.Execute("Servers");
         if (vm.PageName != "Servers") throw new InvalidOperationException("Home server card must navigate.");
         await vm.StopScansAsync(); vm.Go("Home"); window.UpdateLayout(); home = Descendants(window).OfType<HomeView>().Single();
@@ -93,6 +98,8 @@ internal static class SmokeHarness
         vm.LatencyIndex = 1;
         report.Add("Home: scrollable all-subscription server list and controls; server navigation; routing-mode dialog; clickable ping and red unavailable state.");
         await CheckHomeStatesAsync(window, vm, report);
+        await CheckHomeVirtualizationAsync(window, vm, report);
+        CheckNewestRules(vm, report);
         vm.Go("Settings"); await Task.Delay(200); window.UpdateLayout();
         var settings = Descendants(window).OfType<SettingsView>().Single();
         var settingsSearch = (TextBox)settings.FindName("SettingsSearch");
@@ -140,6 +147,14 @@ internal static class SmokeHarness
         report.Add("Live accent palettes, OLED and reduced-motion switch behavior passed.");
         vm.SidebarCollapsed = true; await Task.Delay(300);
         if (Math.Abs(((Border)window.FindName("SidebarHost")).ActualWidth - 76) > .1) throw new InvalidOperationException("Sidebar must settle at its collapsed width.");
+        window.UpdateLayout();
+        var sidebar = (Border)window.FindName("SidebarHost");
+        foreach (var name in new[] { "BrandLogo", "LogoHalo", "FooterBadge" })
+        {
+            var element = (FrameworkElement)window.FindName(name); var origin = element.TranslatePoint(new(), sidebar);
+            if (origin.X < 0 || origin.X + element.ActualWidth > sidebar.ActualWidth || origin.Y < 0 || origin.Y + element.ActualHeight > sidebar.ActualHeight) throw new InvalidOperationException("Collapsed sidebar clips " + name);
+        }
+        Capture(window, "Sidebar-Collapsed");
         vm.SidebarCollapsed = false; await Task.Delay(300);
         if (Math.Abs(((Border)window.FindName("SidebarHost")).ActualWidth - 200) > .1) throw new InvalidOperationException("Sidebar must restore its expanded width.");
         if (vm.ImportQuickSubscription.CanExecute(null)) throw new InvalidOperationException("Empty quick subscription must be disabled.");
@@ -422,6 +437,60 @@ internal static class SmokeHarness
         var view = Descendants(window).OfType<RulesView>().Single();
         var list = (ListBox)view.FindName("RulesList");
         if (list.ActualHeight < 100) throw new InvalidOperationException($"Routing controls must leave a usable rules viewport at minimum window size, including with a banner: {list.ActualHeight:F1}px.");
+    }
+    private static async Task CheckStaleLatencyAsync(List<string> report)
+    {
+        var store = new StateStore(Path.Combine(Root, "latency-regression"));
+        var data = new AppState(); var node = new Server { Name = "Probe fixture", Host = "127.0.0.1", Port = 9 }; data.Servers.Add(node); data.SelectedServerId = node.Id; store.Save(data);
+        var pending = new TaskCompletionSource<LatencyResult>();
+        using var vm = new MainViewModel(store, new ServiceClient(), null, (_, _, _, _, started) => { started?.Invoke(); return pending.Task; });
+        vm.PingServer.Execute(null); vm.LatencyIndex = 2; vm.LatencyIndex = 1;
+        pending.SetResult(new(73, LatencyMode.HttpsGet, DateTimeOffset.UtcNow));
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+        while (!vm.PingServer.CanExecute(null)) await Task.Delay(10, deadline.Token);
+        if (vm.SelectedServer!.LatencyMs is not null) throw new InvalidOperationException("A GET → HEAD → GET change must reject the old GET result.");
+        pending = new(); var prior = vm.SelectedServer;
+        vm.PingServer.Execute(null);
+        var replacement = new Server { Id = prior.Id, Name = prior.Name, Host = prior.Host, Port = prior.Port };
+        vm.Data.Servers.Clear(); vm.Data.Servers.Add(replacement); vm.SelectedServer = replacement;
+        pending.SetResult(new(54, LatencyMode.HttpsGet, DateTimeOffset.UtcNow));
+        while (!vm.PingServer.CanExecute(null)) await Task.Delay(10, deadline.Token);
+        if (prior.LatencyMs is not null || replacement.LatencyMs is not null) throw new InvalidOperationException("Replaced server instances must reject stale latency.");
+        pending = new(); vm.Data.Servers.Clear(); vm.PingServer.Execute(null);
+        pending.SetResult(new(41, LatencyMode.HttpsGet, DateTimeOffset.UtcNow));
+        while (!vm.PingServer.CanExecute(null)) await Task.Delay(10, deadline.Token);
+        if (replacement.LatencyMs != 41) throw new InvalidOperationException("A retained active server removed from a subscription must still allow manual ping.");
+        report.Add("Controlled latency races: GET → HEAD → GET and replaced nodes reject stale results; retained selected node can still be measured.");
+    }
+    private static async Task CheckHomeVirtualizationAsync(MainWindow window, MainViewModel vm, List<string> report)
+    {
+        vm.Go("Home"); window.UpdateLayout();
+        var original = vm.Data.Servers.ToArray();
+        for (var i = 0; i < 1000; i++) vm.Data.Servers.Add(new() { Id = "home-stress-" + i, Name = "Server " + i, Host = "127.0.0.1", Port = 9 });
+        vm.RefreshServers(); await Task.Delay(150); window.UpdateLayout();
+        var home = Descendants(window).OfType<HomeView>().Single(); var list = (ListBox)home.FindName("HomeScroll");
+        var scroll = Descendants(list).OfType<ScrollViewer>().First(); scroll.ScrollToEnd(); await Task.Delay(150); window.UpdateLayout();
+        if (list.Items.Count != vm.ServerRows.Count + 1 || Descendants(list).OfType<ListBoxItem>().Count() >= 80 || scroll.VerticalOffset <= 0 || Descendants(home).OfType<ScrollViewer>().Count(v => v.IsVisible && v.ComputedVerticalScrollBarVisibility == Visibility.Visible) != 1) throw new InvalidOperationException("Home must virtualize 1000 servers with one shared scroll surface.");
+        foreach (var node in vm.Data.Servers.Except(original).ToArray()) vm.Data.Servers.Remove(node);
+        vm.Data.Servers.Clear(); vm.RefreshServers(); scroll.ScrollToTop(); await Task.Delay(100); window.UpdateLayout();
+        if (((FrameworkElement)home.FindName("HomeEmptyServers")).Visibility != Visibility.Visible) throw new InvalidOperationException("Empty Home must retain its add-subscription guidance.");
+        Capture(window, "Home-Empty");
+        foreach (var node in original) vm.Data.Servers.Add(node); vm.RefreshServers(); window.UpdateLayout();
+        report.Add("Home: one scroll surface, 1000-server virtualization, empty subscription guidance, matched dock geometry, public and local IP labels.");
+    }
+    private static void CheckNewestRules(MainViewModel vm, List<string> report)
+    {
+        var prior = vm.ActiveProfile.Rules.ToArray();
+        var first = new RoutingRule { Name = "First dated rule", Values = ["first.example.com"], CreatedAt = DateTimeOffset.UtcNow.AddMinutes(-1) };
+        var newest = new RoutingRule { Name = "Newest dated rule", Values = ["newest.example.com"], CreatedAt = DateTimeOffset.UtcNow };
+        vm.ActiveProfile.Rules.Add(first); vm.ActiveProfile.Rules.Add(newest); vm.RulesChanged();
+        if (!ReferenceEquals(vm.VisibleRules[0], newest) || !vm.ActiveProfile.Rules.Take(prior.Length).SequenceEqual(prior)) throw new InvalidOperationException("Newest display must not change rule execution order.");
+        var editor = new RuleEditor(newest, vm.Data.Servers); editor.NameField.Text = "Edited newest";
+        if (editor.Build().CreatedAt != newest.CreatedAt) throw new InvalidOperationException("Editing must preserve creation time.");
+        vm.RuleSortIndex = 1;
+        if (!vm.VisibleRules.SequenceEqual(vm.ActiveProfile.Rules)) throw new InvalidOperationException("Priority view must show execution order.");
+        vm.ActiveProfile.Rules.Remove(first); vm.ActiveProfile.Rules.Remove(newest); vm.RuleSortIndex = 0; vm.RulesChanged();
+        report.Add("Newest-first display, independent priority order and preserved creation time on edit passed.");
     }
     private static void CheckRuleEditor(Window dialog, MainViewModel vm)
     {
