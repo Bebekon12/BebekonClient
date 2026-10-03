@@ -55,6 +55,8 @@ Version 0.1.8 adds 15 update tests (150 total): signed local feed and package do
 
 ## Required manual acceptance — pending
 
+Version 0.1.9 changes the bundled update channel to GitHub Releases with a version-specific installer URL. The existing signed-update tests and published UI smoke suite are rerun for this release; the smoke checks the candidate local manifest before public release. Post-publication checks must verify the public latest feed, RSA signature, asset sizes and installer hash.
+
 Ultima import and a user-mode forced-VPN HTTPS probe passed. This session is not elevated; real TUN routing and the following acceptance checks remain pending. Do not label them as passed:
 
 1. Install Setup on clean Windows 11; verify no runtime prerequisite, one installation UAC, none per connect. Verify pipe access from another Windows user is denied.

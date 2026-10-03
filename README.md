@@ -35,6 +35,10 @@ For a dev connection, install the published service first. `Bebekon.Service.exe 
 
 Version 0.1.6 fixes a false service-identity rejection when the ordinary UI cannot inspect a LocalSystem process. No elevation is needed for the new SCM status check. `dotnet run --file tools/verify-service.cs -c Release` explicitly tests five authenticated status requests against an installed helper assigned to the current ordinary user. Add `-- --probe` to validate the saved profile and test HTTPS/IP through a temporary proxy core; it stops the core afterward and does not change Windows routes, proxy or saved state.
 
+## Releases and updates
+
+Download the installer or portable archive from [GitHub Releases](https://github.com/Bebekon12/BebekonClient/releases/latest). Version 0.1.9 and later use the signed [GitHub update feed](https://github.com/Bebekon12/BebekonClient/releases/latest/download/update.json) by default. Settings → Updates checks at startup and every six hours; apply an offered update to keep subscriptions, rules and settings. A Windows UAC prompt is still required for the protected helper. Version 0.1.8 can obtain 0.1.9 through the local feed on the build PC, or switch its source to the GitHub feed manually.
+
 ## Version 0.1.8
 
 Settings → Updates checks for new versions, verifies a signed release manifest and installer hash, and offers an in-place update with restart. Subscriptions, rules, settings and the helper owner are preserved. The local channel uses this workspace's dist/update.json; Internet distribution needs a stable HTTPS host. See [publishing updates](docs/UPDATES.md). Install 0.1.8 once to enable subsequent in-app upgrades.

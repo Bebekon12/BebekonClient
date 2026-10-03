@@ -109,9 +109,14 @@ internal static class SmokeHarness
         }
         var originalAccent = vm.AccentColor;
         Descendants(settings).OfType<RadioButton>().Single(r => r.Tag as string == "Updates").IsChecked = true;
-        if (File.Exists(vm.UpdateSource))
+        // Before publication the bundled GitHub URL still points to the previous release.
+        // Verify the exact signed candidate built beside this workspace instead.
+        var candidateFeed = Path.GetFullPath(Path.Combine(Root, "..", "..", "dist", "update.json"));
+        if (File.Exists(candidateFeed))
         {
+            var savedSource = vm.Settings.UpdateSource; vm.Settings.UpdateSource = candidateFeed;
             await vm.CheckUpdatesAsync(false);
+            vm.Settings.UpdateSource = savedSource;
             if (!vm.UpdateStatus.Contains(vm.AppVersion) || vm.UpdateVisibility != Visibility.Collapsed) throw new InvalidOperationException("Published signed feed must report the current build as up to date.");
         }
         vm.SetAvailableUpdate(new(new("0.1.9", "fixture.exe", 1, new string('0', 64), "Synthetic UI fixture"), "fixture.exe"));

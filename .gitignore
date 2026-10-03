@@ -10,3 +10,10 @@ core/*.zip
 *.user
 *.dpapi
 TestResults/
+*.pfx
+*.p12
+*.pem
+*.key
+.env
+.env.*
+*.private.xml

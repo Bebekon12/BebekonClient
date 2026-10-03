@@ -1,4 +1,4 @@
-param([string]$InnoCompiler, [switch]$SkipInstaller, [string]$PublishFolder = 'artifacts\release', [string]$UpdateFeedUrl, [string]$InstallerUrl, [string]$ReleaseNotes = 'Обновления из приложения, яркие пинги и новая кнопка подключения.')
+param([string]$InnoCompiler, [switch]$SkipInstaller, [string]$PublishFolder = 'artifacts\release', [string]$UpdateFeedUrl = 'https://github.com/Bebekon12/BebekonClient/releases/latest/download/update.json', [string]$InstallerUrl, [string]$ReleaseNotes = 'Обновления через GitHub Releases, яркие пинги и обновлённая кнопка подключения.')
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $projectRoot = $PSScriptRoot
@@ -66,6 +66,9 @@ if (-not $SkipInstaller) {
     }
     Invoke-Checked $InnoCompiler @('/Qp',('/DPublishDir=' + $appPublishRoot),('/DOutputDir=' + (Join-Path $projectRoot 'dist')),'installer\setup.iss')
     $releaseVersion = ([xml](Get-Content Directory.Build.props -Raw)).Project.PropertyGroup.Version
+    if (-not $InstallerUrl -and $channelSource -eq 'https://github.com/Bebekon12/BebekonClient/releases/latest/download/update.json') {
+        $InstallerUrl = 'https://github.com/Bebekon12/BebekonClient/releases/download/v' + $releaseVersion + '/BebekonVPN-' + $releaseVersion + '-Setup-x64.exe'
+    }
     $versionedInstaller = Join-Path $projectRoot ('dist\BebekonVPN-' + $releaseVersion + '-Setup-x64.exe')
     Copy-Item -LiteralPath 'dist\BebekonVPN-Setup-x64.exe' -Destination $versionedInstaller -Force
     & (Join-Path $projectRoot 'scripts\publish-update.ps1') -Installer $versionedInstaller -Version $releaseVersion -Output (Join-Path $projectRoot 'dist\update.json') -InstallerUrl $InstallerUrl -Notes $ReleaseNotes
