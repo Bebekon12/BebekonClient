@@ -53,6 +53,13 @@ Environment: Windows 11 x64, .NET SDK 10.0.300, runtime 10.0.8, sing-box 1.14.2.
 
 Version 0.1.8 adds 15 update tests (150 total): signed local feed and package download; equal/older version rejection; wrong signing key/tampered payload rejection; truncated, oversized and corrupted package cleanup; cancellation cleanup; unsafe package paths and non-HTTPS sources. WPF smoke checks disabled ping opacity, the Updates category, update banner/actions at minimum size, and the real signed current-version feed in the published build. The Inno update branch compiles. Full UAC handoff and installed-file replacement are not performed against the user's running app; they remain part of installer acceptance below.
 
+## Version 0.1.10
+
+- Release build: 154 tests passed, zero failures/skips. Four new checks cover session-only deferral, eligibility of another release, explicit reopening and a fresh application session.
+- Published WPF smoke: update detection while hidden waits until foreground activation; automatic offer disables and blurs the underlying UI; Not now restores it and suppresses the same release; Settings reopens it; a new version can prompt again. All existing connection, settings, routing, ping and window checks pass.
+- Update offer, 57% download, verification, restart and cancellation/retry states rendered at 100/175% pixel scale and 860×660. Both decision buttons retain 46px height and fit inside the window. Download progress and spinner were inspected; reduced motion and hidden-window animation stop are asserted. These are presentation fixtures and do not execute an installer.
+- Inno Setup compiled the same-user elevated restart and other-admin original-user fallback. HANDOFF=2 requires the client's acceptance marker after the parent exits; legacy clients retain their previous handoff. End-to-end UAC acceptance/cancellation, actual installed-file replacement and privilege level after restart remain manual acceptance; no working installation was replaced by smoke tests.
+
 ## Required manual acceptance — pending
 
 Version 0.1.9 changes the bundled update channel to GitHub Releases with a version-specific installer URL. The existing signed-update tests and published UI smoke suite are rerun for this release; the smoke checks the candidate local manifest before public release. Post-publication checks must verify the public latest feed, RSA signature, asset sizes and installer hash.

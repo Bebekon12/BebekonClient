@@ -4,6 +4,9 @@ public static class I18n
     public static bool English { get; private set; }
     public static string T(string ru, string en) => English ? en : ru;
     private static readonly (string Key, string Ru, string En)[] Labels = [
+        ("UpdateLater","Не сейчас","Not now"),("UpdateNow","Обновить","Update"),("DownloadProgressLabel","Прогресс загрузки обновления","Update download progress"),
+        ("UpdateRestartHelp","Подписки и правила сохранятся. После обновления приложение откроется от администратора; VPN будет отключён на время установки.","Subscriptions and rules are kept. The app restarts as administrator; VPN disconnects during installation."),
+        ("UpdateStepDownload","1 · Загрузка","1 · Download"),("UpdateStepVerify","2 · Проверка","2 · Verify"),("UpdateStepRestart","3 · Перезапуск","3 · Restart"),
         ("AppUpdates","Обновления","Updates"),("CheckUpdate","Проверить","Check"),("InstallUpdate","Обновить и перезапустить","Update and restart"),
         ("AutoUpdates","Проверять новые версии","Check for new versions"),("AutoUpdatesDetail","При запуске и каждые 6 часов. Установка — по нажатию кнопки.","At startup and every 6 hours. Install when you choose."),
         ("UpdateChannel","Источник обновлений","Update source"),("ConfigureChannel","Изменить","Change"),("UpdateVersion","Версия приложения","Application version"),

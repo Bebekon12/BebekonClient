@@ -20,10 +20,16 @@ public partial class MainWindow : Window
         tray.ContextMenuStrip = new(); tray.ContextMenuStrip.Opening += (_, _) => BuildMenu();
         vm.StatusChanged += OnStatus; vm.PropertyChanged += OnChanged; vm.UpdateFound += OnUpdateFound;
         Closing += OnClosing;
+        Activated += (_, _) => TryShowUpdate();
+        IsVisibleChanged += (_, _) => TryShowUpdate();
+        StateChanged += (_, _) => TryShowUpdate();
+        Dialogs.ModalStateChanged += TryShowUpdate;
         SourceInitialized += (_, _) => NativeChrome.Apply(this);
     }
     private void OnChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (e.PropertyName == nameof(MainViewModel.UpdateBusy) && !vm.UpdateBusy) TryShowUpdate();
+        if (e.PropertyName == nameof(MainViewModel.UpdateOverlayOpen) && !vm.UpdateOverlayOpen) PageContent.Focus();
         if (e.PropertyName == nameof(MainViewModel.Page)) Motion.Reveal(PageContent);
         if (e.PropertyName == nameof(MainViewModel.SidebarWidth))
         {
@@ -40,6 +46,12 @@ public partial class MainWindow : Window
     private void OnUpdateFound()
     {
         if (vm.Settings.Notifications && !IsVisible) tray.ShowBalloonTip(5000, "Bebekon VPN", vm.UpdateNotice, Forms.ToolTipIcon.Info);
+        TryShowUpdate();
+    }
+    internal void TryShowUpdate()
+    {
+        if (IsVisible && IsActive && WindowState != WindowState.Minimized && !Dialogs.ModalOpen && vm.CanPromptForUpdate)
+            vm.PresentUpdate();
     }
     internal Forms.ContextMenuStrip BuildMenu()
     {
@@ -64,7 +76,7 @@ public partial class MainWindow : Window
     private void CloseWindow(object sender, RoutedEventArgs e) => Close();
     private async void OnClosing(object? sender, CancelEventArgs e)
     {
-        if (ForceExit) { vm.StatusChanged -= OnStatus; vm.PropertyChanged -= OnChanged; vm.UpdateFound -= OnUpdateFound; vm.Dispose(); tray.Visible = false; tray.ContextMenuStrip?.Dispose(); tray.Dispose(); icon.Dispose(); return; }
+        if (ForceExit) { Dialogs.ModalStateChanged -= TryShowUpdate; vm.StatusChanged -= OnStatus; vm.PropertyChanged -= OnChanged; vm.UpdateFound -= OnUpdateFound; vm.Dispose(); tray.Visible = false; tray.ContextMenuStrip?.Dispose(); tray.Dispose(); icon.Dispose(); return; }
         e.Cancel = true; if (vm.Settings.MinimizeToTray) Hide(); else await ExitAsync();
     }
     private async Task ExitAsync()

@@ -41,7 +41,7 @@ Download the installer or portable archive from [GitHub Releases](https://github
 
 ## Version 0.1.8
 
-Settings → Updates checks for new versions, verifies a signed release manifest and installer hash, and offers an in-place update with restart. Subscriptions, rules, settings and the helper owner are preserved. The local channel uses this workspace's dist/update.json; Internet distribution needs a stable HTTPS host. See [publishing updates](docs/UPDATES.md). Install 0.1.8 once to enable subsequent in-app upgrades.
+Version 0.1.10 shows an in-app update popup with **Update / Not now**, release notes and animated download/verification progress. Not now defers that version until the next launch; Settings → Updates can reopen it. After Windows approval, Setup upgrades in place and restarts the app as administrator under the same account. Other-admin credentials fall back to the original user's session to retain access to their encrypted settings. Subscriptions, rules, settings and the helper owner are preserved. See [publishing updates](docs/UPDATES.md). Version 0.1.9 can install 0.1.10 through its existing Updates page; subsequent releases use the new popup.
 
 Ping results retain their green/orange/red colors while busy, and previous measurements remain until replaced. The connection button has a dark layered face, gradient rim, hover/press feedback, keyboard focus and a distinct connected state.
 

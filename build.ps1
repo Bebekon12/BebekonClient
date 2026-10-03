@@ -1,4 +1,4 @@
-param([string]$InnoCompiler, [switch]$SkipInstaller, [string]$PublishFolder = 'artifacts\release', [string]$UpdateFeedUrl = 'https://github.com/Bebekon12/BebekonClient/releases/latest/download/update.json', [string]$InstallerUrl, [string]$ReleaseNotes = 'Обновления через GitHub Releases, яркие пинги и обновлённая кнопка подключения.')
+param([string]$InnoCompiler, [switch]$SkipInstaller, [string]$PublishFolder = 'artifacts\release', [string]$UpdateFeedUrl = 'https://github.com/Bebekon12/BebekonClient/releases/latest/download/update.json', [string]$InstallerUrl, [string]$ReleaseNotes = 'Окно обновления внутри приложения, плавный прогресс загрузки и автоматический перезапуск от администратора.')
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $projectRoot = $PSScriptRoot

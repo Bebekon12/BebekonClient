@@ -119,14 +119,7 @@ internal static class SmokeHarness
             vm.Settings.UpdateSource = savedSource;
             if (!vm.UpdateStatus.Contains(vm.AppVersion) || vm.UpdateVisibility != Visibility.Collapsed) throw new InvalidOperationException("Published signed feed must report the current build as up to date.");
         }
-        vm.SetAvailableUpdate(new(new("0.1.9", "fixture.exe", 1, new string('0', 64), "Synthetic UI fixture"), "fixture.exe"));
-        window.UpdateLayout(); await Task.Delay(250); Capture(window, "Update-Available");
-        if (!vm.InstallUpdate.CanExecute(null) || vm.UpdateVisibility != Visibility.Visible) throw new InvalidOperationException("Verified newer release must expose an update action.");
-        var oldWidth = window.Width; var oldHeight = window.Height; window.Width = 860; window.Height = 660; window.UpdateLayout();
-        foreach (var button in Descendants(settings).OfType<Button>().Where(b => b.IsVisible && b.Command == vm.InstallUpdate))
-            if (button.ActualHeight < 42 || button.ActualWidth < 200) throw new InvalidOperationException("Update action must keep its full hit area at minimum size.");
-        Capture(window, "Update-Minimum"); window.Width = oldWidth; window.Height = oldHeight;
-        vm.SetAvailableUpdate(null); report.Add("Updates: signed current-release check when published, update action/banner and minimum-size layout; no installer launched by smoke.");
+        await CheckUpdateOverlayAsync(window, vm, report);
         foreach (var accent in new[] { "Blue", "Emerald", "Violet", "Cyan" }) { vm.AccentColor = accent; if (Application.Current.Resources["Accent"] is not SolidColorBrush) throw new InvalidOperationException("Accent must apply to live resources."); }
         vm.AccentColor = originalAccent;
         vm.PureBlack = true; if (((SolidColorBrush)Application.Current.Resources["Background"]).Color != Colors.Black) throw new InvalidOperationException("OLED background was not applied."); vm.PureBlack = false;
@@ -273,6 +266,63 @@ internal static class SmokeHarness
         window.Show();
         vm.Settings.MinimizeToTray = minimizeToTray;
         report.Add("Caption buttons: hit areas, minimize, maximize/restore icon and labels, language and close-to-tray behavior passed.");
+    }
+    private static async Task CheckUpdateOverlayAsync(MainWindow window, MainViewModel vm, List<string> report)
+    {
+        var version = Version.Parse(vm.AppVersion);
+        var next = new Version(version.Major, version.Minor, version.Build + 1).ToString();
+        var candidate = new AvailableUpdate(new(next, "fixture.exe", 90 * 1048576, new string('0', 64), "Более плавная работа приложения и улучшения подключения.\nНастройки, подписки и правила будут сохранены."), "fixture.exe");
+        window.Hide(); vm.SetAvailableUpdate(candidate);
+        if (vm.UpdateOverlayOpen) throw new InvalidOperationException("Updates must not open a window while the app is in the tray.");
+        window.Show(); window.Activate(); window.TryShowUpdate();
+        await Task.Delay(350); window.UpdateLayout();
+        var overlay = (UpdateOverlay)window.FindName("UpdatePopup");
+        var surface = (Grid)window.FindName("AppSurface");
+        if (!vm.UpdateOverlayOpen || !overlay.IsVisible || surface.IsEnabled || surface.Effect is not System.Windows.Media.Effects.BlurEffect)
+            throw new InvalidOperationException("The foreground update offer must be modal with a blurred, disabled background.");
+        Capture(window, "Update-Available");
+        var oldWidth = window.Width; var oldHeight = window.Height; window.Width = 860; window.Height = 660; window.UpdateLayout();
+        foreach (var name in new[] { "LaterButton", "UpdateButton" })
+        {
+            var button = (Button)overlay.FindName(name);
+            var bounds = button.TransformToAncestor(window).TransformBounds(new Rect(0, 0, button.ActualWidth, button.ActualHeight));
+            if (button.ActualHeight < 46 || button.ActualWidth < 200 || bounds.Bottom > window.ActualHeight)
+                throw new InvalidOperationException("Update popup actions must fit at minimum window size.");
+        }
+        Capture(window, "Update-Minimum");
+        vm.DeferUpdate.Execute(null); window.UpdateLayout();
+        if (vm.UpdateOverlayOpen || !surface.IsEnabled || surface.Effect is not null) throw new InvalidOperationException("Not now must restore the underlying application.");
+        vm.SetAvailableUpdate(candidate); window.TryShowUpdate();
+        if (vm.UpdateOverlayOpen) throw new InvalidOperationException("The same release must not prompt again in this session.");
+        vm.InstallUpdate.Execute(null);
+        if (!vm.UpdateOverlayOpen) throw new InvalidOperationException("Settings must be able to reopen a deferred update.");
+        // Render-only fixtures set private presentation state; no download or installer is executed.
+        static void Set(MainViewModel target, string name, object value) => typeof(MainViewModel).GetProperty(name)!.SetValue(target, value);
+        Set(vm, nameof(vm.UpdateBusy), true); Set(vm, nameof(vm.UpdateStage), "Downloading"); Set(vm, nameof(vm.UpdatePercent), 57);
+        Set(vm, nameof(vm.UpdateStatus), "Загружаем обновление…");
+        await Task.Delay(350); window.UpdateLayout(); Capture(window, "Update-Progress");
+        var progress = (ProgressBar)overlay.FindName("DownloadProgress");
+        var rotation = (RotateTransform)overlay.FindName("SpinnerRotation");
+        if (Math.Abs(progress.Value - 57) > .1 || (Motion.Enabled && !rotation.HasAnimatedProperties)) throw new InvalidOperationException("Download must show live progress and animated loading.");
+        vm.AnimationsEnabled = false;
+        if (rotation.HasAnimatedProperties || progress.HasAnimatedProperties) throw new InvalidOperationException("Update loading must respect reduced motion.");
+        vm.AnimationsEnabled = true; window.Hide();
+        if (rotation.HasAnimatedProperties) throw new InvalidOperationException("Hidden update loading must stop animating.");
+        window.Show(); window.Activate();
+        Set(vm, nameof(vm.UpdatePercent), 100); Set(vm, nameof(vm.UpdateStage), "Verifying");
+        Set(vm, nameof(vm.UpdateStatus), "Проверяем размер и SHA-256…");
+        await Task.Delay(300); window.UpdateLayout(); Capture(window, "Update-Verify");
+        Set(vm, nameof(vm.UpdateStage), "Restarting"); Set(vm, nameof(vm.UpdateStatus), "Ожидаем подтверждения Windows…");
+        window.UpdateLayout(); Capture(window, "Update-Restart");
+        Set(vm, nameof(vm.UpdateStage), "Failed"); Set(vm, nameof(vm.UpdateBusy), false);
+        Set(vm, nameof(vm.UpdateStatus), "Запрос Windows отменён. Можно повторить обновление.");
+        window.UpdateLayout(); Capture(window, "Update-Cancelled");
+        if (!vm.AcceptUpdate.CanExecute(null) || !vm.UpdateOverlayOpen) throw new InvalidOperationException("Failed updates must offer retry without closing the app.");
+        vm.DeferUpdate.Execute(null); vm.SetAvailableUpdate(candidate with { Release = candidate.Release with { Version = "99.0.0" } }); window.TryShowUpdate();
+        if (!vm.UpdateOverlayOpen) throw new InvalidOperationException("A different new release must be eligible for a prompt.");
+        vm.DeferUpdate.Execute(null); vm.SetAvailableUpdate(null);
+        window.Width = oldWidth; window.Height = oldHeight; window.UpdateLayout();
+        report.Add("Updates: tray deferral, automatic foreground offer, Not now/session suppression, explicit reopen, new release, modal blur, 46px actions at minimum size, progress/stages, reduced motion, hidden animation stop and retry UI. No installer launched.");
     }
     private static void Capture(Window window, string name)
     {

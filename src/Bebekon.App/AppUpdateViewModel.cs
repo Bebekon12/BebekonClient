@@ -8,6 +8,40 @@ namespace Bebekon.App;
 
 public sealed partial class MainViewModel
 {
+    private readonly UpdatePromptSession updatePrompts = new();
+    private bool updateOverlayOpen;
+    private string updateStage = "Offer";
+    private int updatePercent;
+    public bool UpdateOverlayOpen { get => updateOverlayOpen; private set => Set(ref updateOverlayOpen, value); }
+    public string UpdateStage { get => updateStage; private set { Set(ref updateStage, value); NotifyUpdatePresentation(); } }
+    public int UpdatePercent { get => updatePercent; private set { Set(ref updatePercent, value); Notify(nameof(UpdateTransfer)); } }
+    public bool UpdateOffer => UpdateStage == "Offer";
+    public bool UpdateFailed => UpdateStage == "Failed";
+    public bool UpdateProgressVisible => !UpdateOffer;
+    public bool UpdateIndeterminate => UpdateStage is "Verifying" or "Restarting";
+    public string UpdateTargetVersion => "v" + availableUpdate?.Release.Version;
+    public string UpdateVersionChange => "v" + AppVersion + "  →  " + UpdateTargetVersion;
+    public string UpdateNotes => availableUpdate?.Release.Notes ?? "";
+    public string UpdateTransfer => availableUpdate is { } update ? $"{update.Release.Size * UpdatePercent / 100.0 / 1048576:0.0} / {update.Release.Size / 1048576.0:0.0} MB" : "";
+    public string UpdateHeading => UpdateStage switch { "Downloading" => T("Загружаем обновление", "Downloading update"), "Verifying" => T("Проверяем файл", "Verifying package"), "Restarting" => T("Готовим перезапуск", "Preparing to restart"), "Failed" => T("Обновление не завершено", "Update not completed"), _ => T("Доступно обновление", "An update is available") };
+    public ICommand DeferUpdate { get; private set; } = null!;
+    public ICommand AcceptUpdate { get; private set; } = null!;
+    internal bool CanPromptForUpdate => availableUpdate is not null && !UpdateBusy && !UpdateOverlayOpen && updatePrompts.ShouldShow(availableUpdate.Release.Version);
+    internal void PresentUpdate(bool explicitRequest = false)
+    {
+        if (UpdateBusy || availableUpdate is null || !updatePrompts.ShouldShow(availableUpdate.Release.Version, explicitRequest)) return;
+        UpdateStage = "Offer"; UpdateOverlayOpen = true;
+    }
+    private void DismissUpdate()
+    {
+        if (UpdateBusy) { updateCancellation?.Cancel(); return; }
+        if (availableUpdate is not null) updatePrompts.Defer(availableUpdate.Release.Version);
+        UpdateOverlayOpen = false;
+    }
+    private void NotifyUpdatePresentation()
+    {
+        foreach (var name in new[] { nameof(UpdateOffer), nameof(UpdateFailed), nameof(UpdateProgressVisible), nameof(UpdateIndeterminate), nameof(UpdateHeading), nameof(UpdateTargetVersion), nameof(UpdateVersionChange), nameof(UpdateNotes), nameof(UpdateTransfer) }) Notify(name);
+    }
     private AppUpdates? updater;
     private AvailableUpdate? availableUpdate;
     private CancellationTokenSource? updateCancellation;
@@ -31,6 +65,7 @@ public sealed partial class MainViewModel
     {
         var changed = availableUpdate?.Release.Version != update?.Release.Version;
         availableUpdate = update;
+        NotifyUpdatePresentation();
         UpdateStatus = update is null ? T("Установлена последняя версия · ", "Up to date · ") + AppVersion : UpdateNotice;
         Notify(nameof(UpdateNotice)); Notify(nameof(UpdateVisibility)); CommandManager.InvalidateRequerySuggested();
         if (changed && update is not null) UpdateFound?.Invoke();
@@ -54,7 +89,9 @@ public sealed partial class MainViewModel
         using var reader = new StreamReader(key); updater = new(reader.ReadToEnd());
         UpdateStatus = T("Текущая версия ", "Current version ") + AppVersion;
         CheckUpdates = Async(_ => CheckUpdatesAsync(false), () => !UpdateBusy);
-        InstallUpdate = Async(_ => InstallUpdateAsync(), () => !UpdateBusy && availableUpdate is not null);
+        InstallUpdate = new Command(_ => PresentUpdate(true), () => !UpdateBusy && availableUpdate is not null);
+        AcceptUpdate = Async(_ => InstallUpdateAsync(), () => !UpdateBusy && availableUpdate is not null);
+        DeferUpdate = new Command(_ => DismissUpdate());
         CancelUpdate = new Command(_ => updateCancellation?.Cancel(), () => UpdateBusy);
         ConfigureUpdates = new Command(_ =>
         {
@@ -86,7 +123,7 @@ public sealed partial class MainViewModel
 
     internal async Task CheckUpdatesAsync(bool background)
     {
-        if (UpdateBusy) return;
+        if (UpdateBusy || UpdateOverlayOpen) return;
         if (UpdateSource.Length == 0) { UpdateStatus = T("Укажите источник обновлений ниже.", "Configure an update source below."); return; }
         UpdateBusy = true; UpdateStatus = T("Проверяем обновления…", "Checking for updates…");
         updateCancellation?.Dispose(); updateCancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
@@ -101,19 +138,24 @@ public sealed partial class MainViewModel
             log.Write("Update check failed: " + e.GetType().Name);
         }
         finally { Notify(nameof(UpdateNotice)); Notify(nameof(UpdateVisibility)); UpdateBusy = false; }
+        if (!background && availableUpdate is not null) PresentUpdate(true);
     }
 
     private async Task InstallUpdateAsync()
     {
         if (UpdateBusy || availableUpdate is not { } update) return;
-        var detail = update.Release.Notes + "\n\n" + T("Приложение перезапустится. VPN будет отключён на время обновления. Подписки, правила и настройки сохранятся.", "The app will restart. VPN disconnects during the update. Subscriptions, rules and settings are preserved.");
-        if (!Dialogs.Confirm(UpdateNotice, detail)) return;
+        UpdateOverlayOpen = true; UpdatePercent = 0; UpdateStage = "Downloading";
         UpdateBusy = true; updateCancellation?.Dispose(); updateCancellation = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
         string? package = null; var launched = false;
         try
         {
             UpdateStatus = T("Загружаем обновление…", "Downloading update…");
-            package = await updater!.DownloadAsync(update, Path.Combine(store.Root, "updates"), new Progress<int>(percent => UpdateStatus = T("Загрузка · ", "Downloading · ") + percent + "%"), updateCancellation.Token);
+            package = await updater!.DownloadAsync(update, Path.Combine(store.Root, "updates"), new Progress<int>(percent =>
+            {
+                if (UpdateStage != "Downloading") return;
+                UpdatePercent = percent;
+                if (percent == 100) { UpdateStage = "Verifying"; UpdateStatus = T("Проверяем размер и SHA-256…", "Checking size and SHA-256…"); }
+            }), updateCancellation.Token);
             updateCancellation.Token.ThrowIfCancellationRequested();
             updateInstalling = true; CommandManager.InvalidateRequerySuggested();
             await StopScansAsync();
@@ -121,9 +163,11 @@ public sealed partial class MainViewModel
             Save();
             // Keep the verified package locked against writes until Windows opens it.
             using var verified = new FileStream(package, FileMode.Open, FileAccess.Read, FileShare.Read);
+            UpdatePercent = 100; UpdateStage = "Verifying";
             await AppUpdates.VerifyInstallerAsync(verified, update.Release, updateCancellation.Token);
+            UpdateStage = "Restarting";
             var start = new ProcessStartInfo(package) { UseShellExecute = true };
-            foreach (var argument in new[] { "/SP-", "/SILENT", "/NORESTART", "/NOCLOSEAPPLICATIONS", "/UPDATE=1", "/LOG",
+            foreach (var argument in new[] { "/SP-", "/SILENT", "/NORESTART", "/NOCLOSEAPPLICATIONS", "/UPDATE=1", "/HANDOFF=2", "/LOG",
                 "/PARENTID=" + Environment.ProcessId, "/OWNERSID=" + WindowsIdentity.GetCurrent().User!.Value,
                 "/DIR=" + AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar) }) start.ArgumentList.Add(argument);
             // Let Setup request its own elevation so runasoriginaluser keeps the original user's identity.
@@ -136,13 +180,15 @@ public sealed partial class MainViewModel
                 if (process.HasExited) throw new UserError(T("Установщик закрыт. Текущая версия сохранена.", "Installer closed. Current version kept."));
                 await Task.Delay(150, handoff.Token);
             }
+            updateCancellation.Token.ThrowIfCancellationRequested();
+            File.WriteAllText(package + ".proceed", "accepted");
             launched = true;
             if (Application.Current.MainWindow is MainWindow window) { window.ForceExit = true; window.Close(); }
             Application.Current.Shutdown();
         }
-        catch (OperationCanceledException) { UpdateStatus = T("Обновление отменено. Текущая версия сохранена.", "Update cancelled. Current version kept."); }
-        catch (System.ComponentModel.Win32Exception e) when (e.NativeErrorCode == 1223) { UpdateStatus = T("Запрос Windows отменён. Можно повторить обновление.", "Windows prompt cancelled. You can try again."); }
-        catch (Exception e) { UpdateStatus = e is UserError ? e.Message : T("Не удалось обновить приложение. Текущая версия сохранена.", "Update failed. Current version kept."); log.Write("Update failed: " + e.GetType().Name); }
-        finally { updateInstalling = false; UpdateBusy = false; if (package is not null) { try { File.Delete(package + ".ready"); if (!launched) File.Delete(package); } catch (IOException) { } } }
+        catch (OperationCanceledException) { UpdateStatus = T("Обновление отменено. Текущая версия сохранена.", "Update cancelled. Current version kept."); UpdateStage = "Failed"; }
+        catch (System.ComponentModel.Win32Exception e) when (e.NativeErrorCode == 1223) { UpdateStatus = T("Запрос Windows отменён. Можно повторить обновление.", "Windows prompt cancelled. You can try again."); UpdateStage = "Failed"; }
+        catch (Exception e) { UpdateStatus = e is UserError ? e.Message : T("Не удалось обновить приложение. Текущая версия сохранена.", "Update failed. Current version kept."); log.Write("Update failed: " + e.GetType().Name); UpdateStage = "Failed"; }
+        finally { updateInstalling = false; UpdateBusy = false; if (package is not null) { try { File.Delete(package + ".ready"); if (!launched) { File.Delete(package + ".proceed"); File.Delete(package); } } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { } } }
     }
 }
