@@ -118,8 +118,10 @@ public static class ConfigGenerator
     {
         if (!s.Supported) throw new UserError(s.UnsupportedReason!);
         // Validate model received by the elevated service; it never accepts executable paths or raw config.
-        if (!Guid.TryParse(s.Uuid, out _) || s.Port is < 1 or > 65535 || string.IsNullOrWhiteSpace(s.Host) || s.Transport is not ("tcp" or "grpc" or "ws" or "http" or "httpupgrade") || s.Security is not ("none" or "tls" or "reality")) throw new UserError("Некорректный сервер.");
+        if (!Guid.TryParse(s.Uuid, out _) || s.Port is < 1 or > 65535 || string.IsNullOrWhiteSpace(s.Host) || s.Transport is not ("tcp" or "grpc" or "ws" or "http" or "httpupgrade") || s.Security is not ("none" or "tls" or "reality") || s.PacketEncoding is not ("none" or "xudp" or "packetaddr")) throw new UserError("Некорректный сервер.");
         var vpn = new JsonObject { ["type"] = "vless", ["tag"] = tag, ["server"] = s.Host, ["server_port"] = s.Port, ["uuid"] = s.Uuid, ["domain_resolver"] = "direct-dns", ["connect_timeout"] = "4s" };
+        vpn["packet_encoding"] = s.PacketEncoding == "none" ? "" : s.PacketEncoding;
+        if (!s.UdpEnabled) vpn["network"] = "tcp";
         if (s.Flow.Length > 0) vpn["flow"] = s.Flow;
         if (s.Security != "none")
         {

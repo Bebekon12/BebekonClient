@@ -15,6 +15,8 @@ The script verifies the pinned core archive, restores packages, runs tests, publ
 
 No .NET runtime is needed on the destination PC. Build needs internet for NuGet and official downloads. Inno Setup 6.7.3 is bootstrapped per user into .tools when no compiler is installed. Override with -InnoCompiler PATH. -SkipInstaller produces only portable output.
 
+Version 0.1.13 adds Clash/Mihomo YAML/JSON VLESS subscriptions and stable device headers (HWID) for providers that require device binding. It imports servers, retaining your routing/DNS. See [subscription formats and HWID](docs/SUBSCRIPTIONS.md).
+
 Version 0.1.3 imports Ultima's JSON Xray subscriptions directly from the provider URL, in addition to plain/Base64 VLESS links. It reads VLESS connection parameters from each configuration and keeps the application's own routing/DNS rules. Version 0.1.2 fixed repeated tray menu openings and improved window buttons; 0.1.1 unified the dark palette, controls and dialogs. To publish while another build folder is in use, run `./build.ps1 -PublishFolder artifacts/release-ultima`; normal builds still use artifacts/release.
 
 Setup installs into Program Files, registers a demand-start LocalSystem helper, assigns its pipe and service-start rights to the chosen Windows account, and creates shortcuts. If UAC uses a different administrator account, enter the ordinary user's Windows account on the owner page. Only helper installation/update and uninstallation need elevation; connecting from the UI does not. Upgrades preserve %LOCALAPPDATA% data.
@@ -57,7 +59,7 @@ Refreshing subscriptions preserves the selected logical server, favorites and va
 
 ## Using it
 
-1. Add Ultima's subscription URL (HTTPS recommended), direct VLESS link, or a URL returning plain/Base64 VLESS links or JSON Xray configurations. The provider URL does not need to be converted to a different format.
+1. Add Ultima's subscription URL (HTTPS recommended), direct VLESS link, or a URL returning plain/Base64 VLESS links or JSON Xray / Clash-Mihomo YAML or JSON configurations. You can also paste the subscription text. The provider URL does not need to be converted to a different format.
 2. Choose a supported server. The client explicitly marks unsupported transports.
 3. Open Rules, leave **By rules**, add OpenAI / ChatGPT, Claude / Anthropic and Telegram.exe.
 4. Connect. A real HTTPS probe through the selected server must succeed before the UI shows Connected.
@@ -103,12 +105,12 @@ Measured on Windows 11 x64: version 0.1.11 Release self-contained UI in a separa
 
 The desired ≤90MB UI target is **not met**. No process is hidden or trimmed. CPU is normalized to the whole machine. Screenshot rendering allocates extra surfaces and is excluded from idle measurements. Real provider/TUN combined memory is unmeasured.
 
-154 automated tests cover plain/Base64/JSON Xray subscription parsing, models, DPAPI, priority, generated config checks, actual loopback VLESS traffic, HTTP Host sniffing, helper/core crash detection, job cleanup, elevation command boundaries and service identity rejection cases. A supplied Ultima subscription was also imported live: nine supported nodes, nine configurations accepted by the official core, and a successful forced-VPN HTTPS probe through gRPC/Reality. Version 0.1.6 also verified authenticated commands and a live saved-profile HTTPS/IP probe through the installed LocalSystem helper from an ordinary UI identity. Full TUN/browser acceptance remains in docs/VALIDATION.md.
+208 automated tests cover plain/Base64/Xray JSON/Clash YAML and JSON subscription parsing, stable HWID headers and device-limit errors, models, DPAPI, priority, generated config checks, actual loopback VLESS traffic, HTTP Host sniffing, helper/core crash detection, job cleanup, elevation command boundaries and service identity rejection cases. A supplied Ultima subscription was also imported live: nine supported nodes, nine configurations accepted by the official core, and a successful forced-VPN HTTPS probe through gRPC/Reality. Version 0.1.6 also verified authenticated commands and a live saved-profile HTTPS/IP probe through the installed LocalSystem helper from an ordinary UI identity. Full TUN/browser acceptance remains in docs/VALIDATION.md.
 
 Known limits:
 
 - XHTTP, mKCP and unfamiliar VLESS extensions are shown as unsupported; current official stable transport support is followed.
-- Plain/Base64 VLESS and JSON Xray VLESS subscriptions are supported. JSON imports server settings, not provider listeners, routes or DNS. Unsupported connection options are marked on the affected node. YAML, sing-box provider JSON and other VPN protocols are not supported. Redirected subscription URLs are rejected to avoid leaking secret URLs.
+- Plain/Base64 VLESS, JSON Xray and Clash/Mihomo YAML/JSON VLESS subscriptions are supported. Imports retain application routes/DNS and ignore provider listeners and proxy groups. Unsupported connection options are marked on the affected node. External proxy-providers, sing-box provider JSON and other VPN protocols are not supported. Redirected subscription URLs are rejected to avoid leaking secret URLs. HWID is app-specific, stable across updates/reinstalls on the same Windows installation, and sent only to HTTPS subscription endpoints (or loopback test endpoints).
 - TLS ECH hides SNI; encrypted names cannot be sniffed. Browser DoH plus ECH can prevent domain selection. No promise to infer names from arbitrary encrypted traffic.
 - The basic Telegram preset covers websites; the admin preset also includes Telegram.exe and the official Telegram IP ranges. Process DNS from the Windows DNS Client service cannot always be attributed to the original program; use TUN and domain rules alongside process rules where needed.
 - Domain-only routing does not cover hard-coded IPs without an observable hostname. Add IP/subnet or application rules.

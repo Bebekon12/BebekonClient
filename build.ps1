@@ -1,4 +1,4 @@
-param([string]$InnoCompiler, [switch]$SkipInstaller, [string]$PublishFolder = 'artifacts\release', [string]$UpdateFeedUrl = 'https://github.com/Bebekon12/BebekonClient/releases/latest/download/update.json', [string]$InstallerUrl, [string]$ReleaseNotes = 'Общая прокрутка главной, четыре метода пинга, новые правила для России, исправления меню и снеговик в шляпе.')
+param([string]$InnoCompiler, [switch]$SkipInstaller, [string]$PublishFolder = 'artifacts\release', [string]$UpdateFeedUrl = 'https://github.com/Bebekon12/BebekonClient/releases/latest/download/update.json', [string]$InstallerUrl, [string]$ReleaseNotes = 'Подписки SnowVPN и других VLESS-провайдеров: Clash/Mihomo YAML и JSON, постоянный HWID и понятные ошибки лимита устройств.')
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $projectRoot = $PSScriptRoot
@@ -43,9 +43,10 @@ foreach ($file in Get-ChildItem -LiteralPath $servicePublishRoot -File -Recurse)
     if (-not (Test-Path -LiteralPath $destination)) { New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null; Copy-Item -LiteralPath $file.FullName -Destination $destination }
 }
 Copy-Item -LiteralPath scripts -Destination $appPublishRoot -Recurse -Force
+Copy-Item -LiteralPath licenses -Destination $appPublishRoot -Recurse -Force
 Copy-Item -LiteralPath README.md,ARCHITECTURE.md,LICENSE -Destination $appPublishRoot -Force
 New-Item -ItemType Directory -Path (Join-Path $appPublishRoot 'docs') -Force | Out-Null
-Copy-Item -LiteralPath docs\VALIDATION.md,docs\UPDATES.md,docs\DESIGN.md,docs\CLIENT-REVIEW.md,docs\RUSSIA-RULES.md -Destination (Join-Path $appPublishRoot 'docs') -Force
+Copy-Item -LiteralPath docs\VALIDATION.md,docs\UPDATES.md,docs\DESIGN.md,docs\CLIENT-REVIEW.md,docs\RUSSIA-RULES.md,docs\SUBSCRIPTIONS.md -Destination (Join-Path $appPublishRoot 'docs') -Force
 New-Item -ItemType Directory -Path (Join-Path $appPublishRoot 'resources\geo') -Force | Out-Null
 Copy-Item -LiteralPath resources\geo\README.md,resources\geo\LICENSE-SagerNet,resources\geo\sources.json -Destination (Join-Path $appPublishRoot 'resources\geo') -Force
 Copy-Item -LiteralPath core\LICENSE,core\version.json -Destination (Join-Path $appPublishRoot 'core') -Force

@@ -65,7 +65,7 @@ internal static class XraySubscriptionParser
         var address = Text(node, "address");
         var port = Property(node, "port");
         if (port.ValueKind != JsonValueKind.Number || !port.TryGetInt32(out var number) || number is < 1 or > 65535) throw Invalid();
-        if (!Guid.TryParse(Text(user, "id"), out var uuid) || uuid == Guid.Empty) throw new UserError("В JSON указан неверный идентификатор VLESS.");
+        if (!Guid.TryParse(Text(user, "id"), out var uuid)) throw new UserError("В JSON указан неверный идентификатор VLESS.");
         if (string.IsNullOrWhiteSpace(address) || Uri.CheckHostName(address.Trim('[', ']')) == UriHostNameType.Unknown) throw Invalid();
         var network = Text(stream, "network", "tcp").ToLowerInvariant();
         network = network switch { "raw" => "tcp", "h2" => "http", _ => network };

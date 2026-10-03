@@ -84,6 +84,17 @@ Version 0.1.8 adds 15 update tests (150 total): signed local feed and package do
 - Existing refresh-selection stability, coalesced routing changes, startup edits, delayed stale recovery and manual disconnect/cancel regression checks remain passing. The working installation and actual system routes were not replaced.
 - Public release verification is performed after publication: signed latest feed, older/current version comparison, published asset sizes/digests and actual installer download/hash. Full installer/UAC/TUN acceptance remains pending below.
 
+## Version 0.1.13 — 2026-10-04
+
+- Release core suite: 208 tests passed, zero failures/skips. Clash/Mihomo YAML/JSON and Base64 fixtures cover full profiles, five-server lists, quoted Unicode names, reordered properties, anchors/merge overrides, TLS/Reality, gRPC, WebSocket, HTTP/2 and HTTPUpgrade. Supported generated configurations pass the pinned official core.
+- UDP encoding/flags reach the outbound configuration and refresh identity. Certificate pinning, insecure TLS, HTTP/1 camouflage and unsupported wire options cannot silently connect with altered parameters. Nil UUIDs are syntactically valid; wildcard destinations remain informational and cannot connect.
+- Cycles, duplicate fields, multi-document input, excessive depth, malformed credentials and unsupported protocols/provider-only configurations fail with credential-free messages. HTML responses produce a specific error. Caller cancellation interrupts a stalled body after headers.
+- HWID derivation is canonical, deterministic and distinct across machine seeds; no raw MachineGuid is returned as the header. Local HTTP integration confirms client format negotiation, the HWID format and Windows platform header. Device-limit / unsupported-HWID response flags take precedence over HTTP errors and malformed bodies.
+- Live provider diagnosis: without HWID the supplied Snow-style endpoint returned five wildcard/nil-ID placeholders requesting HWID. With the stable device headers it returned 14 supported VLESS servers and one MATCH rule; official sing-box accepted all 14 generated configurations. A forced-VPN user-mode HTTPS probe through the second TCP/TLS server returned HTTP 204 in 501 ms; the first node failed. This confirms successful import and one working outbound, not every node or physical TUN routing.
+- The prior Ultima endpoint still yielded nine supported nodes, nine accepted configurations and a successful gRPC/Reality HTTPS HTTP 204 probe (409 ms). Private subscription URLs, HWID values, UUIDs and endpoint addresses are omitted from fixtures and this record.
+- Published self-contained WPF smoke passed: all pages and dialogs render, including minimum-size Subscriptions, existing connection/refresh regressions, update prompt/progress and current signed local feed. No installer was launched.
+- These probes use isolated cores/local ports, preserve the user's service/system proxy/routes and clean runtime files. Provider rules/DNS/listeners are not imported; a fixture confirms an existing user VPN exception and Direct default remain intact.
+
 ## Required manual acceptance — pending
 
 Version 0.1.9 changes the bundled update channel to GitHub Releases with a version-specific installer URL. The existing signed-update tests and published UI smoke suite are rerun for this release; the smoke checks the candidate local manifest before public release. Post-publication checks must verify the public latest feed, RSA signature, asset sizes and installer hash.

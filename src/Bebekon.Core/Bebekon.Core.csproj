@@ -3,6 +3,7 @@
     <InternalsVisibleTo Include="Bebekon.Tests" />
     <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.0" />
     <PackageReference Include="System.ServiceProcess.ServiceController" Version="10.0.0" />
+    <PackageReference Include="YamlDotNet" Version="18.1.0" />
   </ItemGroup>
   <ItemGroup><EmbeddedResource Include="../../resources/flags/countries.json" LogicalName="Bebekon.Core.Countries.json" /></ItemGroup>
   <ItemGroup>

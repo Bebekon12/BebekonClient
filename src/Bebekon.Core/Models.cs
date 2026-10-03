@@ -39,6 +39,8 @@ public sealed class Server : Observable
     public string Fingerprint { get; set; } = "chrome";
     public List<string> Alpn { get; set; } = [];
     public string Flow { get; set; } = "";
+    public string PacketEncoding { get; set; } = "xudp";
+    public bool UdpEnabled { get; set; } = true;
     public string Transport { get; set; } = "tcp";
     public string ServiceName { get; set; } = "";
     public string Path { get; set; } = "/";
@@ -86,7 +88,7 @@ public sealed class Profile : Observable
 public sealed class Subscription
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
-    public string Name { get; set; } = "Ultima";
+    public string Name { get; set; } = "Подписка";
     public string Source { get; set; } = "";
     public DateTimeOffset? Updated { get; set; }
     public int ServerCount { get; set; }

@@ -180,7 +180,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
             try
             {
                 var source = QuickSource.Trim();
-                var sub = new Subscription { Source = source, Name = Uri.TryCreate(source, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https" ? uri.Host.EndsWith("ultm.in", StringComparison.OrdinalIgnoreCase) ? "Ultima" : uri.Host : "VLESS" };
+                var sub = new Subscription { Source = source, Name = Dialogs.SuggestSubscriptionName(source) };
                 var nodes = await SubscriptionLoader.LoadAsync(source, lifetime.Token);
                 Data.Subscriptions.Add(sub); ReplaceServers(sub, nodes); Save(); QuickSource = ""; Go("Servers");
             }

@@ -6,7 +6,7 @@ public static class ServerRefresh
 {
     public static string ConnectionKey(Server s) => JsonSerializer.Serialize(new {
         s.Host, s.Port, s.Uuid, s.Security, s.Sni, s.PublicKey, s.ShortId, s.Fingerprint,
-        s.Alpn, s.Flow, s.Transport, s.ServiceName, s.Path, s.TransportHost, s.UnsupportedReason
+        s.Alpn, s.Flow, s.PacketEncoding, s.UdpEnabled, s.Transport, s.ServiceName, s.Path, s.TransportHost, s.UnsupportedReason
     });
 
     public static List<Server> Merge(string subscriptionId, IEnumerable<Server> previous,
