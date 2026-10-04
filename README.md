@@ -8,6 +8,8 @@ The Android 10+ client is in [`android/`](android/README.md): native Compose int
 
 Download [Bebekon-Android.apk](https://github.com/Bebekon12/BebekonClient/releases/latest/download/Bebekon-Android.apk): one universal APK for all supported devices (arm64-v8a, armeabi-v7a and x86_64), with no architecture selection needed. In the app, Settings → «Кнопка в шторке» adds the VPN toggle to Quick Settings.
 
+Android 0.1.1 restores Ultima/Xray profile names and country flags from `remarks`, refreshes older placeholder-named imports without changing server identity, and makes the local world map visible in both themes. The home sheet has separate server, routing, traffic and session/IP cards matching the chosen design. Rules → Applications opens a searchable multi-selection list with app icons. HTTPS colors use 300/600 ms boundaries; TCP uses 100/250 ms. The previous measurement keeps its color during a refresh, duplicate queued tests are ignored, and changing the test method clears results from the old method.
+
 ## Version 0.1.16 · TrustTunnel
 
 TrustTunnel servers can now be added on **Subscriptions** using official `tt://?` links, HTTPS subscription URLs, exported TOML or endpoint JSON. **Add subscription → Open file** imports a configuration from disk. The gear on a TrustTunnel server selects HTTP/2, HTTP/3 or automatic mode, retaining that choice when subscriptions refresh. Existing TUN, routing profiles, per-rule servers, pings and traffic reporting use the same interface. The official Windows TrustTunnel client 1.1.7 is bundled and verified during build; it starts only for selected/referenced TrustTunnel nodes. It does not convert VLESS or other subscriptions into TrustTunnel: the provider must supply a compatible server.

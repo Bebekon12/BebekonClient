@@ -1,4 +1,4 @@
-param([Parameter(Mandatory)][string]$FixtureExecutable, [string]$Serial = 'emulator-5580')
+param([Parameter(Mandatory)][string]$FixtureExecutable, [string]$Serial = 'emulator-5580', [string]$ProviderFixture)
 $ErrorActionPreference = 'Stop'
 if ($Serial -notmatch '^emulator-\d+$') { throw 'This script only operates on a disposable Android emulator.' }
 if (-not $env:ANDROID_HOME) { throw 'Set ANDROID_HOME.' }
@@ -12,11 +12,21 @@ $configPath = Join-Path $output 'fixture.json'
 $config | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $configPath -Encoding utf8
 $fixture = Start-Process -FilePath $FixtureExecutable -ArgumentList @('run','-c',('"'+$configPath+'"')) -PassThru -WindowStyle Hidden -RedirectStandardOutput (Join-Path $output 'fixture.log') -RedirectStandardError (Join-Path $output 'fixture-error.log')
 try {
-    & $adb -s $Serial install -r (Join-Path $PSScriptRoot 'app/build/outputs/apk/debug/app-x86_64-debug.apk')
+    & $adb -s $Serial install -r (Join-Path $PSScriptRoot 'app/build/outputs/apk/debug/app-debug.apk')
     if ($LASTEXITCODE -ne 0) { throw 'App install failed.' }
     & $adb -s $Serial install -r (Join-Path $PSScriptRoot 'app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk')
     if ($LASTEXITCODE -ne 0) { throw 'Test APK install failed.' }
     & $adb -s $Serial shell appops set com.bebekon.vpn ACTIVATE_VPN allow
-    & $adb -s $Serial shell am instrument -w -e fixture_port $port com.bebekon.vpn.test/androidx.test.runner.AndroidJUnitRunner | Tee-Object -FilePath (Join-Path $output 'instrumentation.txt')
+    $arguments = @('-s', $Serial, 'shell', 'am', 'instrument', '-w', '-e', 'fixture_port', $port)
+    if ($ProviderFixture) {
+        & $adb -s $Serial push $ProviderFixture /data/local/tmp/bebekon-provider-diagnostic.json
+        if ($LASTEXITCODE -ne 0) { throw 'Provider fixture copy failed.' }
+        $arguments += @('-e', 'provider_fixture', '/data/local/tmp/bebekon-provider-diagnostic.json')
+    }
+    $arguments += 'com.bebekon.vpn.test/androidx.test.runner.AndroidJUnitRunner'
+    & $adb @arguments | Tee-Object -FilePath (Join-Path $output 'instrumentation.txt')
     if ($LASTEXITCODE -ne 0 -or -not (Select-String -LiteralPath (Join-Path $output 'instrumentation.txt') -Pattern '^OK \(' -Quiet)) { throw 'Android instrumentation tests failed.' }
-} finally { if (-not $fixture.HasExited) { Stop-Process -Id $fixture.Id } }
+} finally {
+    if ($ProviderFixture) { & $adb -s $Serial shell rm -f /data/local/tmp/bebekon-provider-diagnostic.json }
+    if (-not $fixture.HasExited) { Stop-Process -Id $fixture.Id }
+}

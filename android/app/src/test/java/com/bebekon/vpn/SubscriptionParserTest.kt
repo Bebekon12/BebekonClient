@@ -28,6 +28,45 @@ class SubscriptionParserTest {
         val n = SubscriptionParser.parse(json("outbounds" to array(listOf(outbound))).toString()).single()
         assertEquals("GRPC", n.transport); assertEquals("SE", n.country)
     }
+    @Test fun ultimaProfileRemarksRestoreCountriesWithoutChangingIdentity() {
+        fun profile(title: String) = json("remarks" to title, "outbounds" to array(listOf(
+            json("protocol" to "vless", "tag" to "proxy", "settings" to json("vnext" to array(listOf(json("address" to "vpn.example", "port" to 443, "users" to array(listOf(json("id" to uuid)))))))),
+            json("protocol" to "freedom", "tag" to "direct")
+        )))
+        val first = SubscriptionParser.parse(array(listOf(profile("🇸🇪 Швеция"))).toString()).single()
+        val second = SubscriptionParser.parse(array(listOf(profile("🇱🇻 Латвия #2"))).toString()).single()
+        assertEquals("🇸🇪 Швеция", first.name); assertEquals("SE", first.country)
+        assertEquals("🇱🇻 Латвия #2", second.name); assertEquals("LV", second.country)
+        assertEquals(first.id, second.id)
+        assertEquals(first.outbound, second.outbound)
+    }
+    @Test fun singularSingBoxProfileUsesRemarks() {
+        val config = json("remarks" to "Germany", "outbounds" to array(listOf(json("type" to "trojan", "tag" to "proxy", "server" to "vpn.example", "server_port" to 443, "password" to "secret"))))
+        assertEquals("DE", SubscriptionParser.parse(config.toString()).single().country)
+    }
+    @Test fun separateOutboundsRetainNamesWithinNamedProfile() {
+        val config = json("remarks" to "Provider", "outbounds" to array(listOf("Sweden", "Latvia").map { json("type" to "trojan", "tag" to it, "server" to "$it.example", "server_port" to 443, "password" to "secret") }))
+        assertEquals(listOf("SE", "LV"), SubscriptionParser.parse(config.toString()).map { it.country })
+    }
+    @Test fun latencyColorsUseTheMeasurementMethodAndSurviveLoading() {
+        assertEquals(PingQuality.GOOD, PingResult(millis = 300).quality)
+        assertEquals(PingQuality.FAIR, PingResult(millis = 301).quality)
+        assertEquals(PingQuality.FAIR, PingResult(millis = 600, method = PingMethod.HTTPS_HEAD).quality)
+        assertEquals(PingQuality.POOR, PingResult(millis = 601).quality)
+        assertEquals(PingQuality.GOOD, PingResult(millis = 100, method = PingMethod.TCP).quality)
+        assertEquals(PingQuality.FAIR, PingResult(millis = 250, method = PingMethod.TCP).quality)
+        assertEquals(PingQuality.POOR, PingResult(millis = 300, method = PingMethod.TCP).quality)
+        val previous = PingResult(millis = 260)
+        assertEquals(previous.quality, previous.copy(running = true, queued = true).quality)
+        assertEquals(PingQuality.POOR, PingResult(failed = true).quality)
+    }
+    @Test fun existingPreferencesMigrateToCloudflareAndRetainUserSettings() {
+        val old = Preferences(theme = ThemeChoice.LIGHT, routing = RoutingMode.RULES, ping = PingMethod.TCP).toJson().apply { remove("pingTarget") }
+        val migrated = Preferences.fromJson(old)
+        assertEquals(ThemeChoice.LIGHT, migrated.theme); assertEquals(RoutingMode.RULES, migrated.routing)
+        assertEquals(PingMethod.TCP, migrated.ping); assertEquals(PingTarget.CLOUDFLARE, migrated.pingTarget)
+        assertEquals(PingTarget.GOOGLE, Preferences.fromJson(migrated.copy(pingTarget = PingTarget.GOOGLE).toJson()).pingTarget)
+    }
     @Test fun xhttpIsVisibleWithReason() { assertTrue(SubscriptionParser.link("vless://$uuid@vpn.example:443?type=xhttp").unsupported.contains("XHTTP")) }
     @Test fun ipv6() { assertEquals("2001:db8::1", SubscriptionParser.link("trojan://secret@[2001:db8::1]:443").host) }
     @Test(expected = IllegalArgumentException::class) fun duplicateParameterRejected() { SubscriptionParser.link("vless://$uuid@vpn.example:443?type=ws&type=grpc") }

@@ -36,16 +36,17 @@ import java.util.Locale
 import kotlin.math.*
 
 private val Blue = Color(0xFF387FFF)
-private val Green = Color(0xFF20CF9A)
+private val Green = Color(0xFF20D884)
 private val Amber = Color(0xFFFFAD47)
 private val Red = Color(0xFFFF687A)
-private val Dark = darkColorScheme(primary = Blue, onPrimary = Color.White, background = Color(0xFF08111F), onBackground = Color(0xFFF0F5FF), surface = Color(0xFF122037), onSurface = Color(0xFFF0F5FF), surfaceVariant = Color(0xFF182A44), onSurfaceVariant = Color(0xFF92A9CA), outline = Color(0xFF2A3E5A), secondary = Color(0xFF72AEFF), surfaceContainerHigh = Color(0xFF182A44), surfaceContainerHighest = Color(0xFF1C304C))
-private val Light = lightColorScheme(primary = Color(0xFF226AEA), onPrimary = Color.White, background = Color(0xFFF0F5FC), onBackground = Color(0xFF172A46), surface = Color.White, onSurface = Color(0xFF172A46), surfaceVariant = Color(0xFFE8EFFA), onSurfaceVariant = Color(0xFF667D9B), outline = Color(0xFFCFDCEF), secondary = Color(0xFF297CF4), surfaceContainerHigh = Color(0xFFE8EFFA), surfaceContainerHighest = Color(0xFFE1EBF8))
+private val Dark = darkColorScheme(primary = Blue, onPrimary = Color.White, background = Color(0xFF06182B), onBackground = Color(0xFFF0F5FF), surface = Color(0xFF0C2440), onSurface = Color(0xFFF0F5FF), surfaceVariant = Color(0xFF153554), onSurfaceVariant = Color(0xFF9DC5E8), outline = Color(0xFF274B70), secondary = Color(0xFF53ADFF), secondaryContainer = Color(0xFF163C64), onSecondaryContainer = Color(0xFFDBEEFF), surfaceContainerHigh = Color(0xFF163452), surfaceContainerHighest = Color(0xFF1C3D5C))
+private val Light = lightColorScheme(primary = Color(0xFF086AFF), onPrimary = Color.White, background = Color(0xFFEAF5FF), onBackground = Color(0xFF12234B), surface = Color.White, onSurface = Color(0xFF12234B), surfaceVariant = Color(0xFFE0EFFF), onSurfaceVariant = Color(0xFF526F99), outline = Color(0xFFBDD9F7), secondary = Color(0xFF087FFF), secondaryContainer = Color(0xFFDBEEFF), onSecondaryContainer = Color(0xFF143663), surfaceContainerHigh = Color(0xFFE5F2FF), surfaceContainerHighest = Color(0xFFDDEEFF))
 
 @Composable fun BebekonApp(model: MainViewModel, toggle: () -> Unit, addTile: () -> Unit, scan: () -> Unit, importFile: () -> Unit) {
     val saved by model.saved.collectAsState(); val session by model.session.collectAsState(); val message by model.message.collectAsState(); val imported by model.importText.collectAsState(); val busy by model.busy.collectAsState()
     val isDark = when (saved.preferences.theme) { ThemeChoice.DARK -> true; ThemeChoice.LIGHT -> false; ThemeChoice.SYSTEM -> isSystemInDarkTheme() }
     var tab by rememberSaveable { mutableIntStateOf(0) }; var settings by rememberSaveable { mutableStateOf(false) }; var addSubscription by remember { mutableStateOf(false) }; var editRule by remember { mutableStateOf<Rule?>(null) }; var newRule by remember { mutableStateOf(false) }; var presets by remember { mutableStateOf(false) }; var routing by remember { mutableStateOf(false) }
+    var applications by remember { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
     val activity = androidx.activity.compose.LocalActivity.current
     SideEffect { activity?.let { androidx.core.view.WindowCompat.getInsetsController(it.window, it.window.decorView).apply { isAppearanceLightStatusBars = !isDark; isAppearanceLightNavigationBars = !isDark } } }
@@ -54,9 +55,9 @@ private val Light = lightColorScheme(primary = Color(0xFF226AEA), onPrimary = Co
     MaterialTheme(colorScheme = if (isDark) Dark else Light) {
         Scaffold(containerColor = MaterialTheme.colorScheme.background, snackbarHost = { SnackbarHost(snackbar) }, topBar = {
             Row(Modifier.statusBarsPadding().fillMaxWidth().padding(horizontal = 20.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (settings) IconButton({ settings = false }) { Icon(Icons.Outlined.ArrowBack, "Назад") } else Image(painterResource(R.drawable.snowman), "Снеговик Bebekon в шляпе", Modifier.size(42.dp))
-                Column(Modifier.weight(1f).padding(start = 8.dp)) { Text(if (settings) "Настройки" else "Bebekon", fontSize = 21.sp, fontWeight = FontWeight.Bold); Text(if (settings) "Сделайте приложение своим" else "Ваш маршрут. Ваш интернет.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                if (!settings) IconButton({ settings = true }) { Icon(Icons.Outlined.Settings, "Настройки") }
+                if (settings) IconButton({ settings = false }) { Icon(Icons.Outlined.ArrowBack, "Назад") } else Image(painterResource(R.drawable.snowman), "Снеговик Bebekon в шляпе", Modifier.size(58.dp))
+                Column(Modifier.weight(1f).padding(start = 10.dp)) { Text(if (settings) "Настройки" else "Bebekon VPN", fontSize = 23.sp, fontWeight = FontWeight.Bold); if (settings) Text("Сделайте приложение своим", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                if (!settings) IconButton({ settings = true }, Modifier.clip(CircleShape).background(MaterialTheme.colorScheme.secondary.copy(alpha = .10f))) { Icon(Icons.Outlined.Settings, "Настройки", tint = MaterialTheme.colorScheme.onSurface) }
             }
         }, bottomBar = {
             // Deliberate gap, border and a separate background keep navigation distinct from the sheet in BOTH themes.
@@ -73,7 +74,7 @@ private val Light = lightColorScheme(primary = Color(0xFF226AEA), onPrimary = Co
                     settings -> SettingsScreen(saved.preferences, model, addTile)
                     tab == 0 -> HomeScreen(saved, session, model, toggle, { tab = 1 }, { routing = true }, { tab = 3 })
                     tab == 1 -> ServersScreen(saved, model)
-                    tab == 2 -> RulesScreen(saved, model, { newRule = true }, { editRule = it }, { presets = true }, { routing = true })
+                    tab == 2 -> RulesScreen(saved, model, { newRule = true }, { editRule = it }, { presets = true }, { routing = true }, { applications = true })
                     else -> SubscriptionsScreen(saved, model, { addSubscription = true }, scan, importFile)
                 }
                 if (busy) LinearProgressIndicator(Modifier.fillMaxWidth().align(Alignment.TopCenter), color = MaterialTheme.colorScheme.primary, trackColor = Color.Transparent)
@@ -82,85 +83,13 @@ private val Light = lightColorScheme(primary = Color(0xFF226AEA), onPrimary = Co
         if (addSubscription) SubscriptionDialog(imported, { addSubscription = false; model.importText.value = "" }) { source, name -> model.import(source, name); addSubscription = false }
         if (newRule || editRule != null) RuleDialog(editRule, { newRule = false; editRule = null }) { model.saveRule(it); newRule = false; editRule = null }
         if (presets) PresetsDialog(model, { presets = false })
+        if (applications) ApplicationPicker(emptySet(), true, saved.preferences.routing, { applications = false }) { apps, vpn -> model.saveAppRules(apps, vpn); applications = false }
         if (routing) AlertDialog(onDismissRequest = { routing = false }, title = { Text("Маршрутизация") }, text = { Column { RoutingMode.entries.forEach { m -> Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { model.preferences(saved.preferences.copy(routing = m)); routing = false }.padding(12.dp), verticalAlignment = Alignment.CenterVertically) { RadioButton(saved.preferences.routing == m, onClick = null); Column(Modifier.padding(start = 10.dp)) { Text(m.label, fontWeight = FontWeight.SemiBold); Text(if (m == RoutingMode.ALL) "Всё через VPN, кроме исключений LAN" else "VPN для выбранных сайтов и приложений", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) } } } } }, confirmButton = { TextButton({ routing = false }) { Text("Готово") } })
     }
 }
 
-@Composable private fun HomeScreen(saved: SavedState, session: Session, model: MainViewModel, toggle: () -> Unit, servers: () -> Unit, routing: () -> Unit, subscriptions: () -> Unit) {
-    val pingMap by model.repo.pings.collectAsState(); var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(session.started) { while (true) { now = System.currentTimeMillis(); delay(1000) } }
-    BoxWithConstraints(Modifier.fillMaxSize()) {
-        val peek = (maxHeight * .43f).coerceIn(240.dp, 305.dp)
-        BottomSheetScaffold(sheetPeekHeight = peek, sheetContainerColor = MaterialTheme.colorScheme.surface, sheetTonalElevation = 0.dp, sheetShadowElevation = 5.dp, sheetShape = RoundedCornerShape(topStart = 30.dp, topEnd = 30.dp), sheetDragHandle = { Box(Modifier.padding(top = 10.dp, bottom = 8.dp).size(36.dp, 4.dp).clip(CircleShape).background(MaterialTheme.colorScheme.outline)) }, containerColor = MaterialTheme.colorScheme.background, sheetContent = {
-            LazyColumn(Modifier.fillMaxWidth(), contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                item {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text("Ваше подключение", fontWeight = FontWeight.SemiBold, fontSize = 16.sp, modifier = Modifier.weight(1f)); StatusPill(if (session.phase == Phase.ON) "TUN · защищено" else "TUN", if (session.phase == Phase.ON) Green else MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-                item {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        SheetTile(Modifier.weight(1f), "Сервер", servers) {
-                            Row(verticalAlignment = Alignment.CenterVertically) { Flag(saved.selectedNode?.country ?: "", Modifier.size(27.dp, 19.dp)); Text(saved.selectedNode?.name?.let(::cleanName) ?: "Выбрать", fontWeight = FontWeight.SemiBold, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(start = 8.dp)); Icon(Icons.Outlined.ChevronRight, null, Modifier.size(18.dp)) }
-                            saved.selectedNode?.let { node -> PingText(pingMap[node.id] ?: PingResult(), { model.ping(node) }) }
-                        }
-                        SheetTile(Modifier.weight(1f), "Маршрутизация", routing) {
-                            Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Outlined.Tune, null, Modifier.size(21.dp), tint = MaterialTheme.colorScheme.secondary); Text(saved.preferences.routing.label, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f).padding(start = 8.dp)); Icon(Icons.Outlined.ChevronRight, null, Modifier.size(18.dp)) }
-                            Text(if (saved.preferences.routing == RoutingMode.ALL) "Всё через VPN" else "${saved.rules.size} правил", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp, modifier = Modifier.padding(top = 5.dp))
-                        }
-                    }
-                }
-                item {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Metric(Modifier.weight(1f), Icons.Outlined.South, "Загрузка", if (session.phase == Phase.ON) speed(session.down) else "—", Green)
-                        Metric(Modifier.weight(1f), Icons.Outlined.North, "Отправка", if (session.phase == Phase.ON) speed(session.up) else "—", MaterialTheme.colorScheme.secondary)
-                        Metric(Modifier.weight(1f), Icons.Outlined.Schedule, "Сессия", if (session.started > 0 && session.active) elapsed(now - session.started) else "—", MaterialTheme.colorScheme.onSurface)
-                    }
-                }
-                item {
-                    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(15.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .6f)).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Outlined.Language, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.secondary)
-                        Text("Публичный IP", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f).padding(start = 8.dp))
-                        Text(session.publicIp.ifEmpty { "—" }, fontSize = 12.sp, fontWeight = FontWeight.Medium)
-                    }
-                }
-                item { Row(Modifier.fillMaxWidth().padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) { Text("Все серверы", fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)); TextButton({ model.pingAll() }) { Icon(Icons.Outlined.Speed, null, Modifier.size(17.dp)); Text("Пинг", modifier = Modifier.padding(start = 5.dp)) } } }
-                if (saved.nodes.isEmpty()) item { EmptyState(Icons.Outlined.Link, "Начните с подписки", "Вставьте ссылку провайдера или отсканируйте QR-код", "Добавить подписку", subscriptions) }
-                items(saved.nodes, key = { "home-" + it.id }) { node -> ServerRow(node, node.id == saved.selected, node.id in saved.favorites, pingMap[node.id] ?: PingResult(), { model.select(node) }, { model.favorite(node) }, { model.ping(node) }) }
-            }
-        }) { contentPadding ->
-            Box(Modifier.fillMaxSize().padding(contentPadding)) {
-                WorldMap(saved.selectedNode?.country ?: "SE", saved.preferences.animations, session.phase == Phase.ON)
-                Column(Modifier.align(Alignment.TopCenter).padding(top = 12.dp, start = 16.dp, end = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(when (session.phase) { Phase.ON -> "Вы под защитой"; Phase.STARTING -> "Прокладываем маршрут…"; Phase.RECONNECTING -> "Обновляем маршрут…"; Phase.STOPPING -> "Отключаем VPN…"; Phase.ERROR -> "Не удалось подключиться"; else -> "Свобода в одно касание" }, fontWeight = FontWeight.Bold, fontSize = 22.sp)
-                    Text(when (session.phase) { Phase.ERROR -> session.message; Phase.ON -> if (saved.preferences.routing == RoutingMode.ALL) "Весь трафик идёт через VPN" else "VPN для сайтов и приложений по правилам"; Phase.STARTING -> "Проверяем сервер и создаём туннель"; Phase.RECONNECTING -> "Применяем выбранные настройки"; Phase.STOPPING -> "Завершаем подключение"; else -> "Выберите сервер и подключитесь" }, fontSize = 12.sp, color = if (session.phase == Phase.ERROR) Red else MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 5.dp), maxLines = 2)
-                }
-                ConnectButton(session, saved.preferences.animations, toggle, Modifier.align(Alignment.BottomCenter).padding(bottom = 20.dp))
-            }
-        }
-    }
-}
-@Composable private fun ConnectButton(session: Session, animations: Boolean, onClick: () -> Unit, modifier: Modifier) {
-    val transition = rememberInfiniteTransition(label = "connection-pulse"); val animated by transition.animateFloat(.93f, 1.08f, infiniteRepeatable(tween(1900), RepeatMode.Reverse), label = "halo")
-    val pulse = if (animations && session.active) animated else 1f
-    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(Modifier.size(118.dp), contentAlignment = Alignment.Center) {
-            Canvas(Modifier.fillMaxSize()) { drawCircle(Blue.copy(alpha = .09f), radius = size.minDimension / 2 * pulse); drawCircle(Blue.copy(alpha = .2f), radius = size.minDimension / 2 * .83f, style = Stroke(1.5.dp.toPx())) }
-            Box(Modifier.size(88.dp).clip(CircleShape).background(Brush.linearGradient(listOf(Color(0xFF55B7FF), Blue, Color(0xFF235EDD)))).clickable(enabled = !session.busy, onClick = onClick), contentAlignment = Alignment.Center) {
-                if (session.busy) CircularProgressIndicator(Modifier.size(44.dp), color = Color.White, strokeWidth = 2.dp) else Icon(Icons.Outlined.PowerSettingsNew, if (session.active) "Отключить VPN" else "Подключить VPN", Modifier.size(38.dp), tint = Color.White)
-            }
-        }
-        Text(when (session.phase) { Phase.STARTING -> "Подключение…"; Phase.RECONNECTING -> "Обновление…"; Phase.STOPPING -> "Отключение…"; Phase.ON -> "Отключить"; else -> "Подключиться" }, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-    }
-}
-@Composable private fun SheetTile(modifier: Modifier, title: String, click: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
-    Column(modifier.clip(RoundedCornerShape(18.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .5f)).clickable(onClick = click).height(104.dp).padding(12.dp)) { Text(title, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 8.dp)); content() }
-}
-@Composable private fun Metric(modifier: Modifier, icon: ImageVector, title: String, value: String, color: Color) {
-    Column(modifier.padding(vertical = 5.dp)) { Row(verticalAlignment = Alignment.CenterVertically) { Icon(icon, null, Modifier.size(13.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant); Text(title, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 4.dp)) }; Text(value, fontSize = 18.sp, color = color, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 6.dp)) }
-}
 @Composable fun PingText(ping: PingResult, click: () -> Unit) {
-    val color = when { ping.millis != null -> if (ping.millis < 100) Green else if (ping.millis < 250) Amber else Red; ping.failed -> Red; else -> MaterialTheme.colorScheme.onSurfaceVariant }
+    val color = when (ping.quality) { PingQuality.GOOD -> Green; PingQuality.FAIR -> Amber; PingQuality.POOR -> Red; PingQuality.UNKNOWN -> MaterialTheme.colorScheme.onSurfaceVariant }
     Row(Modifier.clip(RoundedCornerShape(6.dp)).clickable(onClick = click).padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) { Text(ping.label, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = color); if (ping.running) CircularProgressIndicator(Modifier.padding(start = 5.dp).size(10.dp), color = color, strokeWidth = 1.dp) }
 }
 private fun cleanName(s: String) = s.replace(Regex("[\\x{1F1E6}-\\x{1F1FF}]"), "").trim()
@@ -170,7 +99,7 @@ private fun cleanName(s: String) = s.replace(Regex("[\\x{1F1E6}-\\x{1F1FF}]"), "
     if (bitmap != null) Image(bitmap, code, modifier.clip(RoundedCornerShape(4.dp))) else Icon(Icons.Outlined.Public, "Сервер", modifier, tint = MaterialTheme.colorScheme.secondary)
 }
 @Composable private fun StatusPill(text: String, color: Color) { Text(text, fontSize = 10.sp, color = color, fontWeight = FontWeight.SemiBold, modifier = Modifier.clip(CircleShape).background(color.copy(alpha = .12f)).padding(horizontal = 9.dp, vertical = 5.dp)) }
-@Composable private fun ServerRow(node: Node, selected: Boolean, favorite: Boolean, ping: PingResult, select: () -> Unit, star: () -> Unit, probe: () -> Unit) {
+@Composable fun ServerRow(node: Node, selected: Boolean, favorite: Boolean, ping: PingResult, select: () -> Unit, star: () -> Unit, probe: () -> Unit) {
     Surface(shape = RoundedCornerShape(18.dp), color = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = .09f) else MaterialTheme.colorScheme.surface, border = BorderStroke(if (selected) 1.5.dp else 1.dp, if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = .45f)), modifier = Modifier.fillMaxWidth().clickable(onClick = select)) {
         Row(Modifier.padding(start = 13.dp, top = 12.dp, bottom = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             Flag(node.country); Column(Modifier.weight(1f).padding(horizontal = 10.dp)) { Text(cleanName(node.name), fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis); Text(if (node.unsupported.isEmpty()) "${node.protocol} · ${node.transport}" else "Доступен в Windows", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp)) }
@@ -187,21 +116,29 @@ private fun cleanName(s: String) = s.replace(Regex("[\\x{1F1E6}-\\x{1F1FF}]"), "
         item { OutlinedTextField(search, { search = it }, Modifier.fillMaxWidth(), placeholder = { Text("Страна или название") }, leadingIcon = { Icon(Icons.Outlined.Search, null) }, singleLine = true, shape = RoundedCornerShape(16.dp)) }
         item { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) { FilterChip(favorites, { favorites = !favorites }, { Text("Избранное", fontSize = 11.sp) }); FilterChip(sortPing, { sortPing = !sortPing }, { Text("По пингу", fontSize = 11.sp) }); Spacer(Modifier.weight(1f)); IconButton({ model.pingAll() }) { Icon(Icons.Outlined.Speed, "Проверить пинг всех серверов") } } }
         item { Box { TextButton({ methods = true }) { Icon(Icons.Outlined.NetworkCheck, null, Modifier.size(18.dp)); Text(saved.preferences.ping.label, fontSize = 12.sp, modifier = Modifier.padding(start = 6.dp)); Icon(Icons.Outlined.ExpandMore, null) }; DropdownMenu(methods, { methods = false }) { PingMethod.entries.forEach { m -> DropdownMenuItem(text = { Text(m.label) }, onClick = { model.preferences(saved.preferences.copy(ping = m)); methods = false }) } } } }
+        if (saved.preferences.ping != PingMethod.TCP) item {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Сайт для теста", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+                PingTarget.entries.forEach { target -> FilterChip(saved.preferences.pingTarget == target, { model.preferences(saved.preferences.copy(pingTarget = target)) }, { Text(target.label, fontSize = 11.sp) }) }
+            }
+        }
         if (nodes.isEmpty()) item { EmptyState(Icons.Outlined.Public, "Серверов пока нет", "Добавьте подписку или измените фильтр") }
         items(nodes, key = { it.id }) { node -> ServerRow(node, node.id == saved.selected, node.id in saved.favorites, ping[node.id] ?: PingResult(), { model.select(node) }, { model.favorite(node) }, { model.ping(node) }) }
-        item { Text("HTTPS проверяет ответ через VPN. TCP измеряет доступность адреса сервера. На каждую проверку — до 5 секунд.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        item { Text(if (saved.preferences.ping == PingMethod.TCP) "TCP: соединение с адресом сервера. До 100 мс — зелёный, до 250 — оранжевый. Доступ через VPN этот тест не проверяет." else "HTTPS: DNS, VPN-соединение, TLS и ответ сайта. До 300 мс — зелёный, до 600 — оранжевый. Обычно выше TCP; это разные замеры.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        item { Text("Тестовый сайт: ${saved.preferences.pingTarget.label}. Таймаут каждой проверки — 5 секунд. На мобильной сети результат зависит также от сигнала, маршрута оператора и выбранного сайта.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
     }
 }
-@Composable private fun RulesScreen(saved: SavedState, model: MainViewModel, add: () -> Unit, edit: (Rule) -> Unit, presets: () -> Unit, routing: () -> Unit) {
+@Composable private fun RulesScreen(saved: SavedState, model: MainViewModel, add: () -> Unit, edit: (Rule) -> Unit, presets: () -> Unit, routing: () -> Unit, applications: () -> Unit) {
     var search by rememberSaveable { mutableStateOf("") }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item { PageTitle("Ваши правила", "Сайты, приложения и готовые наборы") }
         item { ActionCard(Icons.Outlined.Tune, saved.preferences.routing.label, "Настройте, куда направлять трафик", routing) }
+        item { ActionCard(Icons.Outlined.Apps, "Приложения", "Выберите несколько приложений с иконками", applications) }
         item { Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) { Button(add, Modifier.weight(1f), shape = RoundedCornerShape(14.dp)) { Icon(Icons.Outlined.Add, null, Modifier.size(18.dp)); Text("Правило") }; OutlinedButton(presets, Modifier.weight(1f), shape = RoundedCornerShape(14.dp)) { Icon(Icons.Outlined.AutoAwesome, null, Modifier.size(18.dp)); Text("Наборы") } } }
         item { OutlinedTextField(search, { search = it }, Modifier.fillMaxWidth(), placeholder = { Text("Поиск по правилам") }, leadingIcon = { Icon(Icons.Outlined.Search, null) }, singleLine = true, shape = RoundedCornerShape(16.dp)) }
         if (saved.rules.isEmpty()) item { EmptyState(Icons.Outlined.Route, "Выберите свой маршрут", "Добавьте готовый набор или правило для отдельного сайта. В режиме «По правилам» остальной трафик идёт напрямую.") }
         items(saved.rules.filter { it.name.contains(search, true) || it.values.any { v -> v.contains(search, true) } }.sortedByDescending { it.created }, key = { it.id }) { r ->
-            Surface(shape = RoundedCornerShape(17.dp), color = MaterialTheme.colorScheme.surface) { Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) { Icon(if (r.kind == RuleKind.APP) Icons.Outlined.Apps else Icons.Outlined.Language, null, Modifier.size(22.dp), tint = MaterialTheme.colorScheme.secondary); Column(Modifier.weight(1f).padding(horizontal = 10.dp).clickable { edit(r) }) { Text(r.name, fontWeight = FontWeight.SemiBold, fontSize = 14.sp); Text("${r.kind.label} · ${r.values.joinToString()}", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis); StatusPill(if (r.vpn) "Через VPN" else "Напрямую", if (r.vpn) Green else Amber) }; IconButton({ edit(r) }, Modifier.size(36.dp)) { Icon(Icons.Outlined.Edit, "Изменить правило", Modifier.size(19.dp)) }; IconButton({ model.removeRule(r.id) }, Modifier.size(36.dp)) { Icon(Icons.Outlined.DeleteOutline, "Удалить правило", Modifier.size(19.dp)) } } }
+            Surface(shape = RoundedCornerShape(17.dp), color = MaterialTheme.colorScheme.surface) { Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) { if (r.kind == RuleKind.APP) ApplicationIcon(r.values.first(), Modifier.size(36.dp)) else Icon(Icons.Outlined.Language, null, Modifier.size(30.dp), tint = MaterialTheme.colorScheme.secondary); Column(Modifier.weight(1f).padding(horizontal = 10.dp).clickable { edit(r) }) { Text(r.name, fontWeight = FontWeight.SemiBold, fontSize = 14.sp); Text("${r.kind.label} · ${r.values.joinToString()}", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis); StatusPill(if (r.vpn) "Через VPN" else "Напрямую", if (r.vpn) Green else Amber) }; IconButton({ edit(r) }, Modifier.size(36.dp)) { Icon(Icons.Outlined.Edit, "Изменить правило", Modifier.size(19.dp)) }; IconButton({ model.removeRule(r.id) }, Modifier.size(36.dp)) { Icon(Icons.Outlined.DeleteOutline, "Удалить правило", Modifier.size(19.dp)) } } }
         }
     }
 }
@@ -231,7 +168,7 @@ private fun cleanName(s: String) = s.replace(Regex("[\\x{1F1E6}-\\x{1F1FF}]"), "
         item { ActionCard(Icons.Outlined.ToggleOn, "Кнопка в шторке", "Включайте VPN из быстрых настроек", addTile) }
         item { SectionLabel("О приложении") }
         item { ActionCard(Icons.Outlined.ListAlt, "Журнал подключения", "События без адресов подписок и ключей") { logs = true } }
-        item { ActionCard(Icons.Outlined.SystemUpdate, "Обновления", "Релизы Bebekon Android") { context.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://github.com/Bebekon12/BebekonClient/releases"))) } }
+        item { ActionCard(Icons.Outlined.SystemUpdate, "Обновления", "Скачать новый APK поверх текущей версии") { context.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://github.com/Bebekon12/BebekonClient/releases/latest"))) } }
         item { Text("Bebekon VPN ${BuildConfig.VERSION_NAME}\nAndroid 10+ · sing-box 1.14.2\nVLESS · VMess · SS · Trojan · Hysteria / Hysteria2", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 20.sp) }
     }
     if (logs) AlertDialog(onDismissRequest = { logs = false }, title = { Text("Журнал") }, text = { LazyColumn { if (events.isEmpty()) item { Text("Событий пока нет") }; items(events) { Text(it, fontSize = 12.sp, modifier = Modifier.padding(vertical = 5.dp)) } } }, confirmButton = { TextButton({ logs = false }) { Text("Закрыть") } })

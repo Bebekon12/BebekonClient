@@ -37,7 +37,15 @@ object SubscriptionParser {
     }
     private fun config(root: JSONObject): List<Node> = when {
         root.has("proxies") -> root.getJSONArray("proxies").objects().map(::clash)
-        root.has("outbounds") -> root.getJSONArray("outbounds").objects().filter { it.optString("type", it.optString("protocol")) in types || it.optString("protocol") == "shadowsocks" }.map { if (it.has("protocol")) xray(it) else node(it.optString("tag"), it) }
+        root.has("outbounds") -> {
+            val profileName = listOf("remarks", "remark", "ps", "name").firstNotNullOfOrNull { root.optString(it).trim().takeIf(String::isNotEmpty) }.orEmpty()
+            val outbounds = root.getJSONArray("outbounds").objects().filter { it.optString("type", it.optString("protocol")) in types }
+            outbounds.map { outbound ->
+                val tag = outbound.optString("tag")
+                val title = if (outbounds.size == 1) profileName.ifBlank { tag } else if (profileName.isBlank()) tag else "$profileName · $tag"
+                if (outbound.has("protocol")) xray(outbound, title) else node(title, outbound)
+            }
+        }
         root.optString("type") in types -> listOf(node(root.optString("name", root.optString("tag")), root))
         else -> error("Нет поддерживаемых серверов в JSON подписке")
     }
@@ -124,7 +132,7 @@ object SubscriptionParser {
         transport(c, network, opts.optString("path", "/"), opts.optJSONObject("headers")?.optString("Host") ?: opts.optJSONArray("host")?.optString(0) ?: "", opts.optString("grpc-service-name"))
         return node(o.optString("name"), c)
     }
-    private fun xray(o: JSONObject): Node {
+    private fun xray(o: JSONObject, title: String = o.optString("tag")): Node {
         val type = o.getString("protocol"); val s = o.getJSONObject("settings")
         val peer = s.optJSONArray("vnext")?.getJSONObject(0) ?: s.optJSONArray("servers")?.getJSONObject(0) ?: error("Нет адреса сервера")
         val user = peer.optJSONArray("users")?.getJSONObject(0) ?: peer
@@ -138,7 +146,7 @@ object SubscriptionParser {
         if (security != "none") { val t = stream.optJSONObject("${security}Settings") ?: JSONObject(); val tls = tls(t.optString("serverName"), t.optString("fingerprint")); tls.put("insecure", t.optBoolean("allowInsecure")); if (t.has("alpn")) tls.put("alpn", t.get("alpn")); if (security == "reality") tls.put("reality", json("enabled" to true, "public_key" to t.optString("publicKey"), "short_id" to t.optString("shortId"))); c.put("tls", tls) }
         val net = stream.optString("network", "tcp"); val t = stream.optJSONObject("${net}Settings") ?: JSONObject()
         transport(c, net, t.optString("path", "/"), t.optJSONObject("headers")?.optString("Host") ?: "", t.optString("serviceName"))
-        return node(o.optString("tag"), c)
+        return node(title, c)
     }
     private fun node(name: String, source: JSONObject): Node {
         val c = JSONObject(); source.keys().forEach { if (it in allowed) c.put(it, source.get(it)) }

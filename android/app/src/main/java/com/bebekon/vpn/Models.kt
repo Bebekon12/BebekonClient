@@ -35,9 +35,10 @@ data class Rule(val id: String = UUID.randomUUID().toString(), val name: String,
 enum class ThemeChoice(val label: String) { DARK("Тёмная"), LIGHT("Светлая"), SYSTEM("Как в системе") }
 enum class RoutingMode(val label: String) { ALL("Весь трафик"), RULES("По правилам") }
 enum class PingMethod(val label: String) { HTTPS_GET("HTTPS GET · рекомендуется"), HTTPS_HEAD("HTTPS HEAD"), TCP("TCP") }
-data class Preferences(val theme: ThemeChoice = ThemeChoice.DARK, val routing: RoutingMode = RoutingMode.ALL, val ping: PingMethod = PingMethod.HTTPS_GET, val animations: Boolean = true, val allowLan: Boolean = true, val autoReconnect: Boolean = true) {
-    fun toJson() = json("theme" to theme.name, "routing" to routing.name, "ping" to ping.name, "animations" to animations, "allowLan" to allowLan, "autoReconnect" to autoReconnect)
-    companion object { fun fromJson(o: JSONObject) = Preferences(ThemeChoice.valueOf(o.optString("theme", "DARK")), RoutingMode.valueOf(o.optString("routing", "ALL")), PingMethod.valueOf(o.optString("ping", "HTTPS_GET")), o.optBoolean("animations", true), o.optBoolean("allowLan", true), o.optBoolean("autoReconnect", true)) }
+enum class PingTarget(val label: String, val url: String) { CLOUDFLARE("Cloudflare", "https://cp.cloudflare.com/generate_204"), GOOGLE("Google", "https://www.gstatic.com/generate_204") }
+data class Preferences(val theme: ThemeChoice = ThemeChoice.DARK, val routing: RoutingMode = RoutingMode.ALL, val ping: PingMethod = PingMethod.HTTPS_GET, val animations: Boolean = true, val allowLan: Boolean = true, val autoReconnect: Boolean = true, val pingTarget: PingTarget = PingTarget.CLOUDFLARE) {
+    fun toJson() = json("theme" to theme.name, "routing" to routing.name, "ping" to ping.name, "animations" to animations, "allowLan" to allowLan, "autoReconnect" to autoReconnect, "pingTarget" to pingTarget.name)
+    companion object { fun fromJson(o: JSONObject) = Preferences(ThemeChoice.valueOf(o.optString("theme", "DARK")), RoutingMode.valueOf(o.optString("routing", "ALL")), PingMethod.valueOf(o.optString("ping", "HTTPS_GET")), o.optBoolean("animations", true), o.optBoolean("allowLan", true), o.optBoolean("autoReconnect", true), PingTarget.valueOf(o.optString("pingTarget", "CLOUDFLARE"))) }
 }
 data class SavedState(val subscriptions: List<Subscription> = emptyList(), val selected: String? = null, val favorites: Set<String> = emptySet(), val rules: List<Rule> = emptyList(), val preferences: Preferences = Preferences()) {
     val nodes get() = subscriptions.flatMap { it.nodes }.distinctBy { it.id }
@@ -50,6 +51,12 @@ data class Session(val phase: Phase = Phase.OFF, val server: String = "", val me
     val active get() = phase in listOf(Phase.STARTING, Phase.ON, Phase.RECONNECTING)
     val busy get() = phase in listOf(Phase.STARTING, Phase.STOPPING, Phase.RECONNECTING)
 }
-data class PingResult(val millis: Int? = null, val running: Boolean = false, val failed: Boolean = false) {
-    val label get() = if (millis != null) "$millis мс" else if (running) "Проверка…" else if (failed) "Таймаут" else "—"
+enum class PingQuality { GOOD, FAIR, POOR, UNKNOWN }
+data class PingResult(val millis: Int? = null, val running: Boolean = false, val failed: Boolean = false, val method: PingMethod = PingMethod.HTTPS_GET, val queued: Boolean = false, val target: PingTarget = PingTarget.CLOUDFLARE) {
+    val label get() = if (millis != null) "$millis мс" else if (queued) "В очереди" else if (running) "Проверка…" else if (failed) "Таймаут" else "—"
+    val quality get() = when {
+        millis == null -> if (failed) PingQuality.POOR else PingQuality.UNKNOWN
+        method == PingMethod.TCP -> if (millis <= 100) PingQuality.GOOD else if (millis <= 250) PingQuality.FAIR else PingQuality.POOR
+        else -> if (millis <= 300) PingQuality.GOOD else if (millis <= 600) PingQuality.FAIR else PingQuality.POOR
+    }
 }

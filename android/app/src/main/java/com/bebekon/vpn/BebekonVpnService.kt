@@ -38,7 +38,7 @@ object NativeCore {
         Libbox.setup(SetupOptions().apply { basePath = dir.path; workingPath = dir.path; tempPath = temp.path; fixAndroidStack = true; commandServerSecret = UUID.randomUUID().toString(); logMaxLines = 50; appVersion = BuildConfig.VERSION_NAME; appMarketingVersion = BuildConfig.VERSION_NAME; oomKillerDisabled = true })
         ready = true
     }
-    fun probe(context: Context, state: SavedState, method: String, url: String = "https://www.gstatic.com/generate_204"): BebekonProbeResult {
+    fun probe(context: Context, state: SavedState, method: String, url: String = state.preferences.pingTarget.url): BebekonProbeResult {
         setup(context)
         val platform = AndroidPlatform(context)
         try { return Libbox.bebekonProbe(CoreConfig.build(state, context.repo::geo, tunnel = false), platform, "vpn", url, method) } finally { platform.close() }
@@ -104,9 +104,14 @@ class BebekonVpnService : VpnService(), CommandServerHandler {
                 override fun writeConnectionEvents(events: ConnectionEvents?) = Unit
             }, CommandClientOptions().apply { addCommand(Libbox.CommandStatus); if (BuildConfig.DEBUG && node.host == "10.0.2.2") addCommand(Libbox.CommandLog); statusInterval = 1_000_000_000 }).also { it.connect() }
             // A verified HTTPS response through this outbound confirms usable connectivity.
-            val probe = runCatching { NativeCore.probe(this, saved, "GET") }
+            val probe = runCatching { NativeCore.probe(this, saved, "GET") }.recoverCatching {
+                if (!desired || generation.get() != version) throw CancellationException()
+                val backup = PingTarget.entries.first { it != saved.preferences.pingTarget }
+                NativeCore.probe(this, saved, "GET", backup.url)
+            }
+            if (BuildConfig.DEBUG && node.host == "10.0.2.2" && probe.isFailure) android.util.Log.w("BebekonDebug", "Fixture HTTPS check failed", probe.exceptionOrNull())
             if (!desired || generation.get() != version) return
-            require(probe.isSuccess) { "Сервер не ответил за 5 секунд. Проверьте подписку или выберите другой сервер" }
+            require(probe.isSuccess) { "Сервер не ответил при проверке подключения. Попробуйте другой сервер" }
             VpnController.publish(this) { it.copy(phase = Phase.ON, server = node.name, message = "", started = if (reload && it.started != 0L) it.started else System.currentTimeMillis()) }
             foreground(node.name)
             repo.log(if (reload) "Настройки маршрутизации применены" else "VPN подключён")
@@ -116,7 +121,7 @@ class BebekonVpnService : VpnService(), CommandServerHandler {
             if (BuildConfig.DEBUG) android.util.Log.e("BebekonDebug", "VPN startup failed", e)
             if (desired && generation.get() == version) {
                 desired = false; closeCore()
-                val message = when { e.message?.startsWith("Добавьте") == true -> "Добавьте подписку и выберите сервер"; e.message?.startsWith("Сервер не") == true -> "Сервер не ответил за 5 секунд. Попробуйте другой сервер"; e.message?.contains("permission", true) == true -> "Разрешите VPN в системном окне"; else -> "Не удалось подключиться. Проверьте сервер и параметры подписки" }
+                val message = when { e.message?.startsWith("Добавьте") == true -> "Добавьте подписку и выберите сервер"; e.message?.startsWith("Сервер не") == true -> "Не удалось получить ответ через VPN. Попробуйте другой сервер"; e.message?.contains("permission", true) == true -> "Разрешите VPN в системном окне"; else -> "Не удалось подключиться. Проверьте сервер и параметры подписки" }
                 repo.log(message); VpnController.publish(this) { Session(Phase.ERROR, message = message) }
                 withContext(Dispatchers.Main) { stopForeground(STOP_FOREGROUND_REMOVE); stopSelf() }
             }

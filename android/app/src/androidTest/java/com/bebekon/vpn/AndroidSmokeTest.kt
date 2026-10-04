@@ -5,6 +5,7 @@ import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.test.platform.app.InstrumentationRegistry
 import io.nekohasekai.libbox.Libbox
+import androidx.compose.ui.graphics.toPixelMap
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
@@ -37,6 +38,53 @@ class AndroidSmokeTest {
         compose.onNodeWithText("Кнопка в шторке").assertIsDisplayed()
         compose.onNodeWithText("Тёмная").performClick(); compose.waitUntil(5000) { context.repo.state.value.preferences.theme == ThemeChoice.DARK }
         compose.onNodeWithText("Главная").performClick(); compose.onNodeWithContentDescription("Подключить VPN").assertIsDisplayed()
+    }
+    @Test fun mapShowsLandAndSelectedCountry() {
+        val geometry = parseWorldMap(context.assets.open("world.json").bufferedReader().use { it.readText() })
+        assertTrue(geometry.any { it.code == "FR" }); assertTrue(geometry.any { it.code == "NO" })
+        seed("vless://$uuid@vpn.example:443#Sweden")
+        compose.waitUntil(10_000) { compose.onAllNodesWithContentDescription("Карта мира. Страна сервера: SE").fetchSemanticsNodes().isNotEmpty() }
+        val pixels = compose.onNodeWithTag("world-map").captureToImage().toPixelMap()
+        var land = 0
+        for (y in 0 until pixels.height step 3) for (x in 0 until pixels.width step 3) {
+            val color = pixels[x, y]
+            if (kotlin.math.abs(color.red - 22 / 255f) < .025f && kotlin.math.abs(color.green - 75 / 255f) < .025f && kotlin.math.abs(color.blue - 121 / 255f) < .025f) land++
+        }
+        assertTrue("Country geometry must be visible, not just the marker", land > pixels.width * pixels.height / 9 * .02f)
+    }
+    @Test fun appPickerSupportsSeveralAppsAndIcons() {
+        val apps = installedApps(context).take(2)
+        assertEquals(2, apps.size)
+        context.repo.update { SavedState(preferences = Preferences(routing = RoutingMode.RULES)) }
+        compose.onNodeWithText("Правила").performClick()
+        compose.onNodeWithText("Приложения").performClick()
+        for (app in apps) {
+            compose.onNodeWithTag("app-search").performTextClearance()
+            compose.onNodeWithTag("app-search").performTextInput(app.packageName)
+            compose.waitUntil(5000) { compose.onAllNodesWithTag("app-${app.packageName}").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithTag("app-${app.packageName}").performClick()
+        }
+        compose.onNodeWithTag("save-apps").performClick()
+        compose.waitUntil(5000) { context.repo.state.value.rules.size == 2 }
+        assertEquals(apps.map { it.packageName }.toSet(), context.repo.state.value.rules.flatMap { it.values }.toSet())
+        assertTrue(context.repo.state.value.rules.all { it.kind == RuleKind.APP && it.vpn })
+        compose.waitUntil(5000) { compose.onAllNodesWithContentDescription("Иконка приложения").fetchSemanticsNodes().size >= 2 }
+    }
+    @Test fun optionalProviderLatencyDiagnostic() {
+        val path = InstrumentationRegistry.getArguments().getString("provider_fixture") ?: return
+        val sub = Subscription(name = "Diagnostic", source = "", nodes = SubscriptionParser.parse(java.io.File(path).readText()))
+        assertTrue(sub.nodes.any { it.country.isNotEmpty() })
+        assertTrue(sub.nodes.none { it.name == "proxy" })
+        NativeCore.setup(context)
+        val platform = AndroidPlatform(context)
+        try {
+            for (node in sub.nodes.filter { it.unsupported.isEmpty() }.take(2)) {
+                val tcp = runCatching { Libbox.bebekonTCPProbe(node.host, node.port, platform) }.getOrNull()
+                val https = runCatching { NativeCore.probe(context, SavedState(subscriptions = listOf(sub), selected = node.id), "GET").millis }.getOrNull()
+                val google = runCatching { NativeCore.probe(context, SavedState(subscriptions = listOf(sub), selected = node.id), "GET", PingTarget.GOOGLE.url).millis }.getOrNull()
+                android.util.Log.i("BebekonLatencyTest", "Country=${node.country} TCP=$tcp Cloudflare=$https Google=$google")
+            }
+        } finally { platform.close() }
     }
     @Test fun allNativeProtocolConfigsValidate() {
         NativeCore.setup(context)
