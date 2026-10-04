@@ -27,7 +27,7 @@ Required: JDK 17, Go 1.26.8, Android SDK platform 36, NDK 28.2.13676358. Set `JA
 
 The core script pins the official source commit and adds the small `core/bebekon.go` bridge for independent, deadline-bound VPN probes. It builds arm64-v8a, armeabi-v7a and x86_64. Generated AARs, SDKs, local settings and private signing keys are excluded from Git.
 
-Release builds shrink code/resources. Provide `BEBEKON_ANDROID_KEYSTORE` and `BEBEKON_ANDROID_KEY_PASSWORD`, with alias `bebekon`, then run `:app:assembleRelease`. Keep the same signing key for every update; never put it in the repository. APKs are emitted per architecture plus a universal APK. Prefer arm64-v8a for modern phones.
+Release builds shrink code/resources. Provide `BEBEKON_ANDROID_KEYSTORE` and `BEBEKON_ANDROID_KEY_PASSWORD`, with alias `bebekon`, then run `:app:assembleRelease`. Keep the same signing key for every update; never put it in the repository. The build emits one universal `app-release.apk` with all three supported architectures. Publish it as `Bebekon-Android.apk` so users do not have to choose an architecture.
 
 ## Validation
 
@@ -41,7 +41,7 @@ Install the debug APK and test APK on an isolated emulator and grant the normal 
 
 Application/source: repository GPL-3.0-or-later license. Networking: [SagerNet/sing-box](https://github.com/SagerNet/sing-box), fixed commit in `core/dependencies.json`. Geo rules and flags are the same local resources as the desktop client. Map geometry derives from [Natural Earth](https://www.naturalearthdata.com/about/terms-of-use/) (public domain), simplified to geometry and country labels. The snowman is the existing Bebekon brand asset.
 
-Android releases use their own `android-v…` tags and must not become GitHub's `latest` release, which is used by the Windows updater.
+Android and Windows assets are published together in the [main GitHub release](https://github.com/Bebekon12/BebekonClient/releases/latest). Download the single [Bebekon-Android.apk](https://github.com/Bebekon12/BebekonClient/releases/latest/download/Bebekon-Android.apk) for Android 10+. Preserve the Windows release tag, installer, portable archive and signed `update.json` feed when adding Android assets: the Windows updater uses this same latest release. Android versions and signing keys remain independent. The `android-v0.1.0` source tag identifies the first mobile implementation; it does not require a separate release page.
 
 ## Release 0.1.0 verification
 

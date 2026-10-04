@@ -4,9 +4,9 @@ Windows 10/11 x64, .NET 10, WPF, native UI. Default routing is **selected rules 
 
 ## Android
 
-The Android 10+ client is in [`android/`](android/README.md): native Compose interface, dark/light map design, subscriptions, application/domain rules, live traffic and a Quick Settings tile to toggle VPN from the notification shade. Android uses its own release tags and APK signing key; Windows releases and updater remain on their existing channel. See the Android README for supported protocols, build steps and validation.
+The Android 10+ client is in [`android/`](android/README.md): native Compose interface, dark/light map design, subscriptions, application/domain rules, live traffic and a Quick Settings tile to toggle VPN from the notification shade. Android and Windows downloads share the [main GitHub release](https://github.com/Bebekon12/BebekonClient/releases/latest). Android has its own version and APK signing key. See the Android README for supported protocols, build steps and validation.
 
-Download the first Android APK from [android-v0.1.0](https://github.com/Bebekon12/BebekonClient/releases/tag/android-v0.1.0). Prefer arm64-v8a on modern phones, or universal if unsure. In the app, Settings → «Кнопка в шторке» adds the VPN toggle to Quick Settings.
+Download [Bebekon-Android.apk](https://github.com/Bebekon12/BebekonClient/releases/latest/download/Bebekon-Android.apk): one universal APK for all supported devices (arm64-v8a, armeabi-v7a and x86_64), with no architecture selection needed. In the app, Settings → «Кнопка в шторке» adds the VPN toggle to Quick Settings.
 
 ## Version 0.1.16 · TrustTunnel
 
