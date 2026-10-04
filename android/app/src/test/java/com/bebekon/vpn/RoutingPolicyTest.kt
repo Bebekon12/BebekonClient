@@ -51,11 +51,25 @@ class RoutingPolicyTest {
     }
     @Test fun oldPreferencesAndNewSettingsRoundTrip() {
         assertEquals(Preferences(), Preferences.fromJson(JSONObject()))
-        val p = Preferences(mapLocation = false, dnsResolver = DnsResolver.GOOGLE, mtu = 1280, connectionNotifications = false, checkUpdates = false, sitesInAllApps = true)
+        val p = Preferences(mapLocation = false, dnsResolver = DnsResolver.GOOGLE, mtu = 1280, connectionNotifications = false, checkUpdates = false, sitesInAllApps = true, routingDiagnostics = true)
         assertEquals(p, Preferences.fromJson(p.toJson()))
         val c = JSONObject(CoreConfig.build(state(emptyList()).copy(preferences = p), { error("No geo") }))
         assertEquals(1280, c.getJSONArray("inbounds").getJSONObject(0).getInt("mtu"))
         assertEquals("8.8.8.8", c.getJSONObject("dns").getJSONArray("servers").getJSONObject(0).getString("server"))
+        assertFalse(c.getJSONObject("log").getBoolean("disabled"))
+    }
+    @Test fun routingDiagnosticsRedactsCredentialsButKeepsFailureAndRoutingEvidence() {
+        val s = state(emptyList())
+        val source = "https://provider.example/subscription-secret"
+        val saved = s.copy(subscriptions = listOf(s.subscriptions.single().copy(source = source)))
+        val trace = "domain=example.com => route(direct) error=connection reset; uuid=3bf154da-0ee6-4c45-b5f4-8512b4a2d2bd source=$source url=https://user:password@provider.example/private"
+        val result = redactRoutingLog(trace, saved)
+        assertTrue(result.contains("domain=example.com => route(direct) error=connection reset"))
+        assertFalse(result.contains("3bf154da")); assertFalse(result.contains("subscription-secret")); assertFalse(result.contains("password"))
+        val nested = saved.selectedNode!!.config.put("tls", json("reality" to json("private_key" to "nested-secret")))
+        val nestedState = saved.copy(subscriptions = listOf(saved.subscriptions.single().copy(nodes = listOf(saved.selectedNode!!.copy(outbound = nested.toString())))))
+        assertFalse(redactRoutingLog("private_key=nested-secret", nestedState).contains("nested-secret"))
+        assertTrue(redactRoutingLog("x".repeat(3000), saved).length <= 2000)
     }
     @Test fun webAppUsesSiteRuleNotLauncherUid() {
         val s = state(listOf(app("org.chromium.webapk.chatgpt")))
@@ -64,9 +78,32 @@ class RoutingPolicyTest {
         assertEquals(listOf("chatgpt.com"), resolved.rules.single().values)
         val policy = resolveWebAppPolicy(s) { if (it == "org.chromium.webapk.chatgpt") WebApp("chatgpt.com", "com.yandex.browser") else null }
         assertEquals(setOf("com.yandex.browser"), policy.allowed)
+        assertEquals(setOf("com.yandex.browser"), policy.siteOnlyBrowsers)
+        val config = JSONObject(CoreConfig.build(resolved, { error("No geo") }, policy = policy))
+        assertEquals("A browser included only for a WebAPK must not get a whole-app VPN fallback", "direct", config.getJSONObject("route").getString("final"))
+        assertEquals("direct-dns", config.getJSONObject("dns").getString("final"))
         assertFalse("Other apps must not be captured by WebAPK conversion", "ru.minsvyaz.gosuslugi" in policy.allowed!!)
         val excludedBrowser = s.copy(rules = s.rules + app("com.yandex.browser", false))
         assertTrue(runCatching { resolveWebAppRules(excludedBrowser) { if (it.startsWith("org.chromium.webapk")) WebApp("chatgpt.com", "com.yandex.browser") else null } }.isFailure)
+    }
+    @Test fun webAppBrowserFallbackDoesNotOverrideSitesOrNativeAppSelection() {
+        val identify: (String) -> WebApp? = { if (it == "org.chromium.webapk.chatgpt") WebApp("chatgpt.com", "com.android.chrome") else null }
+        val s = state(listOf(app("org.chromium.webapk.chatgpt"), app("com.openai.chatgpt"), Rule(name = "IP test", kind = RuleKind.KEYWORD, values = listOf("2ip"))))
+        val policy = resolveWebAppPolicy(s, identify)
+        assertEquals(setOf("com.openai.chatgpt"), policy.nativeApps)
+        val config = JSONObject(CoreConfig.build(resolveWebAppRules(s, identify), { error("No geo") }, policy = policy))
+        val routes = config.getJSONObject("route").getJSONArray("rules").objects()
+        val browser = routes.last()
+        assertEquals(listOf("com.android.chrome"), browser.getJSONArray("package_name").strings())
+        assertEquals("direct", browser.getString("outbound"))
+        assertTrue(routes.indexOfFirst { it.has("domain_keyword") } < routes.lastIndex)
+        assertEquals("Native selected apps retain the safe unknown-owner fallback", "vpn", config.getJSONObject("route").getString("final"))
+        val dnsBrowser = config.getJSONObject("dns").getJSONArray("rules").objects().last()
+        assertEquals("direct-dns", dnsBrowser.getString("server"))
+        val explicit = s.copy(rules = s.rules + app("com.android.chrome"))
+        val explicitPolicy = resolveWebAppPolicy(explicit, identify)
+        assertTrue("An explicit whole-browser VPN selection still works", explicitPolicy.siteOnlyBrowsers.isEmpty())
+        assertTrue("Shared mode needs no implicit browser fallback", resolveWebAppPolicy(s.copy(preferences = s.preferences.copy(sitesInAllApps = true)), identify).siteOnlyBrowsers.isEmpty())
     }
     @Test fun appOnlyAndSitesOnlyRemainDistinctWithPresetsAndExceptions() {
         val site = Rule(name = "Preset", kind = RuleKind.GEOSITE, values = listOf("openai"))

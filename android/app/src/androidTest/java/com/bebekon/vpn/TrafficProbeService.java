@@ -11,6 +11,7 @@ public final class TrafficProbeService extends Service {
     private final Messenger messenger = new Messenger(new Handler(Looper.getMainLooper(), message -> {
         Messenger reply = message.replyTo;
         boolean streaming = message.arg2 == 1;
+        String url = message.getData().getString("url", "https://example.com/");
         new Thread(() -> {
             android.util.Log.i("BebekonTrafficTest", "HTTPS probe started; UID=" + android.os.Process.myUid());
             android.net.ConnectivityManager network = getSystemService(android.net.ConnectivityManager.class);
@@ -31,7 +32,7 @@ public final class TrafficProbeService extends Service {
                         if (body.startsWith("HTTP/1.0 200") && body.endsWith("VVVVVVVVV")) status = 200;
                     }
                 } else {
-                connection = (HttpURLConnection) new URL("https://example.com/").openConnection();
+                connection = (HttpURLConnection) new URL(url).openConnection();
                 connection.setConnectTimeout(5000);
                 connection.setReadTimeout(5000);
                 connection.setRequestProperty("Connection", "close");
@@ -53,6 +54,8 @@ public final class TrafficProbeService extends Service {
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
         // Black-box check of an installed release APK without depending on obfuscated app classes.
         Message request = Message.obtain();
+        request.setData(new Bundle());
+        if (intent != null && intent.getStringExtra("url") != null) request.getData().putString("url", intent.getStringExtra("url"));
         request.replyTo = new Messenger(new Handler(Looper.getMainLooper(), response -> {
             android.util.Log.i("BebekonTrafficTest", "Release traffic result: " + response.arg1);
             stopSelf(startId); return true;

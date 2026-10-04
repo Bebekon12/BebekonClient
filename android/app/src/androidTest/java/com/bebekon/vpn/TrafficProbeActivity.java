@@ -6,6 +6,6 @@ public final class TrafficProbeActivity extends android.app.Activity {
         super.onCreate(state);
         android.widget.TextView text = new android.widget.TextView(this);
         text.setText("Bebekon release traffic fixture"); setContentView(text);
-        startService(new android.content.Intent(this, TrafficProbeService.class));
+        startService(new android.content.Intent(this, TrafficProbeService.class).putExtra("url", getIntent().getStringExtra("url")));
     }
 }

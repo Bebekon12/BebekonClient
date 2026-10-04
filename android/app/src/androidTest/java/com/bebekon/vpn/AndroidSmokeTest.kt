@@ -16,19 +16,25 @@ class AndroidSmokeTest {
     private val context: Context get() = InstrumentationRegistry.getInstrumentation().targetContext
     private val uuid = "3bf154da-0ee6-4c45-b5f4-8512b4a2d2bd"
     private fun seed(link: String) { val node = SubscriptionParser.link(link); context.repo.update { SavedState(subscriptions = listOf(Subscription(name = "Test fixture", source = "", nodes = listOf(node))), selected = node.id) } }
-    private fun verifyOtherAppTraffic(expectVpn: Boolean = true, stream: Boolean = false) {
+    private fun verifyOtherAppTraffic(expectVpn: Boolean = true, stream: Boolean = false, url: String = "https://example.com/", routeMatch: String? = null) {
+        if (routeMatch != null) shell("logcat -c")
         val status = java.util.concurrent.atomic.AtomicInteger(0)
         val transport = java.util.concurrent.atomic.AtomicInteger(-1)
         val reply = android.os.Messenger(android.os.Handler(android.os.Looper.getMainLooper()) { transport.set(it.arg2); status.set(it.arg1); true })
         val connection = object : android.content.ServiceConnection {
-            override fun onServiceConnected(name: android.content.ComponentName?, binder: android.os.IBinder?) { android.os.Messenger(binder).send(android.os.Message.obtain().apply { replyTo = reply; arg2 = if (stream) 1 else 0 }) }
+            override fun onServiceConnected(name: android.content.ComponentName?, binder: android.os.IBinder?) { android.os.Messenger(binder).send(android.os.Message.obtain().apply { replyTo = reply; arg2 = if (stream) 1 else 0; data = android.os.Bundle().apply { putString("url", url) } }) }
             override fun onServiceDisconnected(name: android.content.ComponentName?) = Unit
         }
         val intent = android.content.Intent().setComponent(android.content.ComponentName("com.bebekon.vpn.test", "com.bebekon.vpn.TrafficProbeService"))
         assertTrue(context.bindService(intent, connection, Context.BIND_AUTO_CREATE))
         try { compose.waitUntil(20_000) { status.get() != 0 }; assertEquals("Traffic from a separate Android UID", 200, status.get()); assertEquals("Actual Android VPN transport", if (expectVpn) 1 else 0, transport.get()); if (expectVpn) compose.waitUntil(5000) { VpnController.session.value.totalDown > 0 && VpnController.session.value.totalUp > 0 } } finally { context.unbindService(connection) }
+        if (routeMatch != null) {
+            compose.waitUntil(5000) { shellOutput("logcat -d -s BebekonCoreTest:D *:S").contains(routeMatch) }
+            context.cacheDir.resolve("routing-evidence.txt").appendText("Expected: $routeMatch\n" + shellOutput("logcat -d -s BebekonCoreTest:D *:S") + "\n")
+        }
     }
-    private fun shell(command: String) { val descriptor = InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand(command); android.os.ParcelFileDescriptor.AutoCloseInputStream(descriptor).use { it.readBytes() } }
+    private fun shellOutput(command: String): String { val descriptor = InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand(command); return android.os.ParcelFileDescriptor.AutoCloseInputStream(descriptor).use { it.readBytes().toString(Charsets.UTF_8) } }
+    private fun shell(command: String) { shellOutput(command) }
     @org.junit.After fun stopFixtureVpn() { if (VpnController.session.value.active) { VpnController.stop(context); compose.waitUntil(15_000) { VpnController.session.value.phase == Phase.OFF } } }
     @Test fun navigationAndBothThemes() {
         context.repo.update { it.copy(preferences = it.preferences.copy(theme = ThemeChoice.DARK)) }
@@ -163,6 +169,9 @@ class AndroidSmokeTest {
         val args = InstrumentationRegistry.getArguments()
         val port = args.getString("fixture_port")?.toIntOrNull() ?: return
         seed("vless://$uuid@10.0.2.2:$port#Local%20fixture")
+        context.cacheDir.resolve("routing-evidence.txt").delete()
+        context.repo.routingLogs.value = emptyList()
+        context.repo.update { it.copy(preferences = it.preferences.copy(routingDiagnostics = true)) }
         // Permission is granted only to this isolated emulator by the validation script.
         assertNull("Grant VPN consent on the isolated emulator first", android.net.VpnService.prepare(context))
         VpnController.start(context)
@@ -190,6 +199,20 @@ class AndroidSmokeTest {
         verifyOtherAppTraffic(expectVpn = false)
         reloadRules(listOf(com.bebekon.vpn.Rule(name = "Web app", kind = RuleKind.APP, values = listOf("com.bebekon.webapkfixture")), com.bebekon.vpn.Rule(name = "Native app", kind = RuleKind.APP, values = listOf("com.bebekon.vpn.test"))))
         verifyOtherAppTraffic(); verifyOtherAppTraffic(stream = true)
+        // A browser implicitly captured by a WebAPK must use VPN only for selected sites.
+        // Probe from that browser's real separate UID, including a native-app mixed selection.
+        val webProbe = com.bebekon.vpn.Rule(name = "Web probe", kind = RuleKind.APP, values = listOf("com.bebekon.webapkfixture.probe"))
+        reloadRules(listOf(webProbe))
+        verifyOtherAppTraffic(routeMatch = "domain_suffix=example.com => route(vpn)")
+        verifyOtherAppTraffic(url = "https://example.org/", routeMatch = "package_name=com.bebekon.vpn.test => route(direct)")
+        reloadRules(listOf(webProbe, com.bebekon.vpn.Rule(name = "Native Chrome", kind = RuleKind.APP, values = listOf("com.android.chrome"))))
+        verifyOtherAppTraffic(routeMatch = "domain_suffix=example.com => route(vpn)")
+        verifyOtherAppTraffic(url = "https://example.org/", routeMatch = "package_name=com.bebekon.vpn.test => route(direct)")
+        reloadRules(listOf(webProbe, com.bebekon.vpn.Rule(name = "Explicit full browser", kind = RuleKind.APP, values = listOf("com.bebekon.vpn.test"))))
+        verifyOtherAppTraffic(url = "https://example.org/", routeMatch = "package_name=com.bebekon.vpn.test => route(vpn)")
+        compose.waitUntil(5000) { context.repo.routingLogs.value.any { it.contains("package_name=com.bebekon.vpn.test => route(vpn)") } }
+        assertTrue(context.repo.routingLogs.value.size <= 200)
+        assertFalse(context.repo.routingLogs.value.any { it.contains(uuid) })
         // Regression: adding a preset/site to an app selection must not put unchecked apps
         // into the VPN network (the Yandex/Gosuslugi report). Probe from a separate UID.
         reloadRules(listOf(com.bebekon.vpn.Rule(name = "Chrome", kind = RuleKind.APP, values = listOf("com.android.chrome")), com.bebekon.vpn.Rule(name = "VPN site", kind = RuleKind.DOMAIN, values = listOf("example.com"))))

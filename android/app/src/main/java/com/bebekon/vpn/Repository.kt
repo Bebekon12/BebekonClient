@@ -38,6 +38,10 @@ class Repository(private val context: Context) {
     val state = mutable.asStateFlow()
     val pings = MutableStateFlow<Map<String, PingResult>>(emptyMap())
     val logs = MutableStateFlow<List<String>>(emptyList())
+    val routingLogs = MutableStateFlow<List<String>>(emptyList())
+    @Synchronized fun routingLog(message: String, saved: SavedState) {
+        if (state.value.preferences.routingDiagnostics) routingLogs.value = (routingLogs.value + redactRoutingLog(message, saved)).takeLast(200)
+    }
     val storageError = MutableStateFlow(readFailure)
     private fun read(): SavedState = try {
         if (!file.baseFile.exists()) SavedState() else {

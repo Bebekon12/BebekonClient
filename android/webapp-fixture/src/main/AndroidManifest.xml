@@ -1,7 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application android:label="Bebekon WebAPK test fixture" android:allowBackup="false">
         <meta-data android:name="org.chromium.webapk.shell_apk.startUrl" android:value="https://example.com" />
-        <meta-data android:name="org.chromium.webapk.shell_apk.runtimeHost" android:value="com.android.chrome" />
+        <meta-data android:name="org.chromium.webapk.shell_apk.runtimeHost" android:value="${runtimeHost}" />
         <activity android:name="android.app.Activity" android:exported="true">
             <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
         </activity>

@@ -53,6 +53,7 @@ class AndroidPlatform(private val context: Context, private val vpn: BebekonVpnS
         val fd = builder.establish() ?: error("Разрешение на VPN отозвано")
         descriptor?.close(); descriptor = fd
         context.repo.log(if (policy.appOnly) "Android: туннель только для выбранных приложений (${policy.allowed!!.size}); остальные используют обычную сеть" else "Android: общий туннель, исключений приложений: ${policy.excluded.size}")
+        if (policy.siteOnlyBrowsers.isNotEmpty()) context.repo.log("Браузеры веб-приложений: ${policy.siteOnlyBrowsers.joinToString()}; через VPN только сайты из правил")
         return fd.fd
     }
     override fun useProcFS() = false

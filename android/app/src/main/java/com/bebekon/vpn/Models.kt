@@ -54,16 +54,17 @@ enum class DnsResolver(val label: String, val address: String, val hostname: Str
     CLOUDFLARE("Cloudflare", "1.1.1.1", "cloudflare-dns.com"), GOOGLE("Google", "8.8.8.8", "dns.google")
 }
 data class Preferences(val theme: ThemeChoice = ThemeChoice.DARK, val routing: RoutingMode = RoutingMode.ALL, val ping: PingMethod = PingMethod.HTTPS_GET, val animations: Boolean = true, val allowLan: Boolean = true, val autoReconnect: Boolean = true, val pingTarget: PingTarget = PingTarget.CLOUDFLARE,
-    val mapLocation: Boolean = true, val dnsResolver: DnsResolver = DnsResolver.CLOUDFLARE, val mtu: Int = 1400, val connectionNotifications: Boolean = true, val checkUpdates: Boolean = true, val sitesInAllApps: Boolean = false) {
+    val mapLocation: Boolean = true, val dnsResolver: DnsResolver = DnsResolver.CLOUDFLARE, val mtu: Int = 1400, val connectionNotifications: Boolean = true, val checkUpdates: Boolean = true, val sitesInAllApps: Boolean = false, val routingDiagnostics: Boolean = false) {
     fun toJson() = json("theme" to theme.name, "routing" to routing.name, "ping" to ping.name, "animations" to animations, "allowLan" to allowLan, "autoReconnect" to autoReconnect, "pingTarget" to pingTarget.name,
-        "mapLocation" to mapLocation, "dnsResolver" to dnsResolver.name, "mtu" to mtu, "connectionNotifications" to connectionNotifications, "checkUpdates" to checkUpdates, "sitesInAllApps" to sitesInAllApps)
+        "mapLocation" to mapLocation, "dnsResolver" to dnsResolver.name, "mtu" to mtu, "connectionNotifications" to connectionNotifications, "checkUpdates" to checkUpdates, "sitesInAllApps" to sitesInAllApps, "routingDiagnostics" to routingDiagnostics)
     companion object { fun fromJson(o: JSONObject) = Preferences(ThemeChoice.valueOf(o.optString("theme", "DARK")), RoutingMode.valueOf(o.optString("routing", "ALL")), PingMethod.valueOf(o.optString("ping", "HTTPS_GET")), o.optBoolean("animations", true), o.optBoolean("allowLan", true), o.optBoolean("autoReconnect", true), PingTarget.valueOf(o.optString("pingTarget", "CLOUDFLARE")),
-        o.optBoolean("mapLocation", true), DnsResolver.valueOf(o.optString("dnsResolver", "CLOUDFLARE")), o.optInt("mtu", 1400).also { require(it in 1280..1500) }, o.optBoolean("connectionNotifications", true), o.optBoolean("checkUpdates", true), o.optBoolean("sitesInAllApps", false)) }
+        o.optBoolean("mapLocation", true), DnsResolver.valueOf(o.optString("dnsResolver", "CLOUDFLARE")), o.optInt("mtu", 1400).also { require(it in 1280..1500) }, o.optBoolean("connectionNotifications", true), o.optBoolean("checkUpdates", true), o.optBoolean("sitesInAllApps", false), o.optBoolean("routingDiagnostics", false)) }
 }
 
 /** App selection is an OS filter. Adding a site must never silently broaden that filter. */
-data class AppTunnelPolicy(val allowed: Set<String>? = null, val excluded: Set<String> = emptySet()) {
+data class AppTunnelPolicy(val allowed: Set<String>? = null, val excluded: Set<String> = emptySet(), val siteOnlyBrowsers: Set<String> = emptySet()) {
     val appOnly get() = allowed != null
+    val nativeApps get() = allowed.orEmpty() - siteOnlyBrowsers
 }
 fun appTunnelPolicy(state: SavedState): AppTunnelPolicy {
     if (state.preferences.routing == RoutingMode.ALL) return AppTunnelPolicy()

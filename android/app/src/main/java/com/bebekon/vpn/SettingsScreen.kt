@@ -31,7 +31,9 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
     val context = LocalContext.current
     var group by remember { mutableStateOf("Все") }; var query by remember { mutableStateOf("") }
     var logs by remember { mutableStateOf(false) }; var diagnostics by remember { mutableStateOf(false) }
+    var routes by remember { mutableStateOf(false) }
     val events by model.repo.logs.collectAsState(); val state by model.saved.collectAsState()
+    val routeEvents by model.repo.routingLogs.collectAsState()
     val manager = context.getSystemService(NotificationManager::class.java)
     var notificationsEnabled by remember { mutableStateOf(manager.areNotificationsEnabled()) }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { notificationsEnabled = manager.areNotificationsEnabled() }
@@ -49,7 +51,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
         if (visible("Оформление", "Местоположение карта дуга IP")) item { ToggleCard(Icons.Outlined.MyLocation, "Начало маршрута на карте", "Примерное место по обычному IP через ipwho.is. Без GPS, координаты не сохраняются", p.mapLocation) { model.preferences(p.copy(mapLocation = it)) } }
         if (visible("Подключение", "Режим маршрутизации")) item { ActionCard(Icons.Outlined.Route, "Режим маршрутизации", p.routing.label, routing) }
         if (visible("Подключение", "Приложения VPN напрямую исключения")) item { ActionCard(Icons.Outlined.Apps, "Приложения и исключения", "Через VPN / напрямую · ${effectiveAppRules(state.rules).size} правил", applications) }
-        if (p.routing == RoutingMode.RULES && visible("Подключение", "Правила сайтов во всех приложениях")) item { ToggleCard(Icons.Outlined.Public, "Правила сайтов во всех приложениях", "Выключено: при выборе приложений остальные обходят VPN полностью. Включено: общий туннель для сайтов; исключения «Напрямую» сохраняются. Если выбраны только сайты, общий туннель нужен автоматически.", p.sitesInAllApps) { model.preferences(p.copy(sitesInAllApps = it)) } }
+        if (p.routing == RoutingMode.RULES && visible("Подключение", "Правила сайтов во всех приложениях")) item { ToggleCard(Icons.Outlined.Public, "Правила сайтов во всех приложениях", "Выключено: сайты обрабатываются только в выбранных приложениях и браузерах выбранных веб-приложений. Включено: сайты обрабатываются во всех приложениях; остальное идёт напрямую. «Напрямую» исключает приложение целиком, включая правила сайтов. Если выбраны только сайты, общий туннель нужен автоматически.", p.sitesInAllApps) { model.preferences(p.copy(sitesInAllApps = it)) } }
         if (visible("Подключение", "Готовые правила сайты")) item { ActionCard(Icons.Outlined.AutoAwesome, "Готовые правила", "Сервисы, сайты и наборы для России", presets) }
         if (visible("Подключение", "ChatGPT браузер веб-приложение")) item { ActionCard(Icons.Outlined.Public, "ChatGPT из браузера", "Добавить правила сайтов ChatGPT. Браузер нельзя исключать правилом «Напрямую»") { model.repo.presets().firstOrNull { it.first == "OpenAI / ChatGPT" }?.let { model.preset(it.second) } } }
         if (visible("Подключение", "Доступ к локальной сети LAN")) item { ToggleCard(Icons.Outlined.Wifi, "Доступ к локальной сети", "Принтеры, домашние устройства и LAN", p.allowLan) { model.preferences(p.copy(allowLan = it)) } }
@@ -70,11 +72,22 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
         if (visible("Данные", "Обновить подписки")) item { ActionCard(Icons.Outlined.Sync, "Обновить все подписки", "Выбранный сервер сохраняется", { model.refreshAll() }) }
         if (visible("Данные", "Автоматическая проверка обновлений")) item { ToggleCard(Icons.Outlined.Update, "Проверять обновления при запуске", "Покажем окно: обновить или пропустить на этот раз", p.checkUpdates) { model.preferences(p.copy(checkUpdates = it)) } }
         if (visible("Данные", "Обновления установить версия")) item { ActionCard(Icons.Outlined.SystemUpdate, "Обновления", "Проверить и установить прямо из приложения") { context.updater.check() } }
+        if (visible("Проверки", "Диагностика маршрутизации DNS Яндекс")) item { ToggleCard(Icons.Outlined.BugReport, "Диагностика маршрутизации", "Временно записывает домены, маршруты и ошибки в памяти телефона. Журнал может содержать посещённые сайты; данные доступа скрываются. Выключите после проверки.", p.routingDiagnostics) { model.repo.routingLogs.value = emptyList(); model.preferences(p.copy(routingDiagnostics = it)) } }
+        if (visible("Проверки", "Журнал маршрутов DNS ошибки")) item { ActionCard(Icons.Outlined.Route, "Журнал маршрутов", if (p.routingDiagnostics) "Откройте проблемный сайт, затем скопируйте журнал · ${routeEvents.size}/200" else "Включите диагностику маршрутизации для записи") { routes = true } }
         if (visible("Данные", "Журнал подключения диагностика")) item { ActionCard(Icons.Outlined.ListAlt, "Журнал подключения", "События без адресов подписок и ключей") { logs = true } }
         if (visible("Данные", "Версия о приложении протоколы")) item { Text("Bebekon VPN ${BuildConfig.VERSION_NAME}\nAndroid 10+ · sing-box 1.14.2\nVLESS · VMess · SS · Trojan · Hysteria / Hysteria2\nНастройки сохраняются автоматически. Изменения сети применяются переподключением; активные запросы в этот момент могут прерваться.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 19.sp) }
     }
     if (logs) AlertDialog(onDismissRequest = { logs = false }, title = { Text("Журнал") }, text = { LazyColumn { if (events.isEmpty()) item { Text("Событий пока нет") }; items(events) { Text(it, fontSize = 12.sp, modifier = Modifier.padding(vertical = 5.dp)) } } }, confirmButton = { TextButton({ logs = false }) { Text("Закрыть") } })
     if (diagnostics) SiteDiagnosticsDialog(model) { diagnostics = false }
+    if (routes) AlertDialog(onDismissRequest = { routes = false }, title = { Text("Журнал маршрутов") }, text = {
+        LazyColumn(Modifier.heightIn(max = 420.dp)) {
+            if (routeEvents.isEmpty()) item { Text("Включите диагностику маршрутизации и повторите запрос в браузере. Записываются только новые подключения; журнал очищается при переключении диагностики.") }
+            items(routeEvents) { Text(it, fontSize = 11.sp, modifier = Modifier.padding(vertical = 4.dp)) }
+        }
+    }, confirmButton = { TextButton({
+        val clipboard = context.getSystemService(android.content.ClipboardManager::class.java)
+        clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Bebekon: маршруты", "Bebekon VPN ${BuildConfig.VERSION_NAME}\n${redactRoutingLog(events.joinToString("\n"), state)}\n${routeEvents.joinToString("\n")}"))
+    }, enabled = routeEvents.isNotEmpty()) { Text("Скопировать") } }, dismissButton = { TextButton({ routes = false }) { Text("Закрыть") } })
 }
 
 @Composable private fun <T> ChoiceSetting(icon: ImageVector, title: String, subtitle: String, value: T, choices: List<T>, label: (T) -> String, choose: (T) -> Unit) {

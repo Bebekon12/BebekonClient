@@ -34,11 +34,15 @@ import androidx.core.graphics.drawable.toBitmap
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-data class InstalledApp(val packageName: String, val label: String, val webDomain: String = "")
+data class InstalledApp(val packageName: String, val label: String, val webDomain: String = "", val webBrowser: String = "")
 
 fun installedApps(context: Context): List<InstalledApp> = context.packageManager
     .queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0)
-    .map { InstalledApp(it.activityInfo.packageName, it.loadLabel(context.packageManager).toString(), webApp(context, it.activityInfo.packageName)?.domain.orEmpty()) }
+    .map {
+        val web = webApp(context, it.activityInfo.packageName)
+        val browser = web?.browser?.let { pkg -> runCatching { context.packageManager.getApplicationLabel(context.packageManager.getApplicationInfo(pkg, 0)).toString() }.getOrDefault(pkg) }.orEmpty()
+        InstalledApp(it.activityInfo.packageName, it.loadLabel(context.packageManager).toString(), web?.domain.orEmpty(), browser)
+    }
     .distinctBy { it.packageName }.filter { it.packageName != context.packageName }
     .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.label })
 
@@ -91,7 +95,7 @@ fun installedApps(context: Context): List<InstalledApp> = context.packageManager
                         FilterChip(!vpn, { vpn = false; if (!manageRules) assignments = assignments.mapValues { false } }, { Text("Напрямую") }, Modifier.weight(1f).testTag("apps-direct"))
                     }
                     if (manageRules) Text("При выборе приложений VPN получают только отмеченные: остальные сохраняют обычную сеть и DNS. Правила сайтов действуют внутри выбранных приложений. Общую обработку сайтов можно включить в настройках. «Напрямую» исключает приложение; снять галочку — удалить правило.", fontSize = 11.sp, lineHeight = 15.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 8.dp))
-                    if (manageRules) Text("ChatGPT с главного экрана браузера: добавьте готовый набор OpenAI / ChatGPT. Браузер при этом не должен иметь правило «Напрямую».", fontSize = 11.sp, lineHeight = 15.sp, color = MaterialTheme.colorScheme.secondary, modifier = Modifier.padding(bottom = 8.dp))
+                    if (manageRules) Text("Веб-приложение использует свой браузер: в туннель попадает браузер, но через VPN идут только сайты из правил. Для ChatGPT добавьте набор OpenAI / ChatGPT, чтобы учесть авторизацию и загрузку файлов. «Напрямую» для браузера исключает и веб-приложение.", fontSize = 11.sp, lineHeight = 15.sp, color = MaterialTheme.colorScheme.secondary, modifier = Modifier.padding(bottom = 8.dp))
                     val visible = apps.filter { (!onlySelected || assignments[it.packageName] == vpn) && (it.label.contains(search, true) || it.packageName.contains(search, true)) }
                     LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("app-list"), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                         if (loading) item { Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() } }
@@ -105,7 +109,7 @@ fun installedApps(context: Context): List<InstalledApp> = context.packageManager
                                 Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
                                     Text(app.label, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     Text(app.packageName, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                    if (app.webDomain.isNotEmpty()) Text("Веб-приложение · использует сеть своего браузера", fontSize = 10.sp, color = MaterialTheme.colorScheme.secondary)
+                                    if (app.webDomain.isNotEmpty()) Text("${app.webDomain} · браузер: ${app.webBrowser.ifEmpty { "не определён" }}", fontSize = 10.sp, color = MaterialTheme.colorScheme.secondary)
                                     if (manageRules && assignments.containsKey(app.packageName) && !checked) Text(if (vpn) "Сейчас: напрямую" else "Сейчас: через VPN", fontSize = 10.sp, color = MaterialTheme.colorScheme.secondary)
                                 }
                                 Checkbox(checked, onCheckedChange = null)

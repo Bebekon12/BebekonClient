@@ -116,13 +116,19 @@ class BebekonVpnService : VpnService(), CommandServerHandler {
                 override fun writeStatus(message: StatusMessage) { if (desired && generation.get() == statusVersion) VpnController.publish(this@BebekonVpnService) { it.copy(down = message.downlink, up = message.uplink, totalDown = downTotal.update(message.downlinkTotal), totalUp = upTotal.update(message.uplinkTotal)) } }
                 override fun setDefaultLogLevel(level: Int) = Unit
                 override fun clearLogs() = Unit
-                override fun writeLogs(messageList: LogIterator?) { if (BuildConfig.DEBUG && node.host == "10.0.2.2") while (messageList?.hasNext() == true) android.util.Log.d("BebekonCoreTest", messageList.next().message) }
+                override fun writeLogs(messageList: LogIterator?) {
+                    while (messageList?.hasNext() == true) {
+                        val message = messageList.next().message
+                        if (BuildConfig.DEBUG && node.host == "10.0.2.2") android.util.Log.d("BebekonCoreTest", message)
+                        if (repo.state.value.preferences.routingDiagnostics) repo.routingLog(message, original)
+                    }
+                }
                 override fun writeGroups(message: OutboundGroupIterator?) = Unit
                 override fun writeOutbounds(message: OutboundGroupItemIterator?) = Unit
                 override fun initializeClashMode(modeList: StringIterator?, currentMode: String?) = Unit
                 override fun updateClashMode(newMode: String?) = Unit
                 override fun writeConnectionEvents(events: ConnectionEvents?) = Unit
-            }, CommandClientOptions().apply { addCommand(Libbox.CommandStatus); if (BuildConfig.DEBUG && node.host == "10.0.2.2") addCommand(Libbox.CommandLog); statusInterval = 1_000_000_000 }).also { it.connect() }
+            }, CommandClientOptions().apply { addCommand(Libbox.CommandStatus); if (saved.preferences.routingDiagnostics || BuildConfig.DEBUG && node.host == "10.0.2.2") addCommand(Libbox.CommandLog); statusInterval = 1_000_000_000 }).also { it.connect() }
             // A verified HTTPS response through this outbound confirms usable connectivity.
             val probe = runCatching { NativeCore.probe(this, saved, "GET") }.recoverCatching {
                 if (!desired || generation.get() != version) throw CancellationException()

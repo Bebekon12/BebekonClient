@@ -56,7 +56,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         require(value.mtu in 1280..1500)
         val old = saved.value.preferences; repo.update { it.copy(preferences = value) }
         if (old.ping != value.ping || old.pingTarget != value.pingTarget) withContext(Dispatchers.Main) { pingJobs.values.forEach { it.cancel() }; pingJobs.clear(); repo.pings.value = emptyMap() }
-        if (old.routing != value.routing || old.sitesInAllApps != value.sitesInAllApps || old.allowLan != value.allowLan || old.dnsResolver != value.dnsResolver || old.mtu != value.mtu) VpnController.reload(getApplication())
+        if (old.routing != value.routing || old.sitesInAllApps != value.sitesInAllApps || old.allowLan != value.allowLan || old.dnsResolver != value.dnsResolver || old.mtu != value.mtu || old.routingDiagnostics != value.routingDiagnostics) VpnController.reload(getApplication())
     }
     fun refreshAll() { saved.value.subscriptions.filter { it.source.startsWith("https://") }.forEach(::refresh) }
     override fun onCleared() { origin.close(); super.onCleared() }

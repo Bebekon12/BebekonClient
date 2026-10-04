@@ -9,11 +9,14 @@ fun resolveWebAppPolicy(state: SavedState, identify: (String) -> WebApp?): AppTu
     val policy = appTunnelPolicy(state)
     if (!policy.appOnly) return policy
     val apps = effectiveAppRules(state.rules)
-    return policy.copy(allowed = policy.allowed!!.map { pkg ->
+    val browsers = mutableSetOf<String>()
+    val allowed = policy.allowed!!.map { pkg ->
         val app = identify(pkg) ?: return@map pkg
         require(app.browser.isNotBlank() && apps[app.browser] != false) { "Браузер веб-приложения исключён из VPN. Разрешите VPN для его браузера" }
+        if (apps[app.browser] != true) browsers += app.browser
         app.browser
-    }.toSet())
+    }.toSet()
+    return policy.copy(allowed = allowed, siteOnlyBrowsers = browsers)
 }
 fun webApp(context: Context, pkg: String): WebApp? = runCatching {
     val metadata = context.packageManager.getApplicationInfo(pkg, PackageManager.GET_META_DATA).metaData ?: return@runCatching null
