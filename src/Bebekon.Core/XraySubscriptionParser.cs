@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace Bebekon.Core;
 
-/// <summary>Extracts VLESS server settings, never provider routes, DNS, listeners or executable config.</summary>
+/// <summary>Extracts VPN server settings, never provider routes, DNS, listeners or executable config.</summary>
 internal static class XraySubscriptionParser
 {
     public static List<Server> Parse(string content)
@@ -20,7 +20,7 @@ internal static class XraySubscriptionParser
                 try { ReadProfile(profiles[index], servers); }
                 catch (UserError error) { throw new UserError($"Конфигурация {index + 1}: {error.Message}"); }
             }
-            if (servers.Count == 0) throw new UserError("В JSON-подписке не найдено серверов VLESS.");
+            if (servers.Count == 0) throw new UserError("В JSON-подписке не найдено VPN-серверов.");
             return servers.DistinctBy(server => server.Id).ToList();
         }
         catch (Exception error) when (error is JsonException or InvalidOperationException or ArgumentException or UriFormatException)
@@ -38,37 +38,39 @@ internal static class XraySubscriptionParser
         {
             var protocol = Text(outbound, "protocol").ToLowerInvariant();
             if (protocol is "freedom" or "blackhole" or "dns") continue;
-            if (protocol != "vless") throw new UserError("В JSON-подписке есть VPN-протокол, отличный от VLESS.");
+
             var settings = Property(outbound, "settings");
             var stream = Property(outbound, "streamSettings");
             var name = Text(profile, "remarks", Text(profile, "ps", Text(outbound, "tag")));
-            var vnext = Property(settings, "vnext");
+            var vnext = Property(settings, protocol is "vless" or "vmess" ? "vnext" : "servers");
             if (vnext.ValueKind == JsonValueKind.Undefined)
             {
                 // Newer Xray uses address/port/id directly in settings.
-                AddServer(settings, settings, stream, outbound, name, servers);
+                AddServer(settings, settings, stream, outbound, name, protocol, servers);
                 continue;
             }
             if (vnext.ValueKind != JsonValueKind.Array || vnext.GetArrayLength() == 0) throw Invalid();
             foreach (var node in vnext.EnumerateArray())
             {
+                if (protocol is not ("vless" or "vmess")) { AddServer(node, node, stream, outbound, name, protocol, servers); continue; }
                 var users = Property(node, "users");
                 if (users.ValueKind != JsonValueKind.Array || users.GetArrayLength() == 0) throw Invalid();
-                foreach (var user in users.EnumerateArray()) AddServer(node, user, stream, outbound, name, servers);
+                foreach (var user in users.EnumerateArray()) AddServer(node, user, stream, outbound, name, protocol, servers);
             }
         }
     }
 
-    private static void AddServer(JsonElement node, JsonElement user, JsonElement stream, JsonElement outbound, string name, List<Server> servers)
+    private static void AddServer(JsonElement node, JsonElement user, JsonElement stream, JsonElement outbound, string name, string protocol, List<Server> servers)
     {
         if (servers.Count >= 5000) throw new UserError("Подписка содержит слишком много серверов.");
         var address = Text(node, "address");
         var port = Property(node, "port");
         if (port.ValueKind != JsonValueKind.Number || !port.TryGetInt32(out var number) || number is < 1 or > 65535) throw Invalid();
-        if (!Guid.TryParse(Text(user, "id"), out var uuid)) throw new UserError("В JSON указан неверный идентификатор VLESS.");
+        var uuid = Guid.Empty;
+        if (protocol is "vless" or "vmess" && !Guid.TryParse(Text(user, "id"), out uuid)) throw new UserError("В JSON указан неверный UUID.");
         if (string.IsNullOrWhiteSpace(address) || Uri.CheckHostName(address.Trim('[', ']')) == UriHostNameType.Unknown) throw Invalid();
         var network = Text(stream, "network", "tcp").ToLowerInvariant();
-        network = network switch { "raw" => "tcp", "h2" => "http", _ => network };
+        network = network switch { "raw" => "tcp", "h2" => "http", "splithttp" => "xhttp", _ => network };
         var security = Text(stream, "security", "none").ToLowerInvariant();
         var tls = Property(stream, security == "reality" ? "realitySettings" : "tlsSettings");
         var query = new Dictionary<string, string>
@@ -78,7 +80,8 @@ internal static class XraySubscriptionParser
             ["sni"] = Text(tls, "serverName"), ["fp"] = Text(tls, "fingerprint", "chrome"),
             ["pbk"] = Text(tls, "publicKey", Text(tls, "password")), ["sid"] = Text(tls, "shortId"),
             ["alpn"] = string.Join(',', Strings(tls, "alpn")),
-            ["allowInsecure"] = Flag(tls, "allowInsecure") ? "1" : "0"
+            ["pcs"] = Text(tls, "pinnedPeerCertSha256"), ["vcn"] = Text(tls, "verifyPeerCertByName"),
+            ["allowInsecure"] = protocol == "vless" && Flag(tls, "allowInsecure") ? "1" : "0"
         };
         string? unsupported = null;
         if (network == "grpc")
@@ -113,6 +116,14 @@ internal static class XraySubscriptionParser
             }
             else query["host"] = Text(transport, "host");
         }
+        else if (network == "xhttp")
+        {
+            var http = Property(stream, "xhttpSettings"); if (http.ValueKind == JsonValueKind.Undefined) http = Property(stream, "splithttpSettings");
+            query["path"] = Text(http, "path", "/"); query["host"] = Text(http, "host"); query["mode"] = Text(http, "mode", "auto");
+            var extra = Property(http, "extra");
+            if (extra.ValueKind != JsonValueKind.Undefined) query["extra"] = extra.GetRawText();
+            else if (http.ValueKind == JsonValueKind.Object) query["extra"] = JsonSerializer.Serialize(http.EnumerateObject().Where(p => p.Name is not ("path" or "host" or "mode")).ToDictionary(p => p.Name, p => p.Value));
+        }
         else if (network == "tcp")
         {
             var tcp = Property(stream, "tcpSettings");
@@ -130,7 +141,15 @@ internal static class XraySubscriptionParser
             Query = string.Join('&', query.Select(pair => Uri.EscapeDataString(pair.Key) + "=" + Uri.EscapeDataString(pair.Value)))
         };
         var server = VlessParser.Parse(uri.Uri.AbsoluteUri);
+        server.Type = protocol;
+        if (protocol != "vless") server.Flow = "";
+        if (protocol == "vmess") { server.Cipher = Text(user, "security", "auto"); var aid = Property(user, "alterId"); server.AlterId = aid.ValueKind == JsonValueKind.Undefined ? 0 : aid.GetInt32(); }
+        if (protocol is "trojan" or "shadowsocks") { server.Password = Text(user, "password"); if (protocol == "shadowsocks") server.Cipher = Text(user, "method"); }
+        if (protocol != "vless") server.TlsInsecure = Flag(tls, "allowInsecure");
+        if (protocol is not ("vless" or "vmess" or "trojan" or "shadowsocks")) unsupported = "Этот VPN-протокол JSON пока не поддерживается: " + protocol;
         server.UnsupportedReason ??= unsupported;
+        if (server.Supported) ProtocolConfig.Validate(server);
+        server.Id = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(server.Name + ServerRefresh.ConnectionKey(server))))[..24];
         servers.Add(server);
     }
 
@@ -174,5 +193,5 @@ internal static class XraySubscriptionParser
         }
         else if (element.ValueKind == JsonValueKind.Array) foreach (var item in element.EnumerateArray()) CheckDuplicates(item);
     }
-    private static UserError Invalid() => new("Повреждённая JSON-подписка Xray: проверьте формат и параметры VLESS.");
+    private static UserError Invalid() => new("Повреждённая JSON-подписка Xray: проверьте формат и параметры VPN.");
 }

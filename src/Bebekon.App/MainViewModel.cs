@@ -339,7 +339,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
             spec = new(SelectedServer, ActiveProfile, Settings, LatencyService.FreePort(), Convert.ToHexString(RandomNumberGenerator.GetBytes(24)), Data.Servers.Where(s => ActiveProfile.Rules.Any(r => r.UseVpn && r.ServerId == s.Id)).ToList());
             spec = System.Text.Json.JsonSerializer.Deserialize<ConnectSpec>(System.Text.Json.JsonSerializer.Serialize(spec, Json.Options), Json.Options)!;
             var version = configurationVersion;
-            store.SaveRuntime(ConfigGenerator.Generate(spec));
+            store.SaveConnection(spec);
             await EnsureServiceAsync();
             token.ThrowIfCancellationRequested();
             var reply = await service.SendAsync(new("StartCore", spec), true, token);

@@ -32,10 +32,10 @@ public sealed class StateStore(string? root = null)
         try { var protectedData = ProtectedData.Protect(data, null, DataProtectionScope.CurrentUser); var path = Path.Combine(Root, "state.dpapi"); File.WriteAllBytes(path + ".new", protectedData); File.Move(path + ".new", path, true); }
         finally { CryptographicOperations.ZeroMemory(data); }
     }
-    public void SaveRuntime(string config)
+    public void SaveConnection(ConnectSpec spec)
     {
         var dir = Path.Combine(Root, "runtime"); Directory.CreateDirectory(dir);
-        File.WriteAllBytes(Path.Combine(dir, "sing-box.dpapi"), ProtectedData.Protect(Encoding.UTF8.GetBytes(config), null, DataProtectionScope.CurrentUser));
+        File.WriteAllBytes(Path.Combine(dir, "connection.dpapi"), ProtectedData.Protect(JsonSerializer.SerializeToUtf8Bytes(spec, Json.Options), null, DataProtectionScope.CurrentUser));
     }
 }
 public sealed class SafeLog(string directory, string name)
@@ -62,7 +62,7 @@ public sealed class SafeLog(string directory, string name)
     }
     public static string Redact(string message)
     {
-        message = Regex.Replace(message, @"(?i)(https?://|vless://)\S+", "[private-link]");
+        message = Regex.Replace(message, @"(?i)(https?://|vless://|vmess://|ss://|trojan://|hysteria2?://|hy2://)\S+", "[private-link]");
         message = Regex.Replace(message, @"(?i)\b[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}\b", "[id]");
         message = Regex.Replace(message, @"(?i)(uuid|password|public_key|short_id|token)\s*[:=]\s*[^\s,]+", "$1=[secret]");
         return message.Length > 2000 ? message[..2000] : message;

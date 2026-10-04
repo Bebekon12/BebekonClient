@@ -1,5 +1,7 @@
 #:project ../src/Bebekon.Core/Bebekon.Core.csproj
 #:property TargetFramework=net10.0-windows
+#:property PublishAot=false
+#:property JsonSerializerIsReflectionEnabledByDefault=true
 using System.Diagnostics;
 using System.Security.Cryptography;
 using Bebekon.Core;
@@ -35,21 +37,17 @@ try
     foreach (var node in nodes.Where(node => node.Supported))
     {
         var spec = new ConnectSpec(node, new(), new(), LatencyService.FreePort(), Convert.ToHexString(RandomNumberGenerator.GetBytes(24)));
-        var config = Path.Combine(probeRoot, "config.json");
-        await File.WriteAllTextAsync(config, ConfigGenerator.Generate(spec), lifetime.Token);
-        using var core = new CoreProcess(executable, new(probeRoot, "core"));
-        await core.ValidateAsync(config, lifetime.Token);
+        await CoreSession.ValidateAsync(spec, executable, probeRoot, lifetime.Token);
         specs.Add(spec);
     }
     Console.WriteLine($"Official core accepted {specs.Count} generated configurations.");
     for (var index = 0; index < specs.Count; index++)
     {
-        var spec = specs[index]; var config = Path.Combine(probeRoot, "probe.json");
-        await File.WriteAllTextAsync(config, ConfigGenerator.Generate(spec, true), lifetime.Token);
+        var spec = specs[index];
         try
         {
-            using var core = new CoreProcess(executable, new(probeRoot, "core"));
-            await core.StartAsync(config, lifetime.Token);
+            using var core = new CoreSession(executable, new(probeRoot, "core"));
+            await core.StartAsync(spec, probeRoot, true, lifetime.Token);
             using var http = LatencyService.ProbeClient(spec); http.Timeout = TimeSpan.FromSeconds(10);
             var timer = Stopwatch.StartNew();
             using var response = await http.GetAsync("https://www.gstatic.com/generate_204", lifetime.Token);
@@ -69,6 +67,7 @@ try
 catch (Exception error)
 {
     if (error is TypeInitializationException initialization) Console.WriteLine($"Initialization failure in {initialization.TypeName}: {initialization.InnerException?.GetType().Name}.");
+    if (error is UserError) Console.WriteLine(SafeLog.Redact(error.Message));
     Console.WriteLine($"Subscription verification failed ({error.GetType().Name}; private URL and credentials withheld).");
     return 1;
 }

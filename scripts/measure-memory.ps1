@@ -1,6 +1,6 @@
 param([int]$Seconds = 10)
 $ErrorActionPreference='Stop'
-$names=@('Bebekon.App','Bebekon.Service','sing-box')
+$names=@('Bebekon.App','Bebekon.Service','sing-box','xray')
 $initial=@{}
 Get-Process -Name $names -ErrorAction SilentlyContinue | ForEach-Object { $initial[$_.Id]=$_.TotalProcessorTime.TotalMilliseconds }
 Start-Sleep -Seconds $Seconds

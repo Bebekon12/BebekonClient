@@ -1,0 +1,6 @@
+{
+  "version": "26.3.27",
+  "archive": "Xray-windows-64.zip",
+  "sha256": "d004c39288ce9ada487c6f398c7c545f7d749e44bdfdd59dbc9f865afba4e1ad",
+  "source": "https://github.com/XTLS/Xray-core/releases/tag/v26.3.27"
+}

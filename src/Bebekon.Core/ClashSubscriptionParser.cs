@@ -1,4 +1,8 @@
 using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using System.Text.RegularExpressions;
 using YamlDotNet.Core;
 using YamlDotNet.Core.Events;
 using YamlDotNet.RepresentationModel;
@@ -49,25 +53,26 @@ internal static class ClashSubscriptionParser
 
     private static Server ReadServer(Reader reader, Dictionary<string, YamlNode> node)
     {
-        if (!Text(node, "type").Equals("vless", StringComparison.OrdinalIgnoreCase))
-            throw new UserError("Эта версия поддерживает серверы VLESS. В подписке указан другой VPN-протокол.");
+        var type = Text(node, "type").ToLowerInvariant();
+        type = type switch { "ss" => "shadowsocks", "hy2" => "hysteria2", _ => type };
         var host = Text(node, "server").Trim('[', ']');
         if (Uri.CheckHostName(host) == UriHostNameType.Unknown || !int.TryParse(Text(node, "port"), NumberStyles.None, CultureInfo.InvariantCulture, out var port)
             || port is < 1 or > 65535) throw Invalid();
-        if (!Guid.TryParse(Text(node, "uuid"), out var uuid))
-            throw new UserError("В подписке указан неверный идентификатор VLESS.");
+        var uuid = Guid.Empty;
+        if (type is "vless" or "vmess" && !Guid.TryParse(Text(node, "uuid"), out uuid)) throw new UserError("В подписке указан неверный UUID.");
         var network = Text(node, "network", "tcp").ToLowerInvariant();
         if (network.Length == 0) network = "tcp";
         var reality = reader.OptionalMap(node, "reality-opts");
-        var security = reality.Count > 0 ? "reality" : Flag(node, "tls") ? "tls" : "none";
+        var security = reality.Count > 0 ? "reality" : (Flag(node, "tls") || type is "trojan" or "hysteria" or "hysteria2") ? "tls" : "none";
         var query = new Dictionary<string, string>
         {
             ["type"] = network == "h2" ? "http" : network,
-            ["security"] = security, ["sni"] = Text(node, "servername"),
+            ["security"] = security, ["sni"] = Text(node, "servername", Text(node, "sni")),
             ["fp"] = Text(node, "client-fingerprint", "chrome"), ["flow"] = Text(node, "flow"),
             ["pbk"] = Text(reality, "public-key"), ["sid"] = Text(reality, "short-id"),
             ["alpn"] = string.Join(',', Strings(node, "alpn")),
-            ["allowInsecure"] = Flag(node, "skip-cert-verify") ? "1" : "0",
+            ["allowInsecure"] = type == "vless" && Flag(node, "skip-cert-verify") ? "1" : "0",
+            ["pcs"] = network is "xhttp" or "splithttp" ? Text(node, "fingerprint") : "",
             ["encryption"] = Text(node, "encryption", "none"),
             // Current Mihomo defaults to XUDP; legacy packet-addr / xudp flags also occur in subscriptions.
             ["packetEncoding"] = Text(node, "packet-encoding") switch
@@ -106,10 +111,17 @@ internal static class ClashSubscriptionParser
             if (security == "none") unsupported = "Транспорт HTTP/2 без TLS из Clash пока не поддерживается.";
             if (hosts.Length > 1 || h2.Keys.Any(key => key is not ("host" or "path"))) unsupported = "Дополнительные параметры HTTP/2 из Clash пока не поддерживаются.";
         }
+        else if (network is "xhttp" or "splithttp")
+        {
+            var http = reader.OptionalMap(node, "xhttp-opts"); query["type"] = "xhttp";
+            query["path"] = Text(http, "path", "/"); query["host"] = Text(http, "host"); query["mode"] = Text(http, "mode", "auto");
+            var extra = http.TryGetValue("extra", out var raw) ? ToObject(reader, raw) : http.Where(p => p.Key is not ("path" or "host" or "mode")).ToDictionary(p => p.Key, p => ToObject(reader, p.Value));
+            query["extra"] = JsonSerializer.Serialize(extra);
+        }
         else if (network == "http")
             unsupported = "Маскировка HTTP/1 из Clash пока не поддерживается. Она отличается от транспорта HTTP/2.";
         if (node.ContainsKey("name-cert-verify") || node.ContainsKey("shadow-tls-opts") || node.ContainsKey("restls-opts") || node.ContainsKey("jls-opts") || node.ContainsKey("ws-headers")
-            || Text(node, "fingerprint").Length > 0 || Text(node, "certificate").Length > 0 || Text(node, "private-key").Length > 0
+            || network is not ("xhttp" or "splithttp") && Text(node, "fingerprint").Length > 0 || Text(node, "certificate").Length > 0 || Text(node, "private-key").Length > 0
             || Text(node, "dialer-proxy").Length > 0 || Text(node, "interface-name").Length > 0 || node.ContainsKey("routing-mark")
             || Flag(reader.OptionalMap(node, "smux"), "enabled") || Flag(reader.OptionalMap(node, "ech-opts"), "enable")
             || reality.Keys.Any(key => key is not ("public-key" or "short-id")))
@@ -120,10 +132,47 @@ internal static class ClashSubscriptionParser
             Query = string.Join('&', query.Select(pair => Uri.EscapeDataString(pair.Key) + "=" + Uri.EscapeDataString(pair.Value)))
         };
         var server = VlessParser.Parse(uri.Uri.AbsoluteUri);
+        server.Type = type;
+        if (type != "vless") server.Flow = "";
+        if (type is "vmess") { server.Cipher = Text(node, "cipher", "auto"); server.AlterId = Integer(node, "alterId"); server.GlobalPadding = Flag(node, "global-padding"); server.AuthenticatedLength = Flag(node, "authenticated-length"); }
+        if (type is "shadowsocks" or "trojan" or "hysteria" or "hysteria2") server.Password = Text(node, "password", Text(node, "auth-str", Text(node, "auth")));
+        if (type == "shadowsocks")
+        {
+            server.Cipher = Text(node, "cipher"); server.Plugin = Text(node, "plugin");
+            if (server.Plugin is "simple-obfs" or "obfs") server.Plugin = "obfs-local";
+            var opts = reader.OptionalMap(node, "plugin-opts");
+            server.PluginOptions = string.Join(';', opts.Select(p => Text(opts, p.Key).ToLowerInvariant() switch { "true" => p.Key, "false" => "", _ => (server.Plugin == "obfs-local" ? p.Key switch { "mode" => "obfs", "host" => "obfs-host", _ => p.Key } : p.Key) + "=" + Text(opts, p.Key) }).Where(p => p.Length > 0));
+        }
+        if (type is "hysteria" or "hysteria2")
+        {
+            server.Fingerprint = ""; server.UpMbps = Bandwidth(node, "up", type == "hysteria" ? 100 : 0); server.DownMbps = Bandwidth(node, "down", type == "hysteria" ? 100 : 0);
+            server.Obfs = type == "hysteria2" ? Text(node, "obfs") : ""; server.ObfsPassword = Text(node, type == "hysteria2" ? "obfs-password" : "obfs");
+            if (type == "hysteria" && node.ContainsKey("auth") && !node.ContainsKey("auth-str")) server.Password = ProtocolParser.Decode(server.Password);
+            if (node.ContainsKey("ports")) server.ServerPorts = ProtocolParser.PortRanges(Text(node, "ports"));
+            if (node.ContainsKey("hop-interval")) server.HopIntervalSeconds = Integer(node, "hop-interval");
+        }
+        if (type != "vless") server.TlsInsecure = Flag(node, "skip-cert-verify");
         server.UnsupportedReason ??= unsupported;
+        if (type is not ("vless" or "vmess" or "shadowsocks" or "trojan" or "hysteria" or "hysteria2")) server.UnsupportedReason = "Этот VPN-протокол пока не поддерживается: " + type;
+        if (server.Supported) ProtocolConfig.Validate(server);
+        server.Id = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(server.Name + ServerRefresh.ConnectionKey(server))))[..24];
         return server;
     }
 
+    private static int Integer(Dictionary<string, YamlNode> node, string key) => int.Parse(Text(node, key, "0"), CultureInfo.InvariantCulture);
+    private static int Bandwidth(Dictionary<string, YamlNode> node, string key, int fallback)
+    {
+        var text = Text(node, key, fallback.ToString(CultureInfo.InvariantCulture));
+        var match = Regex.Match(text, @"^([0-9]+)(?:\s*(?:[Mm][Bb][Pp][Ss]))?$", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
+        if (!match.Success) throw Invalid(); return int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture);
+    }
+    private static object? ToObject(Reader reader, YamlNode node) => node switch
+    {
+        YamlMappingNode => reader.Map(node).ToDictionary(p => p.Key, p => ToObject(reader, p.Value)),
+        YamlSequenceNode seq => seq.Children.Select(n => ToObject(reader, n)).ToArray(),
+        YamlScalarNode { Value: { } value } => value.ToLowerInvariant() switch { "true" => true, "false" => false, _ => int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var n) ? (object)n : value },
+        _ => throw Invalid()
+    };
     private static void Validate(YamlNode node, HashSet<YamlNode> path, int depth, ref int visits)
     {
         // Anchors are allowed; cycles and exponential alias expansion are bounded.
@@ -184,5 +233,5 @@ internal static class ClashSubscriptionParser
         if (value is not YamlSequenceNode sequence || sequence.Children.Any(item => item is not YamlScalarNode { Value: not null })) throw Invalid();
         return sequence.Children.Select(item => ((YamlScalarNode)item).Value!).ToArray();
     }
-    private static UserError Invalid() => new("Повреждённая подписка Clash/Mihomo: проверьте формат и параметры VLESS.");
+    private static UserError Invalid() => new("Повреждённая подписка Clash/Mihomo: проверьте формат и параметры VPN.");
 }

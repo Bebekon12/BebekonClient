@@ -63,12 +63,12 @@ public static class ConfigGenerator
 {
     public const string CoreVersion = "1.14.2";
     private static JsonArray Strings(IEnumerable<string> values) => new(values.Select(v => (JsonNode?)JsonValue.Create(v)).ToArray());
-    public static string Generate(ConnectSpec spec, bool probeOnly = false)
+    public static string Generate(ConnectSpec spec, bool probeOnly = false, XhttpRuntime? runtime = null)
     {
         var s = spec.Server;
         if (spec.ProbePort is < 1024 or > 65535 || spec.ProbePassword.Length < 24 || spec.Settings.Mtu is < 1280 or > 9000 || !Enum.IsDefined(spec.Settings.TunnelMode)) throw new UserError("Некорректные параметры подключения.");
         RuleValidation.Validate(spec.Profile);
-        var vpn = Vpn(s, "vpn");
+        var vpn = Vpn(s, "vpn", runtime);
         var outbounds = new JsonArray { vpn, new JsonObject { ["type"] = "direct", ["tag"] = "direct", ["domain_resolver"] = "direct-dns" } };
         var dnsServers = new JsonArray { Dns("direct-dns", "direct"), Dns("vpn-dns", "vpn") };
         var serverTags = new Dictionary<string, string> { [s.Id] = "vpn" };
@@ -81,7 +81,7 @@ public static class ConfigGenerator
                 var nodes = spec.RuleServers?.Where(n => n.Id == id).ToArray();
                 if (nodes is null || nodes.Length != 1) throw new UserError("Сервер одного из правил недоступен. Измените правило или выберите «Авто».");
                 var tag = "vpn-rule-" + serverTags.Count;
-                serverTags.Add(id, tag); outbounds.Add(Vpn(nodes[0], tag)); dnsServers.Add(Dns(tag + "-dns", tag));
+                serverTags.Add(id, tag); outbounds.Add(Vpn(nodes[0], tag, runtime)); dnsServers.Add(Dns(tag + "-dns", tag));
             }
         }
         var inbounds = new JsonArray { new JsonObject { ["type"] = "mixed", ["tag"] = "vpn-probe", ["listen"] = "127.0.0.1", ["listen_port"] = spec.ProbePort, ["users"] = new JsonArray { new JsonObject { ["username"] = "bebekon", ["password"] = spec.ProbePassword } } } };
@@ -96,6 +96,7 @@ public static class ConfigGenerator
             new JsonObject { ["action"] = "sniff", ["sniffer"] = Strings(["http", "tls", "quic", "dns"]), ["timeout"] = "300ms" },
             new JsonObject { ["protocol"] = "dns", ["action"] = "hijack-dns" }
         };
+        if (runtime is not null) { inbounds.Add(new JsonObject { ["type"] = "mixed", ["tag"] = "xray-direct", ["listen"] = "127.0.0.1", ["listen_port"] = runtime.Direct.Port, ["users"] = new JsonArray { new JsonObject { ["username"] = "bebekon", ["password"] = runtime.Direct.Password } } }); routes.Insert(0, new JsonObject { ["inbound"] = Strings(["xray-direct"]), ["action"] = "route", ["outbound"] = "direct" }); }
         var dnsRules = new JsonArray(); var sets = new JsonArray(); var setTags = new HashSet<string>();
         foreach (var rule in probeOnly ? [] : spec.Profile.Rules)
         {
@@ -114,31 +115,13 @@ public static class ConfigGenerator
         }.ToJsonString(Json.Options);
     }
     private static JsonObject Dns(string tag, string detour) => new() { ["type"] = "https", ["tag"] = tag, ["server"] = "1.1.1.1", ["detour"] = detour, ["tls"] = new JsonObject { ["server_name"] = "cloudflare-dns.com" } };
-    private static JsonObject Vpn(Server s, string tag)
+    private static JsonObject Vpn(Server s, string tag, XhttpRuntime? runtime)
     {
-        if (!s.Supported) throw new UserError(s.UnsupportedReason!);
-        // Validate model received by the elevated service; it never accepts executable paths or raw config.
-        if (!Guid.TryParse(s.Uuid, out _) || s.Port is < 1 or > 65535 || string.IsNullOrWhiteSpace(s.Host) || s.Transport is not ("tcp" or "grpc" or "ws" or "http" or "httpupgrade") || s.Security is not ("none" or "tls" or "reality") || s.PacketEncoding is not ("none" or "xudp" or "packetaddr")) throw new UserError("Некорректный сервер.");
-        var vpn = new JsonObject { ["type"] = "vless", ["tag"] = tag, ["server"] = s.Host, ["server_port"] = s.Port, ["uuid"] = s.Uuid, ["domain_resolver"] = "direct-dns", ["connect_timeout"] = "4s" };
-        vpn["packet_encoding"] = s.PacketEncoding == "none" ? "" : s.PacketEncoding;
-        if (!s.UdpEnabled) vpn["network"] = "tcp";
-        if (s.Flow.Length > 0) vpn["flow"] = s.Flow;
-        if (s.Security != "none")
-        {
-            var tls = new JsonObject { ["enabled"] = true, ["server_name"] = s.Sni.Length > 0 ? s.Sni : s.Host };
-            if (s.Alpn.Count > 0) tls["alpn"] = Strings(s.Alpn);
-            if (s.Fingerprint.Length > 0) tls["utls"] = new JsonObject { ["enabled"] = true, ["fingerprint"] = s.Fingerprint };
-            if (s.Security == "reality") tls["reality"] = new JsonObject { ["enabled"] = true, ["public_key"] = s.PublicKey, ["short_id"] = s.ShortId };
-            vpn["tls"] = tls;
-        }
-        if (s.Transport != "tcp")
-        {
-            var t = new JsonObject { ["type"] = s.Transport };
-            if (s.Transport == "grpc") t["service_name"] = s.ServiceName;
-            else { t["path"] = s.Path; if (s.TransportHost.Length > 0) { if (s.Transport == "ws") t["headers"] = new JsonObject { ["Host"] = s.TransportHost }; else if (s.Transport == "http") t["host"] = Strings([s.TransportHost]); else t["host"] = s.TransportHost; } }
-            vpn["transport"] = t;
-        }
-        return vpn;
+        ProtocolConfig.Validate(s);
+        if (s.Transport != "xhttp") return ProtocolConfig.Outbound(s, tag);
+        if (runtime is null || !runtime.Bridges.TryGetValue(s.Id, out var bridge)) throw new UserError("Для XHTTP требуется запуск комплектного ядра Xray.");
+        var vpn = new JsonObject { ["type"] = "socks", ["tag"] = tag, ["server"] = "127.0.0.1", ["server_port"] = bridge.Port, ["version"] = "5", ["username"] = "bebekon", ["password"] = bridge.Password, ["connect_timeout"] = "4s" };
+        if (!s.UdpEnabled) vpn["network"] = "tcp"; return vpn;
     }
     private static JsonObject Match(RoutingRule r)
     {

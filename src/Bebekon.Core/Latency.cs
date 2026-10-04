@@ -63,16 +63,24 @@ public sealed class LatencyService(string executable)
         }
         finally { limit.Release(); }
     }
-    public static int FreePort() { using var listener = new TcpListener(IPAddress.Loopback, 0); listener.Start(); return ((IPEndPoint)listener.LocalEndpoint).Port; }
+    public static int FreePort()
+    {
+        // Windows reserves different ranges for TCP and UDP. Mixed/SOCKS bridges need both.
+        for (var attempt = 0; attempt < 256; attempt++)
+        {
+            using var udp = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0)); var port = ((IPEndPoint)udp.Client.LocalEndPoint!).Port;
+            using var tcp = new TcpListener(IPAddress.Loopback, port);
+            try { tcp.Start(); return port; } catch (SocketException) { }
+        }
+        throw new UserError("Не удалось найти свободный локальный порт VPN.");
+    }
     private async Task<long?> ExactAsync(Server server, HttpMethod method, CancellationToken ct)
     {
         var root = Path.Combine(Paths.UserRoot, "runtime", "probe-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(root);
         var spec = new ConnectSpec(server, new(), new(), FreePort(), Convert.ToHexString(RandomNumberGenerator.GetBytes(24)));
-        var path = Path.Combine(root, "probe.json");
         try
         {
-            File.WriteAllText(path, ConfigGenerator.Generate(spec, true));
-            using var core = new CoreProcess(executable, new(Paths.Logs, "core")); await core.StartAsync(path, ct);
+            using var core = new CoreSession(executable, new(Paths.Logs, "core")); await core.StartAsync(spec, root, true, ct);
             using var http = ProbeClient(spec); http.Timeout = Timeout.InfiniteTimeSpan;
             return await MeasureHttpAsync(http, method, ct);
         }

@@ -31,7 +31,7 @@ public class ServiceIntegrationTests
             await Task.Delay(100,timeout.Token);
             Assert.Equal(ConnectionState.Error,(await Send(new("GetStatus"),timeout.Token)).Status.State);
             Assert.True((await Send(new("StopCore"),timeout.Token)).Ok);
-            node.Transport="xhttp";Assert.False((await Send(new("StartCore",spec),timeout.Token)).Ok);
+            node.Transport="kcp";Assert.False((await Send(new("StartCore",spec),timeout.Token)).Ok);
             node.Transport="tcp";reply=await Send(new("StartCore",spec),timeout.Token);Assert.True(reply.Ok);
             var childPid=reply.Status.CorePid!.Value;
             helper.Kill();await helper.WaitForExitAsync(timeout.Token);await Task.Delay(200,timeout.Token);

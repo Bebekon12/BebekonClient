@@ -98,7 +98,7 @@ public class SubscriptionTests
         else Stream(profile)[network + "Settings"]!["host"] = network == "http" ? new JsonArray("cdn.example.com") : JsonValue.Create("cdn.example.com");
         var node = Parse(profile); Assert.True(node.Supported); Assert.Equal("/edge?a=b&c=d", node.Path); Assert.Equal("cdn.example.com", node.TransportHost);
     }
-    [Theory] [InlineData("xhttp")] [InlineData("kcp")]
+    [Theory] [InlineData("kcp")]
     public void UnsupportedTransportStaysVisible(string network)
     {
         var node = Parse(Xray(network)); Assert.False(node.Supported); Assert.Throws<UserError>(() => ConfigGenerator.Generate(CoreTests.Spec(node: node)));

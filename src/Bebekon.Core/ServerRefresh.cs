@@ -5,6 +5,7 @@ namespace Bebekon.Core;
 public static class ServerRefresh
 {
     public static string ConnectionKey(Server s) => JsonSerializer.Serialize(new {
+        s.Type, s.Password, s.Cipher, s.AlterId, s.GlobalPadding, s.AuthenticatedLength, s.Plugin, s.PluginOptions, s.Obfs, s.ObfsPassword, s.UpMbps, s.DownMbps, s.ServerPorts, s.HopIntervalSeconds, s.TlsInsecure, s.CertificatePin, s.VerifyCertificateName, s.XhttpMode, s.XhttpExtra,
         s.Host, s.Port, s.Uuid, s.Security, s.Sni, s.PublicKey, s.ShortId, s.Fingerprint,
         s.Alpn, s.Flow, s.PacketEncoding, s.UdpEnabled, s.Transport, s.ServiceName, s.Path, s.TransportHost, s.UnsupportedReason
     });

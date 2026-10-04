@@ -60,7 +60,7 @@ public static class ServiceInstaller
         var root = Path.GetFullPath(packageRoot);
         var script = Path.Combine(root, "scripts", "install-service.ps1");
         if (!File.Exists(script) || !File.Exists(Path.Combine(root, "Bebekon.Service.exe")) ||
-            !File.Exists(Path.Combine(root, "core", "sing-box.exe")))
+            !File.Exists(Path.Combine(root, "core", "sing-box.exe")) || !File.Exists(Path.Combine(root, "core", "xray.exe")))
             throw new UserError("Для TUN нужна полная папка приложения. Откройте Bebekon.App.exe из portable-сборки или установите Setup.");
         return new(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System),
             "WindowsPowerShell", "v1.0", "powershell.exe"))

@@ -103,7 +103,7 @@ public class ClashSubscriptionTests
     }
 
     [Theory]
-    [InlineData("network: xhttp")] [InlineData("network: http")]
+    [InlineData("network: http")]
     [InlineData("tls: true\nskip-cert-verify: true")]
     [InlineData("network: ws\nws-opts: {max-early-data: 2048}")]
     [InlineData("network: grpc\ngrpc-opts: {grpc-user-agent: custom}")]

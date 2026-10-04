@@ -1,4 +1,4 @@
-param([string]$InnoCompiler, [switch]$SkipInstaller, [string]$PublishFolder = 'artifacts\release', [string]$UpdateFeedUrl = 'https://github.com/Bebekon12/BebekonClient/releases/latest/download/update.json', [string]$InstallerUrl, [string]$ReleaseNotes = 'Подписки SnowVPN и других VLESS-провайдеров: Clash/Mihomo YAML и JSON, постоянный HWID и понятные ошибки лимита устройств.')
+param([string]$InnoCompiler, [switch]$SkipInstaller, [string]$PublishFolder = 'artifacts\release', [string]$UpdateFeedUrl = 'https://github.com/Bebekon12/BebekonClient/releases/latest/download/update.json', [string]$InstallerUrl, [string]$ReleaseNotes = 'Добавлены VMess, Shadowsocks / 2022, Trojan, Hysteria 1/2 и VLESS XHTTP. Импорт ссылок, Base64, Clash/Mihomo, Xray и sing-box JSON; улучшена стабильность запуска и отмены.')
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $projectRoot = $PSScriptRoot
@@ -28,6 +28,16 @@ Expand-Archive -LiteralPath $archive -DestinationPath .tools\sing-box-extracted 
 $coreFolder = Join-Path $projectRoot ('.tools\sing-box-extracted\sing-box-' + $pin.version + '-windows-amd64')
 Copy-Item -LiteralPath (Join-Path $coreFolder 'sing-box.exe') -Destination core\sing-box.exe -Force
 Copy-Item -LiteralPath (Join-Path $coreFolder 'LICENSE') -Destination core\LICENSE -Force
+$xrayPin = Get-Content -LiteralPath core\xray-version.json -Raw | ConvertFrom-Json
+$xrayArchive = Join-Path $projectRoot '.tools\xray.zip'
+if (-not (Test-Path -LiteralPath $xrayArchive) -or (Get-FileHash -LiteralPath $xrayArchive -Algorithm SHA256).Hash -ne $xrayPin.sha256) {
+    Invoke-WebRequest ('https://github.com/XTLS/Xray-core/releases/download/v' + $xrayPin.version + '/' + $xrayPin.archive) -OutFile $xrayArchive
+}
+if ((Get-FileHash -LiteralPath $xrayArchive -Algorithm SHA256).Hash -ne $xrayPin.sha256) { throw 'Xray archive checksum mismatch.' }
+Safe-Clean '.tools\xray-extracted'
+Expand-Archive -LiteralPath $xrayArchive -DestinationPath .tools\xray-extracted -Force
+Copy-Item -LiteralPath .tools\xray-extracted\xray.exe -Destination core\xray.exe -Force
+Copy-Item -LiteralPath .tools\xray-extracted\LICENSE -Destination core\LICENSE-Xray -Force
 Invoke-Checked dotnet @('clean','Bebekon.sln','-c','Release','--nologo','-v','quiet')
 Invoke-Checked dotnet @('restore','Bebekon.sln','--nologo')
 Invoke-Checked dotnet @('test','tests\Bebekon.Tests','-c','Release','--nologo','--logger','trx;LogFileName=core.trx','--results-directory','artifacts\tests')
@@ -49,7 +59,7 @@ New-Item -ItemType Directory -Path (Join-Path $appPublishRoot 'docs') -Force | O
 Copy-Item -LiteralPath docs\VALIDATION.md,docs\UPDATES.md,docs\DESIGN.md,docs\CLIENT-REVIEW.md,docs\RUSSIA-RULES.md,docs\SUBSCRIPTIONS.md -Destination (Join-Path $appPublishRoot 'docs') -Force
 New-Item -ItemType Directory -Path (Join-Path $appPublishRoot 'resources\geo') -Force | Out-Null
 Copy-Item -LiteralPath resources\geo\README.md,resources\geo\LICENSE-SagerNet,resources\geo\sources.json -Destination (Join-Path $appPublishRoot 'resources\geo') -Force
-Copy-Item -LiteralPath core\LICENSE,core\version.json -Destination (Join-Path $appPublishRoot 'core') -Force
+Copy-Item -LiteralPath core\LICENSE,core\version.json,core\LICENSE-Xray,core\xray-version.json -Destination (Join-Path $appPublishRoot 'core') -Force
 $channelSource = if ($UpdateFeedUrl) { $UpdateFeedUrl } else { Join-Path $projectRoot 'dist\update.json' }
 @{ source = $channelSource } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $appPublishRoot 'resources\update-channel.json') -Encoding utf8
 if (-not $SkipInstaller) {

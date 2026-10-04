@@ -69,7 +69,7 @@ public static class Dialogs
     {
         var w = Shell(I18n.T(old is null ? "Добавить подписку" : "Изменить подписку", old is null ? "Add subscription" : "Edit subscription"), out var body);
         var name = Field(body, I18n.T("Название (необязательно)", "Name (optional)"), old?.Name ?? "");
-        name.Tag = I18n.T("Автоматически по ссылке", "Detected from the link"); var source = Field(body, I18n.T("URL / VLESS / текст подписки", "URL / VLESS / subscription text"), old?.Source ?? "");
+        name.Tag = I18n.T("Автоматически по ссылке", "Detected from the link"); var source = Field(body, I18n.T("URL / VPN-ссылка / текст подписки", "URL / VPN link / subscription text"), old?.Source ?? "");
         source.TextWrapping = TextWrapping.Wrap; source.MaxHeight = 120; source.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
         var paste = new Button { Content = I18n.T("Вставить из буфера", "Paste from clipboard"), Margin = new(0, 10, 0, 0), HorizontalAlignment = HorizontalAlignment.Left }; paste.Click += (_, _) => { if (System.Windows.Clipboard.ContainsText()) source.Text = System.Windows.Clipboard.GetText().Trim(); }; body.Children.Add(paste);
         body.Children.Add(new TextBlock { Text = I18n.T("Ссылка хранится в зашифрованном виде только на этом компьютере.", "The link is encrypted and stored only on this computer."), TextWrapping = TextWrapping.Wrap, Foreground = (Brush)Application.Current.Resources["Muted"], Margin = new(0, 12, 0, 0) });
@@ -77,7 +77,7 @@ public static class Dialogs
         return w.ShowDialog() == true ? new() { Name = name.Text.Trim().Length > 0 ? name.Text.Trim() : SuggestSubscriptionName(source.Text.Trim()), Source = source.Text.Trim() } : null;
     }
     internal static string SuggestSubscriptionName(string source) => Uri.TryCreate(source, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https"
-        ? uri.IdnHost : source.StartsWith("vless://", StringComparison.OrdinalIgnoreCase) ? "VLESS" : I18n.T("Подписка", "Subscription");
+        ? uri.IdnHost : ProtocolParser.IsLink(source) ? source.Split(':')[0].ToUpperInvariant() : I18n.T("Подписка", "Subscription");
 
     public static RoutingRule? Rule(RoutingRule? old, IEnumerable<Server>? servers = null)
     {

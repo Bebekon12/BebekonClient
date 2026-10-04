@@ -21,6 +21,12 @@ internal static class SmokeHarness
         var store = new StateStore(Path.Combine(Root, "test-user"));
         var data = new AppState();
         foreach (var name in new[] { "🇱🇻 Латвия", "DE Германия", "EU Hysteria", "LT Литва", "LT Литва — YouTube", "LV Латвия #2", "NL Нидерланды", "NL Нидерланды #2", "SE Швеция" }) data.Servers.Add(VlessParser.Parse("vless://" + Guid.NewGuid() + "@127.0.0.1:9?security=none&type=tcp#" + Uri.EscapeDataString(name)));
+        data.Servers[1].Type = "vmess";
+        data.Servers[2].Type = "hysteria2"; data.Servers[2].Security = "tls"; data.Servers[2].Password = "fixture-secret"; data.Servers[2].Fingerprint = "";
+        data.Servers[3].Type = "shadowsocks"; data.Servers[3].Cipher = "aes-128-gcm"; data.Servers[3].Password = "fixture-secret";
+        data.Servers[4].Type = "trojan"; data.Servers[4].Security = "tls"; data.Servers[4].Password = "fixture-secret";
+        data.Servers[5].Transport = "xhttp";
+        data.Servers[6].Type = "hysteria"; data.Servers[6].Security = "tls"; data.Servers[6].Password = "fixture-secret"; data.Servers[6].UpMbps = 100; data.Servers[6].DownMbps = 100; data.Servers[6].Fingerprint = "";
         data.Subscriptions.Add(new() { Name = "UI test fixture", Source = "https://example.invalid/private-token", ServerCount = data.Servers.Count });
         foreach (var server in data.Servers) server.SubscriptionId = data.Subscriptions[0].Id;
         data.SelectedServerId = data.Servers[0].Id;
@@ -47,7 +53,7 @@ internal static class SmokeHarness
         await CheckCaptionButtonsAsync(window, vm, report);
         await ConnectionChecks.RunAsync(Path.Combine(Root, "connection-regression"));
         await CheckStaleLatencyAsync(report);
-        report.Add("Connection regressions: stable refreshed selection; coalesced rule edits; stable beyond 5 seconds; stale recovery ignored; manual off/cancel wins; edits during startup applied; traffic directions and units.");
+        report.Add("Connection regressions: stable refreshed selection; coalesced rule edits; stable beyond 5 seconds; stale recovery ignored; manual off/cancel wins; edits during startup applied; traffic directions and units; XHTTP reaches helper.");
         vm.Go("Servers"); vm.LatencyIndex = 0; vm.LatencyIndex = 1; vm.LatencyIndex = 2; vm.LatencyIndex = 3; vm.LatencyIndex = 0; vm.CancelPing.Execute(null); vm.Go("Home");
         await Task.Delay(400);
         if (vm.Scanning) throw new InvalidOperationException("Rapid mode changes and navigation must cancel pending scans.");

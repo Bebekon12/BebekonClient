@@ -22,15 +22,20 @@ public static class VlessParser
         }
         string Get(string key, string fallback = "") => q.GetValueOrDefault(key, fallback);
         var s = new Server { Id = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(input.Trim())))[..24], Name = Uri.UnescapeDataString(u.Fragment.TrimStart('#')), Host = u.IdnHost.Trim('[', ']'), Port = u.Port, Uuid = id.ToString(), Security = Get("security", "none").ToLowerInvariant(), Sni = Get("sni", Get("serverName")), PublicKey = Get("pbk"), ShortId = Get("sid"), Fingerprint = Get("fp", "chrome"), Flow = Get("flow"), Transport = Get("type", "tcp").ToLowerInvariant(), ServiceName = Get("serviceName"), Path = Get("path", "/"), TransportHost = Get("host") };
+        if (s.Transport == "splithttp") s.Transport = "xhttp";
+        s.XhttpMode = Get("mode", "auto"); s.XhttpExtra = Get("extra"); s.CertificatePin = Get("pcs").Replace(":", "").ToLowerInvariant(); s.VerifyCertificateName = Get("vcn");
+        if (s.Transport == "xhttp") { XhttpConfig.Options(s); if (s.CertificatePin.Length > 0 && (s.CertificatePin.Length != 64 || s.CertificatePin.Any(c => !Uri.IsHexDigit(c)))) throw new UserError("Некорректный отпечаток TLS-сертификата XHTTP."); }
+        else if (s.CertificatePin.Length > 0 || s.VerifyCertificateName.Length > 0) s.UnsupportedReason = "Отпечаток сертификата / vcn поддерживается только для XHTTP.";
         s.PacketEncoding = Get("packetEncoding", "xudp").ToLowerInvariant();
         s.UdpEnabled = Get("udp", "1") is "1" or "true";
+        if (s.Transport == "xhttp" && s.PacketEncoding == "packetaddr") s.UnsupportedReason = "Кодирование packetaddr не поддерживается ядром XHTTP; используйте XUDP.";
         if (s.PacketEncoding is not ("none" or "xudp" or "packetaddr")) s.UnsupportedReason = "Не поддерживается кодирование UDP-пакетов VLESS.";
         if (Get("udp", "1") is not ("0" or "1" or "false" or "true")) s.UnsupportedReason = "Некорректный параметр UDP.";
         if (IPAddress.TryParse(s.Host, out var address) && (address.Equals(IPAddress.Any) || address.Equals(IPAddress.IPv6Any)))
             s.UnsupportedReason = "Провайдер вернул запись без рабочего адреса сервера. Проверьте подписку и привязку HWID.";
         if (s.Name.Length == 0) s.Name = s.Host;
         s.Alpn = Get("alpn").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
-        if (s.Transport is not ("tcp" or "grpc" or "ws" or "http" or "httpupgrade")) s.UnsupportedReason = "Не поддерживается этой версией: " + s.Transport;
+        if (s.Transport is not ("tcp" or "grpc" or "ws" or "http" or "httpupgrade" or "xhttp" or "splithttp")) s.UnsupportedReason = "Не поддерживается этой версией: " + s.Transport;
         if (s.Security is not ("none" or "tls" or "reality")) s.UnsupportedReason = "Не поддерживается тип защиты соединения.";
         if (s.Flow is not ("" or "xtls-rprx-vision")) s.UnsupportedReason = "Не поддерживается режим VLESS flow.";
         if (s.Flow.Length > 0 && (s.Security == "none" || s.Transport != "tcp")) s.UnsupportedReason = "Этот режим VLESS требует TCP и TLS / Reality.";
@@ -44,7 +49,7 @@ public static class VlessParser
             if (s.ShortId.Length > 16 || s.ShortId.Length % 2 != 0 || s.ShortId.Any(c => !Uri.IsHexDigit(c))) throw new UserError("Неверный короткий идентификатор Reality.");
             if (string.IsNullOrWhiteSpace(s.Sni)) throw new UserError("Для Reality необходимо имя сервера (SNI).");
         }
-        if (q.ContainsKey("mode") && Get("mode") is not ("" or "gun") || s.Transport == "ws" && s.Path.Contains("?ed=", StringComparison.Ordinal)) s.UnsupportedReason = "Дополнительные параметры транспорта пока не поддерживаются.";
+        if (s.Transport != "xhttp" && q.ContainsKey("mode") && Get("mode") is not ("" or "gun") || s.Transport == "ws" && s.Path.Contains("?ed=", StringComparison.Ordinal)) s.UnsupportedReason = "Дополнительные параметры транспорта пока не поддерживаются.";
         return s;
     }
     public static List<Server> ParseSubscription(string content)
@@ -52,10 +57,10 @@ public static class VlessParser
         if (content.Length > 4 * 1024 * 1024) throw new UserError("Подписка слишком большая.");
         content = content.Trim().TrimStart('\uFEFF').TrimStart();
         if (content.StartsWith('<')) throw new UserError("Провайдер вернул веб-страницу вместо подписки. Нужна прямая ссылка на список серверов.");
-        if (!content.StartsWith("vless://", StringComparison.OrdinalIgnoreCase) && !IsJson(content) && !IsYaml(content))
+        if (!ProtocolParser.IsLink(content) && !IsJson(content) && !IsYaml(content))
         {
             try { var b = string.Concat(content.Where(c => !char.IsWhiteSpace(c))).Replace('-', '+').Replace('_', '/'); content = new UTF8Encoding(false, true).GetString(Convert.FromBase64String(b.PadRight((b.Length + 3) / 4 * 4, '='))); }
-            catch (Exception e) when (e is FormatException or DecoderFallbackException) { throw new UserError("Неизвестный формат подписки. Поддерживаются VLESS, Base64, JSON Xray и Clash/Mihomo YAML или JSON."); }
+            catch (Exception e) when (e is FormatException or DecoderFallbackException) { throw new UserError("Неизвестный формат подписки. Поддерживаются VPN-ссылки, Base64, JSON Xray и Clash/Mihomo YAML или JSON."); }
         }
         content = content.Trim().TrimStart('\uFEFF').TrimStart();
         if (content.StartsWith('<')) throw new UserError("Провайдер вернул веб-страницу вместо подписки. Нужна прямая ссылка на список серверов.");
@@ -66,6 +71,7 @@ public static class VlessParser
                 using var document = JsonDocument.Parse(content, new() { MaxDepth = 32, AllowTrailingCommas = true, CommentHandling = JsonCommentHandling.Skip });
                 if (document.RootElement.ValueKind == JsonValueKind.Object && document.RootElement.TryGetProperty("proxies", out _))
                     return ClashSubscriptionParser.Parse(JsonSerializer.Serialize(document.RootElement));
+                if (document.RootElement.ValueKind == JsonValueKind.Object && document.RootElement.TryGetProperty("outbounds", out var outbounds) && outbounds.ValueKind == JsonValueKind.Array && outbounds.EnumerateArray().Any(node => node.ValueKind == JsonValueKind.Object && node.TryGetProperty("type", out _))) return SingBoxSubscriptionParser.Parse(document.RootElement);
             }
             catch (JsonException)
             {
@@ -80,9 +86,9 @@ public static class VlessParser
         var servers = new List<Server>();
         for (var i = 0; i < lines.Length; i++)
         {
-            try { servers.Add(Parse(lines[i])); }
+            try { servers.Add(ProtocolParser.Parse(lines[i])); }
             catch (UserError e) { throw new UserError($"Строка {i + 1}: {e.Message}"); }
-            catch (Exception e) when (e is UriFormatException or ArgumentException) { throw new UserError($"Строка {i + 1}: повреждённая ссылка VLESS."); }
+            catch (Exception e) when (e is UriFormatException or ArgumentException) { throw new UserError($"Строка {i + 1}: повреждённая ссылка VPN."); }
         }
         return servers.DistinctBy(s => s.Id).ToList();
     }

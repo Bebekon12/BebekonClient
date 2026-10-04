@@ -59,6 +59,9 @@ internal static class ConnectionChecks
         await vm.DisconnectAsync(); await connecting; await Task.Delay(800);
         Require(!vm.Connected && !service.Running && service.Starts == 6, "Cancellation during connection remains off");
         Require(service.MaxConcurrentTransitions == 1, "Start/stop transitions are serialized");
+        vm.SelectedServer!.Transport = "xhttp";
+        await vm.ConnectAsync(); Require(vm.Connected && service.Last?.Server.Transport == "xhttp", "XHTTP reaches helper without premature sing-box-only generation");
+        await vm.DisconnectAsync();
     }
     private static void Require(bool value, string message) { if (!value) throw new InvalidOperationException("Connection regression: " + message); }
     private static async Task Until(Func<bool> condition)

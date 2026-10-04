@@ -17,6 +17,7 @@ public class ServiceInstallerTests
             File.WriteAllText(Path.Combine(root, "scripts", "install-service.ps1"), "");
             File.WriteAllBytes(Path.Combine(root, "Bebekon.Service.exe"), []);
             File.WriteAllBytes(Path.Combine(root, "core", "sing-box.exe"), []);
+            File.WriteAllBytes(Path.Combine(root, "core", "xray.exe"), []);
             var owner = WindowsIdentity.GetCurrent().User!.Value;
             var plan = ServiceInstaller.CreateStartInfo(root, owner);
             Assert.True(plan.UseShellExecute); Assert.Equal("runas", plan.Verb); Assert.Equal(ProcessWindowStyle.Hidden, plan.WindowStyle);

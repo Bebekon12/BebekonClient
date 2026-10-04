@@ -31,6 +31,26 @@ public sealed class Server : Observable
     public string Name { get; set; } = "";
     public string Host { get; set; } = "";
     public int Port { get; set; }
+    // Default preserves VLESS nodes saved by earlier versions.
+    public string Type { get; set; } = "vless";
+    public string Password { get; set; } = "";
+    public string Cipher { get; set; } = "auto";
+    public int AlterId { get; set; }
+    public bool GlobalPadding { get; set; }
+    public bool AuthenticatedLength { get; set; }
+    public string Plugin { get; set; } = "";
+    public string PluginOptions { get; set; } = "";
+    public string Obfs { get; set; } = "";
+    public string ObfsPassword { get; set; } = "";
+    public int UpMbps { get; set; }
+    public int DownMbps { get; set; }
+    public List<string> ServerPorts { get; set; } = [];
+    public int HopIntervalSeconds { get; set; } = 30;
+    public string CertificatePin { get; set; } = "";
+    public string VerifyCertificateName { get; set; } = "";
+    public bool TlsInsecure { get; set; }
+    public string XhttpMode { get; set; } = "auto";
+    public string XhttpExtra { get; set; } = "";
     public string Uuid { get; set; } = "";
     public string Security { get; set; } = "none";
     public string Sni { get; set; } = "";
@@ -50,7 +70,7 @@ public sealed class Server : Observable
     public bool Favorite { get => favorite; set { if (Set(ref favorite, value)) Notify(nameof(Star)); } }
     [JsonIgnore] public string Star => Favorite ? "★" : "☆";
     [JsonIgnore] public bool Supported => UnsupportedReason is null;
-    [JsonIgnore] public string Protocol => "VLESS · " + (Transport == "grpc" ? "gRPC" : Transport.ToUpperInvariant());
+    [JsonIgnore] public string Protocol => (Type == "shadowsocks" ? "Shadowsocks" : Type == "hysteria2" ? "Hysteria 2" : Type == "hysteria" ? "Hysteria" : Type.ToUpperInvariant()) + " · " + (Type is "hysteria" or "hysteria2" ? "QUIC" : Transport == "grpc" ? "gRPC" : Transport.ToUpperInvariant()) + (TlsInsecure ? " · TLS без проверки" : "");
     private string subscriptionLabel = "";
     [JsonIgnore] public string SubscriptionLabel { get => subscriptionLabel; set { if (Set(ref subscriptionLabel, value)) Notify(nameof(ConnectionLabel)); } }
     [JsonIgnore] public string ConnectionLabel => SubscriptionLabel.Length == 0 ? Protocol : Protocol + " · " + SubscriptionLabel;
@@ -92,7 +112,7 @@ public sealed class Subscription
     public string Source { get; set; } = "";
     public DateTimeOffset? Updated { get; set; }
     public int ServerCount { get; set; }
-    [JsonIgnore] public string SafeSource => Source.StartsWith("vless://", StringComparison.OrdinalIgnoreCase) ? "VLESS · защищённая ссылка" : Uri.TryCreate(Source, UriKind.Absolute, out var uri) ? uri.GetLeftPart(UriPartial.Authority) + "/••••••" : "Защищённая подписка";
+    [JsonIgnore] public string SafeSource => Uri.TryCreate(Source, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https" && uri.UserInfo.Length == 0 ? uri.GetLeftPart(UriPartial.Authority) + "/••••••" : "Защищённая подписка";
     [JsonIgnore] public string Summary => $"{ServerCount} серверов · Обновлено: {Updated?.ToLocalTime().ToString("dd.MM HH:mm") ?? "ещё не обновлялось"}";
 }
 public sealed class Settings
