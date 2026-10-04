@@ -111,7 +111,9 @@ class AndroidSmokeTest {
         val path = InstrumentationRegistry.getArguments().getString("update_fixture") ?: return
         val fixture = java.io.File(path)
         val hash = java.security.MessageDigest.getInstance("SHA-256").let { digest -> fixture.inputStream().use { input -> val buffer = ByteArray(65536); while (true) { val count = input.read(buffer); if (count < 0) break; digest.update(buffer, 0, count) } }; digest.digest().joinToString("") { "%02x".format(it) } }
-        val release = json("name" to "Bebekon VPN · Windows 0.1.16 и Android 0.1.3", "tag_name" to "v0.1.16", "assets" to array(listOf(json("name" to "Bebekon-Android.apk", "digest" to "sha256:$hash", "size" to fixture.length(), "browser_download_url" to "https://github.com/Bebekon12/BebekonClient/releases/download/v0.1.16/Bebekon-Android.apk")))).toString()
+        val fixtureVersion = context.packageManager.getPackageArchiveInfo(fixture.absolutePath, 0)?.versionName ?: error("Update fixture APK metadata is missing")
+        assertTrue("Use an update fixture newer than the installed client", AndroidRelease.newer(fixtureVersion, BuildConfig.VERSION_NAME))
+        val release = json("name" to "Bebekon VPN · Android $fixtureVersion", "tag_name" to "v0.1.16", "assets" to array(listOf(json("name" to "Bebekon-Android.apk", "digest" to "sha256:$hash", "size" to fixture.length(), "browser_download_url" to "https://github.com/Bebekon12/BebekonClient/releases/download/v0.1.16/Bebekon-Android.apk")))).toString()
         val updater = AppUpdater(context, { release }, { fixture.inputStream() }, automatic = false)
         compose.runOnUiThread { compose.activity.setContent { androidx.compose.material3.MaterialTheme { UpdateDialog(updater) } }; updater.check() }
         compose.waitUntil(10_000) { updater.state.value.phase == UpdatePhase.AVAILABLE }
