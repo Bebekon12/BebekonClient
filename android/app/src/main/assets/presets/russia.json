@@ -1,0 +1,167 @@
+{
+  "name": "Россия · основные сервисы",
+  "icon": "Servers",
+  "domains": [],
+  "description": "YouTube, Discord, мессенджеры, соцсети, Bluesky и Roblox · 18 правил",
+  "rules": [
+    {
+      "name": "YouTube",
+      "kind": "geoSite",
+      "values": [
+        "youtube"
+      ],
+      "useVpn": true
+    },
+    {
+      "name": "Discord",
+      "kind": "geoSite",
+      "values": [
+        "discord"
+      ],
+      "useVpn": true
+    },
+    {
+      "name": "WhatsApp",
+      "kind": "geoSite",
+      "values": [
+        "whatsapp"
+      ],
+      "useVpn": true
+    },
+    {
+      "name": "Telegram",
+      "kind": "geoSite",
+      "values": [
+        "telegram"
+      ],
+      "useVpn": true
+    },
+    {
+      "name": "Instagram",
+      "kind": "geoSite",
+      "values": [
+        "instagram"
+      ],
+      "useVpn": true
+    },
+    {
+      "name": "Facebook",
+      "kind": "geoSite",
+      "values": [
+        "facebook"
+      ],
+      "useVpn": true
+    },
+    {
+      "name": "Twitter / X",
+      "kind": "geoSite",
+      "values": [
+        "twitter"
+      ],
+      "useVpn": true
+    },
+    {
+      "name": "Telegram · IP-сети",
+      "kind": "geoIp",
+      "values": [
+        "telegram"
+      ],
+      "useVpn": true
+    },
+    {
+      "name": "Signal",
+      "kind": "site",
+      "values": [
+        "signal.org",
+        "signal.art",
+        "signal.group",
+        "signal.link",
+        "signal.me",
+        "signal.tube"
+      ],
+      "useVpn": true
+    },
+    {
+      "name": "Viber",
+      "kind": "site",
+      "values": [
+        "viber.com",
+        "viber.co",
+        "viber.me",
+        "vbcdn.com",
+        "vbcdn.net"
+      ],
+      "useVpn": true
+    },
+    {
+      "name": "Bluesky",
+      "kind": "site",
+      "values": [
+        "bsky.app",
+        "bsky.social",
+        "bsky.network"
+      ],
+      "useVpn": true
+    },
+    {
+      "name": "Roblox",
+      "kind": "site",
+      "values": [
+        "roblox.com",
+        "roblox.net",
+        "rbxcdn.com",
+        "rbxinfra.net",
+        "roblox-api.arkoselabs.com"
+      ],
+      "useVpn": true
+    },
+    {
+      "name": "Discord · приложение",
+      "kind": "application",
+      "values": [
+        "Discord.exe"
+      ],
+      "useVpn": true
+    },
+    {
+      "name": "WhatsApp · приложение",
+      "kind": "application",
+      "values": [
+        "WhatsApp.exe"
+      ],
+      "useVpn": true
+    },
+    {
+      "name": "Telegram · приложение",
+      "kind": "application",
+      "values": [
+        "Telegram.exe"
+      ],
+      "useVpn": true
+    },
+    {
+      "name": "Signal · приложение",
+      "kind": "application",
+      "values": [
+        "Signal.exe"
+      ],
+      "useVpn": true
+    },
+    {
+      "name": "Viber · приложение",
+      "kind": "application",
+      "values": [
+        "Viber.exe"
+      ],
+      "useVpn": true
+    },
+    {
+      "name": "RobloxPlayerBeta · приложение",
+      "kind": "application",
+      "values": [
+        "RobloxPlayerBeta.exe"
+      ],
+      "useVpn": true
+    }
+  ]
+}

@@ -1,0 +1,55 @@
+package com.bebekon.vpn
+
+import org.json.JSONArray
+import org.json.JSONObject
+import java.security.MessageDigest
+import java.util.UUID
+
+fun json(vararg entries: Pair<String, Any?>) = JSONObject().also { o -> entries.forEach { (k, v) -> if (v != null) o.put(k, v) } }
+fun array(items: Iterable<Any?>) = JSONArray().also { a -> items.forEach { a.put(it) } }
+fun JSONArray.objects() = (0 until length()).map { getJSONObject(it) }
+fun JSONArray.strings() = (0 until length()).map { getString(it) }
+fun digest(value: String) = MessageDigest.getInstance("SHA-256").digest(value.toByteArray()).joinToString("") { "%02x".format(it) }
+
+/** Only connection parameters are retained. Provider routing/listeners/commands never enter the runtime. */
+data class Node(val id: String, val name: String, val outbound: String, val country: String = "", val unsupported: String = "") {
+    val config get() = JSONObject(outbound)
+    val host get() = config.optString("server")
+    val port get() = config.optInt("server_port", 443)
+    val protocol get() = config.optString("type").replace("shadowsocks", "SS").uppercase()
+    val transport get() = config.optJSONObject("transport")?.optString("type")?.uppercase() ?: "TCP"
+    fun toJson() = json("id" to id, "name" to name, "outbound" to config, "country" to country, "unsupported" to unsupported)
+    companion object { fun fromJson(o: JSONObject) = Node(o.getString("id"), o.getString("name"), o.getJSONObject("outbound").toString(), o.optString("country"), o.optString("unsupported")) }
+}
+data class Subscription(val id: String = UUID.randomUUID().toString(), val name: String, val source: String, val nodes: List<Node>, val updated: Long = System.currentTimeMillis(), val info: String = "") {
+    fun toJson() = json("id" to id, "name" to name, "source" to source, "nodes" to array(nodes.map(Node::toJson)), "updated" to updated, "info" to info)
+    companion object { fun fromJson(o: JSONObject) = Subscription(o.getString("id"), o.getString("name"), o.getString("source"), o.getJSONArray("nodes").objects().map(Node::fromJson), o.optLong("updated"), o.optString("info")) }
+}
+enum class RuleKind(val label: String, val field: String) {
+    DOMAIN("Сайт и поддомены", "domain_suffix"), KEYWORD("Слово в домене", "domain_keyword"), APP("Приложение", "package_name"), CIDR("IP / подсеть", "ip_cidr"), GEOSITE("GeoSite", "rule_set"), GEOIP("GeoIP", "rule_set")
+}
+data class Rule(val id: String = UUID.randomUUID().toString(), val name: String, val kind: RuleKind, val values: List<String>, val vpn: Boolean = true, val created: Long = System.currentTimeMillis()) {
+    fun toJson() = json("id" to id, "name" to name, "kind" to kind.name, "values" to array(values), "vpn" to vpn, "created" to created)
+    companion object { fun fromJson(o: JSONObject) = Rule(o.getString("id"), o.getString("name"), RuleKind.valueOf(o.getString("kind")), o.getJSONArray("values").strings(), o.optBoolean("vpn", true), o.optLong("created")) }
+}
+enum class ThemeChoice(val label: String) { DARK("Тёмная"), LIGHT("Светлая"), SYSTEM("Как в системе") }
+enum class RoutingMode(val label: String) { ALL("Весь трафик"), RULES("По правилам") }
+enum class PingMethod(val label: String) { HTTPS_GET("HTTPS GET · рекомендуется"), HTTPS_HEAD("HTTPS HEAD"), TCP("TCP") }
+data class Preferences(val theme: ThemeChoice = ThemeChoice.DARK, val routing: RoutingMode = RoutingMode.ALL, val ping: PingMethod = PingMethod.HTTPS_GET, val animations: Boolean = true, val allowLan: Boolean = true, val autoReconnect: Boolean = true) {
+    fun toJson() = json("theme" to theme.name, "routing" to routing.name, "ping" to ping.name, "animations" to animations, "allowLan" to allowLan, "autoReconnect" to autoReconnect)
+    companion object { fun fromJson(o: JSONObject) = Preferences(ThemeChoice.valueOf(o.optString("theme", "DARK")), RoutingMode.valueOf(o.optString("routing", "ALL")), PingMethod.valueOf(o.optString("ping", "HTTPS_GET")), o.optBoolean("animations", true), o.optBoolean("allowLan", true), o.optBoolean("autoReconnect", true)) }
+}
+data class SavedState(val subscriptions: List<Subscription> = emptyList(), val selected: String? = null, val favorites: Set<String> = emptySet(), val rules: List<Rule> = emptyList(), val preferences: Preferences = Preferences()) {
+    val nodes get() = subscriptions.flatMap { it.nodes }.distinctBy { it.id }
+    val selectedNode get() = nodes.firstOrNull { it.id == selected }
+    fun toJson() = json("version" to 1, "subscriptions" to array(subscriptions.map(Subscription::toJson)), "selected" to selected, "favorites" to array(favorites), "rules" to array(rules.map(Rule::toJson)), "preferences" to preferences.toJson())
+    companion object { fun fromJson(o: JSONObject): SavedState { require(o.optInt("version") == 1) { "Неизвестная версия настроек" }; return SavedState(o.getJSONArray("subscriptions").objects().map(Subscription::fromJson), if (o.isNull("selected")) null else o.optString("selected").takeIf { it.isNotEmpty() }, o.getJSONArray("favorites").strings().toSet(), o.getJSONArray("rules").objects().map(Rule::fromJson), Preferences.fromJson(o.getJSONObject("preferences"))) } }
+}
+enum class Phase { OFF, STARTING, ON, RECONNECTING, STOPPING, ERROR }
+data class Session(val phase: Phase = Phase.OFF, val server: String = "", val message: String = "", val started: Long = 0, val down: Long = 0, val up: Long = 0, val totalDown: Long = 0, val totalUp: Long = 0, val publicIp: String = "") {
+    val active get() = phase in listOf(Phase.STARTING, Phase.ON, Phase.RECONNECTING)
+    val busy get() = phase in listOf(Phase.STARTING, Phase.STOPPING, Phase.RECONNECTING)
+}
+data class PingResult(val millis: Int? = null, val running: Boolean = false, val failed: Boolean = false) {
+    val label get() = if (millis != null) "$millis мс" else if (running) "Проверка…" else if (failed) "Таймаут" else "—"
+}

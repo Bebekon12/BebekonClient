@@ -1,0 +1,343 @@
+{
+  "name": "Правила админа",
+  "icon": "Shield",
+  "domains": [],
+  "rules": [
+    {
+      "name": "speedtest",
+      "kind": "contains",
+      "values": [
+        "speedtest"
+      ],
+      "useVpn": true
+    },
+    {
+      "name": "outlook",
+      "kind": "contains",
+      "values": [
+        "outlook"
+      ],
+      "useVpn": true
+    },
+    {
+      "name": "valvesoftware",
+      "kind": "contains",
+      "values": [
+        "valvesoftware"
+      ],
+      "useVpn": true
+    },
+    {
+      "name": "magnitude.com",
+      "kind": "site",
+      "values": [
+        "magnitude.com"
+      ],
+      "useVpn": true
+    },
+    {
+      "name": "steam · домены",
+      "kind": "contains",
+      "values": [
+        "steam"
+      ],
+      "useVpn": false
+    },
+    {
+      "name": "pixabay",
+      "kind": "contains",
+      "values": [
+        "pixabay"
+      ],
+      "useVpn": true
+    },
+    {
+      "name": "store.supercell.com",
+      "kind": "site",
+      "values": [
+        "store.supercell.com"
+      ],
+      "useVpn": true
+    },
+    {
+      "name": "supercell.com",
+      "kind": "site",
+      "values": [
+        "supercell.com"
+      ],
+      "useVpn": true
+    },
+    {
+      "name": "steam",
+      "kind": "application",
+      "values": [
+        "steam.exe"
+      ],
+      "useVpn": false
+    },
+    {
+      "name": "itch.io",
+      "kind": "site",
+      "values": [
+        "itch.io"
+      ],
+      "useVpn": true
+    },
+    {
+      "name": "palworld.gg",
+      "kind": "site",
+      "values": [
+        "palworld.gg"
+      ],
+      "useVpn": true
+    },
+    {
+      "name": "pterohost",
+      "kind": "contains",
+      "values": [
+        "pterohost"
+      ],
+      "useVpn": true
+    },
+    {
+      "name": "gartic.io",
+      "kind": "site",
+      "values": [
+        "gartic.io"
+      ],
+      "useVpn": true
+    },
+    {
+      "name": "figma",
+      "kind": "contains",
+      "values": [
+        "figma"
+      ],
+      "useVpn": true
+    },
+    {
+      "name": "update",
+      "kind": "application",
+      "values": [
+        "update.exe"
+      ],
+      "useVpn": false
+    },
+    {
+      "name": "discord",
+      "kind": "application",
+      "values": [
+        "discord.exe"
+      ],
+      "useVpn": false
+    },
+    {
+      "name": "ip2location.com",
+      "kind": "site",
+      "values": [
+        "ip2location.com"
+      ],
+      "useVpn": true
+    },
+    {
+      "name": "chess.com",
+      "kind": "site",
+      "values": [
+        "chess.com"
+      ],
+      "useVpn": true
+    },
+    {
+      "name": "diep",
+      "kind": "contains",
+      "values": [
+        "diep"
+      ],
+      "useVpn": true
+    },
+    {
+      "name": "whatsapp",
+      "kind": "contains",
+      "values": [
+        "whatsapp"
+      ],
+      "useVpn": true
+    },
+    {
+      "name": "Telegram",
+      "kind": "application",
+      "values": [
+        "Telegram.exe"
+      ],
+      "useVpn": true
+    },
+    {
+      "name": "telegram · IP",
+      "kind": "geoIp",
+      "values": [
+        "telegram"
+      ],
+      "useVpn": true
+    },
+    {
+      "name": "anthropic",
+      "kind": "geoSite",
+      "values": [
+        "anthropic"
+      ],
+      "useVpn": true
+    },
+    {
+      "name": "netflix",
+      "kind": "geoSite",
+      "values": [
+        "netflix"
+      ],
+      "useVpn": true
+    },
+    {
+      "name": "twitch",
+      "kind": "geoSite",
+      "values": [
+        "twitch"
+      ],
+      "useVpn": true
+    },
+    {
+      "name": "tiktok",
+      "kind": "geoSite",
+      "values": [
+        "tiktok"
+      ],
+      "useVpn": true
+    },
+    {
+      "name": "google",
+      "kind": "geoSite",
+      "values": [
+        "google"
+      ],
+      "useVpn": true
+    },
+    {
+      "name": "openai",
+      "kind": "geoSite",
+      "values": [
+        "openai"
+      ],
+      "useVpn": true
+    },
+    {
+      "name": "discord · сайты",
+      "kind": "geoSite",
+      "values": [
+        "discord"
+      ],
+      "useVpn": false
+    },
+    {
+      "name": "instagram",
+      "kind": "geoSite",
+      "values": [
+        "instagram"
+      ],
+      "useVpn": true
+    },
+    {
+      "name": "facebook",
+      "kind": "geoSite",
+      "values": [
+        "facebook"
+      ],
+      "useVpn": true
+    },
+    {
+      "name": "twitter",
+      "kind": "geoSite",
+      "values": [
+        "twitter"
+      ],
+      "useVpn": true
+    },
+    {
+      "name": "telegram · сайты",
+      "kind": "geoSite",
+      "values": [
+        "telegram"
+      ],
+      "useVpn": true
+    },
+    {
+      "name": "youtube",
+      "kind": "geoSite",
+      "values": [
+        "youtube"
+      ],
+      "useVpn": false
+    },
+    {
+      "name": "Rider.Backend",
+      "kind": "application",
+      "values": [
+        "Rider.Backend.exe"
+      ],
+      "useVpn": true
+    },
+    {
+      "name": "rider64",
+      "kind": "application",
+      "values": [
+        "rider64.exe"
+      ],
+      "useVpn": true
+    },
+    {
+      "name": "diep.io",
+      "kind": "site",
+      "values": [
+        "diep.io"
+      ],
+      "useVpn": true
+    },
+    {
+      "name": "tiktok · домены",
+      "kind": "contains",
+      "values": [
+        "tiktok"
+      ],
+      "useVpn": true
+    },
+    {
+      "name": "claude · программа",
+      "kind": "application",
+      "values": [
+        "claude.exe"
+      ],
+      "useVpn": true
+    },
+    {
+      "name": "claude · домены",
+      "kind": "contains",
+      "values": [
+        "claude"
+      ],
+      "useVpn": true
+    },
+    {
+      "name": "claude.com",
+      "kind": "site",
+      "values": [
+        "claude.com"
+      ],
+      "useVpn": true
+    },
+    {
+      "name": "telegram",
+      "kind": "application",
+      "values": [
+        "telegram.exe"
+      ],
+      "useVpn": true
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "singBox": { "version": "1.14.2", "commit": "af6e64c3b69e6132ebaee0e1a3d24e93903f6709", "repository": "https://github.com/SagerNet/sing-box", "license": "GPL-3.0-or-later" },
+  "gomobile": "github.com/sagernet/gomobile@v0.1.12",
+  "go": "1.26.8",
+  "ndk": "28.2.13676358",
+  "java": "17",
+  "tags": "with_gvisor,with_quic,with_utls,with_clash_api,with_low_memory",
+  "architectures": ["arm64-v8a", "armeabi-v7a", "x86_64"],
+  "map": { "source": "https://github.com/nvkelso/natural-earth-vector/blob/master/geojson/ne_110m_admin_0_countries.geojson", "license": "Public domain" }
+}

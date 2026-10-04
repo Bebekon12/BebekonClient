@@ -1,0 +1,45 @@
+package com.bebekon.vpn
+
+import org.json.JSONObject
+
+object CoreConfig {
+    fun build(state: SavedState, geo: (String) -> JSONObject, tunnel: Boolean = true): String {
+        val node = state.selectedNode ?: error("Выберите сервер")
+        require(node.unsupported.isEmpty()) { node.unsupported }
+        val vpn = node.config.also { it.put("tag", "vpn"); it.put("domain_resolver", "direct-dns"); it.put("connect_timeout", "4s") }
+        val rules = mutableListOf<JSONObject>()
+        rules += json("action" to "sniff", "timeout" to "300ms")
+        rules += json("protocol" to "dns", "action" to "hijack-dns")
+        if (state.preferences.allowLan) rules += json("ip_is_private" to true, "outbound" to "direct")
+        val dnsRules = mutableListOf<JSONObject>()
+        val sets = mutableMapOf<String, JSONObject>()
+        if (state.preferences.routing == RoutingMode.RULES) {
+            // Last authored exception wins. UI and execution share this precedence.
+            for (rule in state.rules.sortedByDescending { it.created }) {
+                validateRule(rule)
+                val target = if (rule.vpn) "vpn" else "direct"
+                val field = rule.kind.field
+                val values = if (rule.kind in listOf(RuleKind.GEOSITE, RuleKind.GEOIP)) rule.values.map { val key = (if (rule.kind == RuleKind.GEOSITE) "geosite-" else "geoip-") + it.lowercase(); sets.getOrPut(key) { json("type" to "inline", "tag" to key, "rules" to geo(key).getJSONArray("rules")) }; key } else rule.values
+                rules += json(field to array(values), "outbound" to target)
+                if (rule.kind in listOf(RuleKind.DOMAIN, RuleKind.KEYWORD, RuleKind.GEOSITE)) dnsRules += json(field to array(values), "server" to if (rule.vpn) "vpn-dns" else "direct-dns")
+            }
+        }
+        val defaultVpn = state.preferences.routing == RoutingMode.ALL
+        val route = json("rules" to array(rules), "final" to if (defaultVpn) "vpn" else "direct", "auto_detect_interface" to true, "default_domain_resolver" to "direct-dns", "rule_set" to array(sets.values))
+        val dns = json("servers" to array(listOf(
+            json("type" to "https", "tag" to "direct-dns", "server" to "1.1.1.1", "server_port" to 443, "path" to "/dns-query", "tls" to json("enabled" to true, "server_name" to "cloudflare-dns.com")),
+            json("type" to "https", "tag" to "vpn-dns", "server" to "1.1.1.1", "server_port" to 443, "path" to "/dns-query", "tls" to json("enabled" to true, "server_name" to "cloudflare-dns.com"), "detour" to "vpn")
+        )), "rules" to array(dnsRules), "final" to if (defaultVpn) "vpn-dns" else "direct-dns", "strategy" to "prefer_ipv4", "reverse_mapping" to true)
+        return json("log" to json("disabled" to !(BuildConfig.DEBUG && node.host == "10.0.2.2"), "level" to "debug"), "dns" to dns, "inbounds" to array(if (tunnel) listOf(json("type" to "tun", "tag" to "tun", "address" to array(listOf("172.19.0.1/30", "fdfe:dcba:9876::1/126")), "mtu" to 1400, "auto_route" to true, "strict_route" to true, "stack" to "gvisor")) else emptyList()), "outbounds" to array(listOf(vpn, json("type" to "direct", "tag" to "direct"))), "route" to route, "experimental" to json("clash_api" to json())).toString()
+    }
+    fun validateRule(r: Rule) {
+        require(r.values.isNotEmpty() && r.values.size <= 256 && r.values.all { it.isNotBlank() && it.length <= 253 && it.none(Char::isISOControl) }) { "Укажите значение правила" }
+        when (r.kind) {
+            RuleKind.DOMAIN -> require(r.values.all { Regex("[A-Za-z0-9_\\-.]+|[\\p{L}0-9_\\-.]+").matches(it) && !it.startsWith('.') }) { "Укажите домен без https:// и пути" }
+            RuleKind.APP -> require(r.values.all { Regex("[A-Za-z0-9_]+(?:\\.[A-Za-z0-9_]+)+").matches(it) && !it.endsWith(".exe", true) }) { "Нужно имя пакета Android, например org.telegram.messenger" }
+            RuleKind.CIDR -> r.values.forEach { value -> val p = value.split('/'); require(p.size == 2 && p[1].toIntOrNull() in 0..(if (p[0].contains(':')) 128 else 32) && Regex("[0-9a-fA-F:.]+").matches(p[0])) { "Укажите IP-подсеть, например 192.168.1.0/24" } }
+            RuleKind.GEOSITE, RuleKind.GEOIP -> require(r.values.all { Regex("[a-z0-9-]+").matches(it) }) { "Некорректное имя гео-набора" }
+            else -> Unit
+        }
+    }
+}

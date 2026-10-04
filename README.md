@@ -2,6 +2,12 @@
 
 Windows 10/11 x64, .NET 10, WPF, native UI. Default routing is **selected rules → VPN; everything else → Direct**.
 
+## Android
+
+The Android 10+ client is in [`android/`](android/README.md): native Compose interface, dark/light map design, subscriptions, application/domain rules, live traffic and a Quick Settings tile to toggle VPN from the notification shade. Android uses its own release tags and APK signing key; Windows releases and updater remain on their existing channel. See the Android README for supported protocols, build steps and validation.
+
+Download the first Android APK from [android-v0.1.0](https://github.com/Bebekon12/BebekonClient/releases/tag/android-v0.1.0). Prefer arm64-v8a on modern phones, or universal if unsure. In the app, Settings → «Кнопка в шторке» adds the VPN toggle to Quick Settings.
+
 ## Version 0.1.16 · TrustTunnel
 
 TrustTunnel servers can now be added on **Subscriptions** using official `tt://?` links, HTTPS subscription URLs, exported TOML or endpoint JSON. **Add subscription → Open file** imports a configuration from disk. The gear on a TrustTunnel server selects HTTP/2, HTTP/3 or automatic mode, retaining that choice when subscriptions refresh. Existing TUN, routing profiles, per-rule servers, pings and traffic reporting use the same interface. The official Windows TrustTunnel client 1.1.7 is bundled and verified during build; it starts only for selected/referenced TrustTunnel nodes. It does not convert VLESS or other subscriptions into TrustTunnel: the provider must supply a compatible server.

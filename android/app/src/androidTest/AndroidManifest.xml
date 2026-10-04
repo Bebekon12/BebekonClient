@@ -1,0 +1,9 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <application>
+        <activity android:name="com.bebekon.vpn.TrafficProbeActivity" android:exported="true" />
+        <!-- Test APK only: a different UID proves that traffic traverses the Android TUN. -->
+        <service android:name="com.bebekon.vpn.TrafficProbeService" android:exported="true" />
+    </application>
+</manifest>

@@ -1,0 +1,178 @@
+{
+  "updated": "2026-10-03",
+  "sources": [
+    {
+      "sha256": "AACA1F727C8CA51690D2C81358B9541C8F6C356D5C9A45B2B7DA23658A70D906",
+      "jsonSha256": "3B20F6F28858ABD69B3D58A658598881F446EA6111E27F9B77735CE45D35D7CE",
+      "name": "geosite-anthropic",
+      "source": "https://raw.githubusercontent.com/SagerNet/sing-geosite/417ea33286a8c3a77fdce9b68ce25d58565dad43/geosite-anthropic.srs"
+    },
+    {
+      "sha256": "A6D4CD7EB185FEA9A6B8DEF1E8C06A3B31923A73AFF175931A24301385884DBB",
+      "jsonSha256": "6F17F20B140CC9560822AAFD1977A34CE03045E6FEF33360A061D901BFDB2B68",
+      "name": "geosite-discord",
+      "source": "https://raw.githubusercontent.com/SagerNet/sing-geosite/417ea33286a8c3a77fdce9b68ce25d58565dad43/geosite-discord.srs"
+    },
+    {
+      "sha256": "25F39C0938E0FA5B44880D7D29C4497557A7E70B13E6FDABD667B0059677045E",
+      "jsonSha256": "1846024BE049F8B64D20671B03EE10A08F1D897915CD09FE43194A1A2613D6E9",
+      "name": "geosite-facebook",
+      "source": "https://raw.githubusercontent.com/SagerNet/sing-geosite/417ea33286a8c3a77fdce9b68ce25d58565dad43/geosite-facebook.srs"
+    },
+    {
+      "sha256": "952D89C656FDB147D4F5D04541DD942B33DCCE0DAE906A8416E24CBC1161402A",
+      "jsonSha256": "FD509A9CB25C6311589C73288F3F278D682A8FE6B153AB0EC80579199F3C6017",
+      "name": "geosite-google",
+      "source": "https://raw.githubusercontent.com/SagerNet/sing-geosite/417ea33286a8c3a77fdce9b68ce25d58565dad43/geosite-google.srs"
+    },
+    {
+      "sha256": "5952194148489E4E5C55FB10076DE2CC3B7956BDAF718471BC8B93692256DB57",
+      "jsonSha256": "011183CE3E29DFF33FA9B549832DE61178289BDD099753A43EFFE910B74FFAEC",
+      "name": "geosite-instagram",
+      "source": "https://raw.githubusercontent.com/SagerNet/sing-geosite/417ea33286a8c3a77fdce9b68ce25d58565dad43/geosite-instagram.srs"
+    },
+    {
+      "sha256": "E663D33CDCE888830C0095E28BB88141D5C0980B5715912F3779A5074B36A19D",
+      "jsonSha256": "6196814900616522C9B66CEF30DF5EA64117AD7266AD87C006B49C926D4076AC",
+      "name": "geosite-netflix",
+      "source": "https://raw.githubusercontent.com/SagerNet/sing-geosite/417ea33286a8c3a77fdce9b68ce25d58565dad43/geosite-netflix.srs"
+    },
+    {
+      "sha256": "AAE1FEDE5B274089B027668EE5D073221332F283EF29F943E8AEAF12261067D1",
+      "jsonSha256": "BB70C4F3C6DD85661C0523AB4EF983E5D48697F6AF82F61A1873447188596B27",
+      "name": "geosite-openai",
+      "source": "https://raw.githubusercontent.com/SagerNet/sing-geosite/417ea33286a8c3a77fdce9b68ce25d58565dad43/geosite-openai.srs"
+    },
+    {
+      "sha256": "924584651FB89CC9B8BC1D88836B922F6631BCC57997E85BD670EFEE7BE406FE",
+      "jsonSha256": "04E3F36E253C2006DD91CBCE3418985FE188E0C739A5A29F73E9942C1635E9EE",
+      "name": "geosite-telegram",
+      "source": "https://raw.githubusercontent.com/SagerNet/sing-geosite/417ea33286a8c3a77fdce9b68ce25d58565dad43/geosite-telegram.srs"
+    },
+    {
+      "sha256": "3FD69C4047A0908A9D2B7940D91C60E86B88D56F7153E452432A68D8FAA5A309",
+      "jsonSha256": "9DC68600985D3192AF83C53606244EA06FB8057C28AD48F8B6FFA87B80AA9BB8",
+      "name": "geosite-tiktok",
+      "source": "https://raw.githubusercontent.com/SagerNet/sing-geosite/417ea33286a8c3a77fdce9b68ce25d58565dad43/geosite-tiktok.srs"
+    },
+    {
+      "sha256": "A5EE6077F93E347D488F0BA63F26CF59AB767E5BF657EA2FE92BF527B581A1F4",
+      "jsonSha256": "97E66B491CF16167471E5B5D06A72FE388FEB930E9E78242DA7DF21901E6AA25",
+      "name": "geosite-twitch",
+      "source": "https://raw.githubusercontent.com/SagerNet/sing-geosite/417ea33286a8c3a77fdce9b68ce25d58565dad43/geosite-twitch.srs"
+    },
+    {
+      "sha256": "0ABF51B02CDDBA87F797D556ED7D3902D543B2BDD458E6AAA8AFD29A252E53C5",
+      "jsonSha256": "A19C8766B246590849CAB6C0A91B70636059D7EC78334FFB1F457B2BB6EF0511",
+      "name": "geosite-twitter",
+      "source": "https://raw.githubusercontent.com/SagerNet/sing-geosite/417ea33286a8c3a77fdce9b68ce25d58565dad43/geosite-twitter.srs"
+    },
+    {
+      "sha256": "DA226BE97E1A18A083E0FE5F6A9D7CA281E26783F6E735C27F4867AC326C42C0",
+      "jsonSha256": "C71EA2F87CAC192991F7EF067C4E347E7B8D2FC9563B86CC5C2BA7A0FAF9B7E5",
+      "name": "geosite-whatsapp",
+      "source": "https://raw.githubusercontent.com/SagerNet/sing-geosite/417ea33286a8c3a77fdce9b68ce25d58565dad43/geosite-whatsapp.srs"
+    },
+    {
+      "sha256": "8817814137AE7174F378AD9B2DD67222CDB281017B0BB4117DF6B9BE46F1761E",
+      "jsonSha256": "9006E3DF6A123D152371B18ED37BD1BB48D092EE60C19A6BC86B6450C0ACC15A",
+      "name": "geosite-youtube",
+      "source": "https://raw.githubusercontent.com/SagerNet/sing-geosite/417ea33286a8c3a77fdce9b68ce25d58565dad43/geosite-youtube.srs"
+    },
+    {
+      "sha256": "6E23F5580DD443E2F9C4895ADAFEE8D199C1A3487182AD5F0A2256CF59C7E53A",
+      "jsonSha256": "84281743D5CEE74967FB171EB3F7B135CC269BAED09D2B58CE4D52E528E9B880",
+      "name": "geoip-ru",
+      "source": "https://raw.githubusercontent.com/SagerNet/sing-geoip/7fe82a879ad2666526730c195b55a6d8d9147908/geoip-ru.srs"
+    },
+    {
+      "sha256": "E77BC006C95F9A6841C7F7979B541E396150D10875F2D3A414800A3C2F4DA26B",
+      "jsonSha256": "C52A60C93F9B07A319F52B25D6E82DE65EBB212CBFC66FFB8DB1B44828CDC8BF",
+      "name": "geoip-de",
+      "source": "https://raw.githubusercontent.com/SagerNet/sing-geoip/7fe82a879ad2666526730c195b55a6d8d9147908/geoip-de.srs"
+    },
+    {
+      "sha256": "98CEE80D1377E625D43150E80D0B0C2B3DCC362D57D78099DBB89E3813152BCA",
+      "jsonSha256": "A6695CF49A940E69E538DC8676CACC45895583C472E1BE174A0983E160738973",
+      "name": "geoip-us",
+      "source": "https://raw.githubusercontent.com/SagerNet/sing-geoip/7fe82a879ad2666526730c195b55a6d8d9147908/geoip-us.srs"
+    },
+    {
+      "sha256": "7C73DCF065CC20083E741B0899DEA47BEA7943221C3851B05F66C4F68D62E0C0",
+      "jsonSha256": "C956B9C6FEFF922E6CD40133337E84052BCB049561E963635812ED558DBB57C4",
+      "name": "geoip-nl",
+      "source": "https://raw.githubusercontent.com/SagerNet/sing-geoip/7fe82a879ad2666526730c195b55a6d8d9147908/geoip-nl.srs"
+    },
+    {
+      "sha256": "7941F98E50D7AF4025E441BE79CC48CFAB0D78DE088B6EA19401FA7A0E5E2EF6",
+      "jsonSha256": "9394B8CBFF3501C232426A59AFD9F710C9DA0F65625E31F863B1563C95B0DBC5",
+      "name": "geoip-lv",
+      "source": "https://raw.githubusercontent.com/SagerNet/sing-geoip/7fe82a879ad2666526730c195b55a6d8d9147908/geoip-lv.srs"
+    },
+    {
+      "sha256": "0B154BA1EA22CD3FDCBBBAAD30B89C6AC26457E507D1BDDACB230BBE4D7E47DA",
+      "jsonSha256": "9A67D032BD998160FE6AE52E78EB19F205A818093B44BC9CF3D15017FB61E795",
+      "name": "geoip-lt",
+      "source": "https://raw.githubusercontent.com/SagerNet/sing-geoip/7fe82a879ad2666526730c195b55a6d8d9147908/geoip-lt.srs"
+    },
+    {
+      "sha256": "7AFAB5A159CC46016C8F77A7195536DEF7A8B892D427B887091F38C61E559E1E",
+      "jsonSha256": "D57454C5D2E15A23176CED896EDC07344985BD7E52A94EF85A566D5966C5F186",
+      "name": "geoip-se",
+      "source": "https://raw.githubusercontent.com/SagerNet/sing-geoip/7fe82a879ad2666526730c195b55a6d8d9147908/geoip-se.srs"
+    },
+    {
+      "sha256": "8E3C359A6857382CFA64BFF0005A3CCD1CE5C9958906C73456418DF713B22EDD",
+      "jsonSha256": "C1C37AEE7984B804ADDA381F6B28ECF5D5A7F8380277811B389D4B7B84663AF5",
+      "name": "geoip-gb",
+      "source": "https://raw.githubusercontent.com/SagerNet/sing-geoip/7fe82a879ad2666526730c195b55a6d8d9147908/geoip-gb.srs"
+    },
+    {
+      "sha256": "5EC9CC0B35A53B8F33B524D93B82439E1E38FE3EDA44AD545C1F1D3818E457F4",
+      "jsonSha256": "30C3F70DB7C0D9C17EDC74395D265A36FAA8814B05C312CD379BDA9DEE397771",
+      "name": "geoip-ee",
+      "source": "https://raw.githubusercontent.com/SagerNet/sing-geoip/7fe82a879ad2666526730c195b55a6d8d9147908/geoip-ee.srs"
+    },
+    {
+      "sha256": "CC94EDB9E95A35431F4024826A577EEF4570960282E33B1AC1DC6690CF71B5AA",
+      "jsonSha256": "2F8AA233444E9A2C953E3E6D8DE29CB54D2858E7A83587E86BBD3FC91E2F0E37",
+      "name": "geoip-fr",
+      "source": "https://raw.githubusercontent.com/SagerNet/sing-geoip/7fe82a879ad2666526730c195b55a6d8d9147908/geoip-fr.srs"
+    },
+    {
+      "sha256": "F5F0F76A650166873E16319DC594CC67766CF0D56FD325A7CE9CF186E80267DC",
+      "jsonSha256": "3A1BD8DBFC83CBBC56A237CC353BA1B0E569DF56DFF0B48232B2B2303ABB66D4",
+      "name": "geoip-pl",
+      "source": "https://raw.githubusercontent.com/SagerNet/sing-geoip/7fe82a879ad2666526730c195b55a6d8d9147908/geoip-pl.srs"
+    },
+    {
+      "sha256": "BFBBAC5C2519D8AB005173D6073B62E74C226D8C7B334BA7B50A649D646AB3B7",
+      "jsonSha256": "59A584F325E502827785351CB894D2E20D0AA3FCFFA1BD53B84294A73EAC67BA",
+      "name": "geoip-ua",
+      "source": "https://raw.githubusercontent.com/SagerNet/sing-geoip/7fe82a879ad2666526730c195b55a6d8d9147908/geoip-ua.srs"
+    },
+    {
+      "sha256": "EBEE603FDF402314B44B9F653CDCF6D9CC9C41E84E2B3515E3123C5C920A93BC",
+      "jsonSha256": "5AB7CFD464608FB34D4332FF9E4D955992873ABE1DA1512F4EB6A1AEC01CF6EF",
+      "name": "geoip-cn",
+      "source": "https://raw.githubusercontent.com/SagerNet/sing-geoip/7fe82a879ad2666526730c195b55a6d8d9147908/geoip-cn.srs"
+    },
+    {
+      "sha256": "E2CCE81F24DC3443F47582E92700380C1EC0791583A41D498C353AD8752AEF04",
+      "jsonSha256": "E5C282D00400D865CA29F87AF941501BA4D8EA4D365EB59F369A57304F3471D1",
+      "name": "geoip-fi",
+      "source": "https://raw.githubusercontent.com/SagerNet/sing-geoip/7fe82a879ad2666526730c195b55a6d8d9147908/geoip-fi.srs"
+    },
+    {
+      "sha256": "D9917A7657BC54C9D9072111041EFE61D43F3439A2CBBDF7786A9A688D7BEE2A",
+      "jsonSha256": "C8572A5EF8A04F797A0BC2998A9DBFC843BDD6B7BFED35268A377DEC391443B5",
+      "name": "geoip-kz",
+      "source": "https://raw.githubusercontent.com/SagerNet/sing-geoip/7fe82a879ad2666526730c195b55a6d8d9147908/geoip-kz.srs"
+    },
+    {
+      "jsonSha256": "1044B423D1067D220846D76C241320A6B4C830B55334407ADC70AAC8DEC07B66",
+      "name": "geoip-telegram",
+      "source": "https://core.telegram.org/resources/cidr.txt"
+    }
+  ]
+}

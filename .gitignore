@@ -17,3 +17,14 @@ TestResults/
 .env
 .env.*
 *.private.xml
+android/.gradle/
+android/.kotlin/
+android/.core-source/
+android/**/build/
+android/local.properties
+android/app/libs/*.aar
+android/app/libs/*-sources.jar
+*.jks
+*.keystore
+hs_err_pid*.log
+replay_pid*.log
