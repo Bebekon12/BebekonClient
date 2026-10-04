@@ -54,14 +54,14 @@ enum class DnsResolver(val label: String, val address: String, val hostname: Str
     CLOUDFLARE("Cloudflare", "1.1.1.1", "cloudflare-dns.com"), GOOGLE("Google", "8.8.8.8", "dns.google")
 }
 data class Preferences(val theme: ThemeChoice = ThemeChoice.DARK, val routing: RoutingMode = RoutingMode.ALL, val ping: PingMethod = PingMethod.HTTPS_GET, val animations: Boolean = true, val allowLan: Boolean = true, val autoReconnect: Boolean = true, val pingTarget: PingTarget = PingTarget.CLOUDFLARE,
-    val mapLocation: Boolean = true, val dnsResolver: DnsResolver = DnsResolver.CLOUDFLARE, val mtu: Int = 1400, val connectionNotifications: Boolean = true, val checkUpdates: Boolean = true) {
+    val mapLocation: Boolean = true, val dnsResolver: DnsResolver = DnsResolver.CLOUDFLARE, val mtu: Int = 1400, val connectionNotifications: Boolean = true, val checkUpdates: Boolean = true, val sitesInAllApps: Boolean = false) {
     fun toJson() = json("theme" to theme.name, "routing" to routing.name, "ping" to ping.name, "animations" to animations, "allowLan" to allowLan, "autoReconnect" to autoReconnect, "pingTarget" to pingTarget.name,
-        "mapLocation" to mapLocation, "dnsResolver" to dnsResolver.name, "mtu" to mtu, "connectionNotifications" to connectionNotifications, "checkUpdates" to checkUpdates)
+        "mapLocation" to mapLocation, "dnsResolver" to dnsResolver.name, "mtu" to mtu, "connectionNotifications" to connectionNotifications, "checkUpdates" to checkUpdates, "sitesInAllApps" to sitesInAllApps)
     companion object { fun fromJson(o: JSONObject) = Preferences(ThemeChoice.valueOf(o.optString("theme", "DARK")), RoutingMode.valueOf(o.optString("routing", "ALL")), PingMethod.valueOf(o.optString("ping", "HTTPS_GET")), o.optBoolean("animations", true), o.optBoolean("allowLan", true), o.optBoolean("autoReconnect", true), PingTarget.valueOf(o.optString("pingTarget", "CLOUDFLARE")),
-        o.optBoolean("mapLocation", true), DnsResolver.valueOf(o.optString("dnsResolver", "CLOUDFLARE")), o.optInt("mtu", 1400).also { require(it in 1280..1500) }, o.optBoolean("connectionNotifications", true), o.optBoolean("checkUpdates", true)) }
+        o.optBoolean("mapLocation", true), DnsResolver.valueOf(o.optString("dnsResolver", "CLOUDFLARE")), o.optInt("mtu", 1400).also { require(it in 1280..1500) }, o.optBoolean("connectionNotifications", true), o.optBoolean("checkUpdates", true), o.optBoolean("sitesInAllApps", false)) }
 }
 
-/** Site rules need a shared tunnel; an app-only selection can be isolated by Android itself. */
+/** App selection is an OS filter. Adding a site must never silently broaden that filter. */
 data class AppTunnelPolicy(val allowed: Set<String>? = null, val excluded: Set<String> = emptySet()) {
     val appOnly get() = allowed != null
 }
@@ -69,8 +69,9 @@ fun appTunnelPolicy(state: SavedState): AppTunnelPolicy {
     if (state.preferences.routing == RoutingMode.ALL) return AppTunnelPolicy()
     val apps = effectiveAppRules(state.rules)
     val sitesNeedTunnel = state.rules.any { it.kind != RuleKind.APP && it.vpn }
-    return if (sitesNeedTunnel) AppTunnelPolicy(excluded = apps.filterValues { !it }.keys)
-    else AppTunnelPolicy(allowed = apps.filterValues { it }.keys)
+    val selected = apps.filterValues { it }.keys
+    return if (state.preferences.sitesInAllApps || selected.isEmpty() && sitesNeedTunnel) AppTunnelPolicy(excluded = apps.filterValues { !it }.keys)
+    else AppTunnelPolicy(allowed = selected)
 }
 data class SavedState(val subscriptions: List<Subscription> = emptyList(), val selected: String? = null, val favorites: Set<String> = emptySet(), val rules: List<Rule> = emptyList(), val preferences: Preferences = Preferences()) {
     val nodes get() = subscriptions.flatMap { it.nodes }.distinctBy { it.id }
@@ -84,6 +85,9 @@ data class Session(val phase: Phase = Phase.OFF, val server: String = "", val me
     val busy get() = phase in listOf(Phase.STARTING, Phase.STOPPING, Phase.RECONNECTING)
 }
 enum class PingQuality { GOOD, FAIR, POOR, UNKNOWN }
+fun nodesByPing(nodes: List<Node>, pings: Map<String, PingResult>): List<Node> = nodes.sortedWith(compareBy<Node> {
+    when (pings[it.id]?.quality) { PingQuality.GOOD -> 0; PingQuality.FAIR -> 1; PingQuality.POOR -> 2; else -> 3 }
+}.thenBy { pings[it.id]?.millis ?: Int.MAX_VALUE })
 data class PingResult(val millis: Int? = null, val running: Boolean = false, val failed: Boolean = false, val method: PingMethod = PingMethod.HTTPS_GET, val queued: Boolean = false, val target: PingTarget = PingTarget.CLOUDFLARE) {
     val label get() = if (millis != null) "$millis мс" else if (queued) "В очереди" else if (running) "Проверка…" else if (failed) "Таймаут" else "—"
     val quality get() = when {

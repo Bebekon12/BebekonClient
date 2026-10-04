@@ -1,4 +1,4 @@
-param([string]$InnoCompiler, [switch]$SkipInstaller, [string]$PublishFolder = 'artifacts\release', [string]$UpdateFeedUrl = 'https://github.com/Bebekon12/BebekonClient/releases/latest/download/update.json', [string]$InstallerUrl, [string]$ReleaseNotes = 'Добавлена поддержка TrustTunnel: ссылки tt://, TOML/JSON и HTTPS-подписки, HTTP/2 и HTTP/3, импорт файла и выбор протокола сервера. Сохраняются текущие правила, TUN и выбранный сервер.')
+param([string]$InnoCompiler, [switch]$SkipInstaller, [string]$TestSettings, [string]$PublishFolder = 'artifacts\release', [string]$UpdateFeedUrl = 'https://github.com/Bebekon12/BebekonClient/releases/latest/download/update.json', [string]$InstallerUrl, [string]$ReleaseNotes = 'Добавлена поддержка TrustTunnel: ссылки tt://, TOML/JSON и HTTPS-подписки, HTTP/2 и HTTP/3, импорт файла и выбор протокола сервера. Сохраняются текущие правила, TUN и выбранный сервер.')
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $projectRoot = $PSScriptRoot
@@ -50,7 +50,9 @@ Copy-Item -LiteralPath .tools\trusttunnel-extracted\trusttunnel_client.exe -Dest
 Copy-Item -LiteralPath .tools\trusttunnel-extracted\LICENSE.txt -Destination core\LICENSE-TrustTunnel -Force
 Invoke-Checked dotnet @('clean','Bebekon.sln','-c','Release','--nologo','-v','quiet')
 Invoke-Checked dotnet @('restore','Bebekon.sln','--nologo')
-Invoke-Checked dotnet @('test','tests\Bebekon.Tests','-c','Release','--nologo','--logger','trx;LogFileName=core.trx','--results-directory','artifacts\tests')
+$testArgs = @('test','tests\Bebekon.Tests','-c','Release','--nologo','--logger','trx;LogFileName=core.trx','--results-directory','artifacts\tests')
+if ($TestSettings) { $testArgs += @('--settings', [IO.Path]::GetFullPath($TestSettings)) }
+Invoke-Checked dotnet $testArgs
 $publishArgs = @('-c','Release','-r','win-x64','--self-contained','true','-p:PublishReadyToRun=true','-p:PublishSingleFile=false','--nologo')
 Invoke-Checked dotnet (@('publish','src\Bebekon.App\Bebekon.App.csproj') + $publishArgs + @('-o',$appPublishRoot))
 Invoke-Checked dotnet (@('publish','src\Bebekon.Service\Bebekon.Service.csproj') + $publishArgs + @('-o','artifacts\service-publish'))

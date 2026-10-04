@@ -26,7 +26,7 @@ The world map projects local country geometry into screen coordinates and highli
 
 Rules → Applications supports searching by label/package, selecting multiple apps, VPN/direct actions, and actual installed-app icons. Saving a batch updates individual app rules atomically and reloads the VPN once. Application rules apply in **By rules** mode; the picker explains this when full-device routing is selected.
 
-Latency colors are product thresholds, not a network standard: **HTTPS GET/HEAD ≤300 ms green, ≤600 ms amber, otherwise red; TCP ≤100 ms green, ≤250 ms amber, otherwise red**. TCP tests the server socket; HTTPS includes DNS, the VPN handshake, target TLS and an HTTP response. They are not interchangeable RTT measurements (see [sing-box's URL test implementation](https://github.com/SagerNet/sing-box/blob/v1.14.2/common/urltest/urltest.go)). Servers offers Cloudflare (`cp.cloudflare.com/generate_204`, default) and Google (`www.gstatic.com/generate_204`); results from different targets are not mixed. Existing results retain their method and color during queued/running tests. A new method or target cancels the old queue and clears stale results. At most two native tests run concurrently, each with its existing five-second deadline. Connection validation tries the other HTTPS target if the first fails, so one blocked test site does not reject an otherwise usable connection; startup validation can take up to two five-second attempts.
+Latency colors are product thresholds, not a network standard: **HTTPS GET/HEAD ≤300 ms green, ≤600 ms amber, otherwise red; TCP ≤100 ms green, ≤250 ms amber, otherwise red**. TCP tests the server socket; HTTPS includes DNS, the VPN handshake, target TLS and an HTTP response. They are not interchangeable RTT measurements (see [sing-box's URL test implementation](https://github.com/SagerNet/sing-box/blob/v1.14.2/common/urltest/urltest.go)). Servers offers Cloudflare (`cp.cloudflare.com/generate_204`, default) and Google (`www.gstatic.com/generate_204`); results from different targets are not mixed. Existing results retain their method and color during queued/running tests. A new method or target cancels the old queue and clears stale results. At most four native tests run concurrently, each with its existing five-second deadline. Connection validation tries the other HTTPS target if the first fails, so one blocked test site does not reject an otherwise usable connection; startup validation can take up to two five-second attempts.
 
 ## Android 0.1.2
 
@@ -44,13 +44,23 @@ Home card labels/values are vertically centered. Received/sent volume appears in
 
 Settings offers searchable categories for themes, motion, location, routing/app rules, presets, LAN, three delayed startup retries, DoH resolver, MTU, Android always-on/blocking options, background battery settings, Quick Settings, ping method/target, site diagnostics, connection-event notifications, subscriptions, update checking and the log. The required low-priority foreground VPN notification remains independent from optional connection/error event notifications. Startup/retry can be cancelled from Home or Quick Settings without a delayed reconnection restarting it.
 
+## Android 0.1.3
+
+App filtering is calculated from the stored app rules **before** recognizable WebAPKs are converted to runtime domain rules. Previously that conversion could switch an apparently app-only selection to a shared tunnel and expose VPN transport/DNS to unchecked applications. WebAPK launchers map to their host browser in the system allowlist; native selected apps retain their own packages. Other applications retain the physical network. A WebAPK shares networking with its browser and cannot have a separate OS network identity.
+
+Adding site/service rules to a selection of native apps no longer silently captures the rest of the device. Site rules apply within the selected apps. Settings → «Правила сайтов во всех приложениях» explicitly enables a shared tunnel; Direct apps remain excluded. Site-only configurations still use the shared tunnel as required. Shared site mode keeps unmatched DNS on the direct resolver; matching site/app DNS rules still select their appropriate resolver. The log records which system scope was actually established without subscription URLs or keys. This matches the separation of app filters and routing described in [Happ's official app-management documentation](https://github.com/HappDev/happ_su/blob/main/dev-docs/app-management.md), using Android's `addAllowedApplication` / `addDisallowedApplication` APIs.
+
+Server lists default to live ping ordering (green, amber, red, unknown). Home uses the same ordering; results rise as each probe finishes without changing the selected server. Four Android probes run concurrently, with the existing five-second native deadline per active probe. Waiting in the queue is separate from that deadline. Failed peers cannot stall the whole scan indefinitely.
+
+The isolated validation setup includes a tiny **test-only WebAPK metadata fixture**, in addition to a separate-UID HTTPS/streaming companion. It exercises app-only stored rules that become site rules at runtime, mixed native/WebAPK app selections, and unselected-app physical networking. The fixture APK is never included in public release assets.
+
 ## Build
 
 Required: JDK 17, Go 1.26.8, Android SDK platform 36, NDK 28.2.13676358. Set `JAVA_HOME`, `ANDROID_HOME` and `ANDROID_NDK_HOME`, and add Go to PATH. Gradle 8.13 is pinned by the wrapper and SHA-256.
 
 ```powershell
 ./android/build-core.ps1
-./android/gradlew.bat -p android :app:testDebugUnitTest :app:assembleDebug
+./android/gradlew.bat -p android :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest :webapp-fixture:assembleDebug
 ```
 
 The core script pins the official source commit and adds the small `core/bebekon.go` bridge for independent, deadline-bound VPN probes. It builds arm64-v8a, armeabi-v7a and x86_64. Generated AARs, SDKs, local settings and private signing keys are excluded from Git.
@@ -94,3 +104,9 @@ The optional Ultima probes and direct/VPN HEAD diagnostic exercised real provide
 Debug and release Lint reported zero errors (18 advisory warnings). APK signature continuity, Android 10 minimum API, all three ABIs and 16 KiB ZIP alignment were verified. The app-only/mixed TUN tests used Android's real VpnService in the emulator, not mocked transport flags. Test components remain confined to the separate instrumentation APK.
 
 The final signed, R8-optimized 0.1.2 APK installed over the previously published signed 0.1.1 and retained the encrypted subscription, selected Sweden fixture and light theme. The separately installed test companion then reported actual VPN transport and HTTPS HTTP 200 through the release APK. Light Home with the real approximate-IP arc and measured traffic spikes was visually inspected; idle speed remains zero while the chart retains those earlier spikes.
+
+## Release 0.1.3 verification
+
+All 47 JVM tests passed, including preserved original app scope before WebAPK conversion, explicit shared site mode, direct DNS fallback and live ping sorting. Debug and release Lint report zero errors and 18 advisory warnings. The original certificate, universal ABIs and 16 KiB APK ZIP alignment were checked. The release, instrumentation and separate WebAPK metadata fixture APKs compile; the fixture is never a public download.
+
+The expanded real-tunnel instrumentation suite was not run for this candidate: the Android 15 emulator could not reserve 2,560 MB within Windows' current commit limit. Do not reuse the earlier 0.1.2 instrumentation results as evidence for 0.1.3. No physical phone was attached, so the exact Yandex/Gosuslugi error still needs confirmation after updating.

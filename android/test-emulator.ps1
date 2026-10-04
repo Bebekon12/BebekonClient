@@ -18,6 +18,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'App install failed.' }
     & $adb -s $Serial install -r (Join-Path $PSScriptRoot 'app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk')
     if ($LASTEXITCODE -ne 0) { throw 'Test APK install failed.' }
+    & $adb -s $Serial install -r (Join-Path $PSScriptRoot 'webapp-fixture/build/outputs/apk/debug/webapp-fixture-debug.apk')
+    if ($LASTEXITCODE -ne 0) { throw 'WebAPK metadata fixture install failed. Build :webapp-fixture:assembleDebug first.' }
     & $adb -s $Serial shell appops set com.bebekon.vpn ACTIVATE_VPN allow
     $arguments = @('-s', $Serial, 'shell', 'am', 'instrument', '-w', '-e', 'fixture_port', $port)
     if ($ProviderFixture) {

@@ -22,6 +22,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
     private Task? activeScan;
     private int latencyGeneration;
     private int latencyRequest;
+    private bool pingSortPending;
     private readonly Dictionary<string, int> latestLatencyRequests = [];
     private CancellationTokenSource? applyDelay;
     private CancellationTokenSource? networkDelay;
@@ -253,7 +254,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
     }
     private async Task RunScanAsync(bool force)
     {
-        if (Scanning) return; Scanning = true; scan?.Dispose(); scan = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token); var token = scan.Token;
+        if (Scanning) return; SortIndex = 0; Scanning = true; scan?.Dispose(); scan = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token); var token = scan.Token;
         var nodes = Data.Servers.ToArray();
         foreach (var node in nodes) if (node.LatencyMs is null) node.Latency = T("В очереди", "Queued");
         try { await Task.WhenAll(nodes.Select(s => MeasureServerAsync(s, force, token))); RefreshServers(); }
@@ -276,6 +277,15 @@ public sealed partial class MainViewModel : Observable, IDisposable
             ? ms + T(" мс", " ms")
             : result.TimedOut ? T("Таймаут", "Timeout") : T("Недоступен", "Unavailable");
         node.LatencyMs = result.Milliseconds ?? (supported ? -1 : null);
+        QueuePingSort();
+    }
+    private async void QueuePingSort()
+    {
+        if (SortIndex != 0 || pingSortPending) return;
+        pingSortPending = true;
+        try { await Task.Delay(120, lifetime.Token); if (SortIndex == 0) RefreshServers(); }
+        catch (OperationCanceledException) { }
+        finally { pingSortPending = false; }
     }
     private async Task RefreshSubAsync(Subscription sub) { var servers = await SubscriptionLoader.LoadAsync(sub.Source, lifetime.Token); ReplaceServers(sub, servers); Save(); }
     internal void ReplaceServers(Subscription sub, List<Server> incoming)
@@ -293,7 +303,16 @@ public sealed partial class MainViewModel : Observable, IDisposable
         foreach (var server in Data.Servers) server.SubscriptionLabel = Data.Subscriptions.FirstOrDefault(s => s.Id == server.SubscriptionId)?.Name ?? "";
         IEnumerable<Server> servers = Data.Servers.Where(s => s.Name.Contains(ServerSearch, StringComparison.OrdinalIgnoreCase) || s.SubscriptionLabel.Contains(ServerSearch, StringComparison.OrdinalIgnoreCase));
         servers = SortIndex == 0 ? servers.OrderBy(s => s.LatencyMs is >= 0 ? s.LatencyMs : long.MaxValue).ThenBy(s => s.Name) : servers.OrderBy(s => s.Name);
-        var array = servers.ToArray(); ServerRows.Clear(); for (var i = 0; i < array.Length; i += ListMode ? 1 : 2) ServerRows.Add(new(array[i], !ListMode && i + 1 < array.Length ? array[i + 1] : null)); Notify(nameof(ServerCount)); Notify(nameof(NoServers));
+        var array = servers.ToArray(); var rows = new List<ServerRow>();
+        for (var i = 0; i < array.Length; i += ListMode ? 1 : 2) rows.Add(new(array[i], !ListMode && i + 1 < array.Length ? array[i + 1] : null));
+        // Move existing rows instead of clearing the list on every completed probe.
+        for (var i = 0; i < rows.Count; i++) {
+            if (i < ServerRows.Count && ServerRows[i] == rows[i]) continue;
+            var existing = ServerRows.IndexOf(rows[i]);
+            if (existing >= 0) ServerRows.Move(existing, i); else ServerRows.Insert(i, rows[i]);
+        }
+        while (ServerRows.Count > rows.Count) ServerRows.RemoveAt(ServerRows.Count - 1);
+        Notify(nameof(ServerCount)); Notify(nameof(NoServers));
     }
     private void RefreshRules() { VisibleRules.Clear(); var rules = ActiveProfile.Rules.Where(r => r.Name.Contains(RuleSearch, StringComparison.OrdinalIgnoreCase) || r.Description.Contains(RuleSearch, StringComparison.OrdinalIgnoreCase)); if (RuleSortIndex == 0) rules = rules.OrderByDescending(r => r.CreatedAt); foreach (var r in rules) VisibleRules.Add(r); Notify(nameof(RuleCount)); Notify(nameof(NoRules)); }
     private void AttachProfile() { foreach (var r in ActiveProfile.Rules) { r.PropertyChanged -= OnRuleChanged; r.PropertyChanged += OnRuleChanged; } }

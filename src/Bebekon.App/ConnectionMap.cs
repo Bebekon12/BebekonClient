@@ -58,10 +58,11 @@ public sealed class ConnectionMap : FrameworkElement
         var code = CountryInfo.Resolve(ServerName);
         var selected = string.IsNullOrEmpty(code) ? null : Countries.FirstOrDefault(c => c.Code == code);
         var lon = selected?.Center.X ?? 10;
-        var lat = Math.Clamp((selected?.Center.Y ?? 35) - 22, -65, 65);
-        var span = Origin is null || selected is null ? 245 : Math.Clamp(Math.Abs(MapLocation.LongitudeDelta(Origin.Longitude - lon)) * 2.5 + 60, 245, 460);
-        var scale = Math.Min(ActualWidth * .72 / span, ActualHeight / 150);
-        Point At(Point p) => new((p.X - lon) * scale + ActualWidth * .61, (lat - p.Y) * scale + ActualHeight * .66);
+        var lat = Math.Clamp((selected?.Center.Y ?? 35) - 8, -65, 65);
+        var span = Origin is null || selected is null ? 165 : Math.Clamp(Math.Abs(MapLocation.LongitudeDelta(Origin.Longitude - lon)) * 2.5 + 60, 165, 460);
+        var verticalSpan = Origin is null || selected is null ? 100 : Math.Max(100, Math.Abs(Origin.Latitude - selected.Center.Y) * 2 + 48);
+        var scale = Math.Min(ActualWidth * .78 / span, ActualHeight / verticalSpan);
+        Point At(Point p) => new((p.X - lon) * scale + ActualWidth * .64, (lat - p.Y) * scale + ActualHeight * .56);
         projected = Countries.Select(c => {
             var shape = new StreamGeometry { FillRule = FillRule.EvenOdd };
             using (var path = shape.Open()) foreach (var ring in c.Rings) {
@@ -73,7 +74,7 @@ public sealed class ConnectionMap : FrameworkElement
         departure = Origin is null ? null : At(new(lon + MapLocation.LongitudeDelta(Origin.Longitude - lon), Origin.Latitude));
         beam = null;
         if (destination is { } end && departure is { } start) {
-            bend = new((start.X + end.X) / 2, Math.Min(start.Y, end.Y) - 36);
+            bend = new((start.X + end.X) / 2, Math.Min(start.Y, end.Y) - Math.Clamp(Math.Abs(start.X - end.X) * .2, 44, 78));
             beam = new StreamGeometry(); using (var p = beam.Open()) { p.BeginFigure(start, false, false); p.QuadraticBezierTo(bend, end, true, false); } beam.Freeze();
         }
     }

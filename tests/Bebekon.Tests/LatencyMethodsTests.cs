@@ -11,12 +11,12 @@ public sealed class LatencyMethodsTests
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token) => send(request, token);
     }
     [Theory] [InlineData("GET")] [InlineData("HEAD")]
-    public async Task HttpsProbeUsesSelectedVerbThreeTimes(string verb)
+    public async Task HttpsProbeMeasuresOneCompleteRequestUsingSelectedVerb(string verb)
     {
         var requests = new List<string>();
         using var http = new HttpClient(new Handler((request, _) => { requests.Add(request.Method.Method); Assert.Equal("https://www.gstatic.com/generate_204", request.RequestUri!.AbsoluteUri); return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NoContent)); }));
         Assert.True(await LatencyService.MeasureHttpAsync(http, new HttpMethod(verb), default) >= 0);
-        Assert.Equal(new[] { verb, verb, verb }, requests);
+        Assert.Equal(new[] { verb }, requests);
     }
     [Fact] public async Task HttpFailureAndCancellationAreNotSuccessfulLatency()
     {

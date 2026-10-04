@@ -90,7 +90,7 @@ fun installedApps(context: Context): List<InstalledApp> = context.packageManager
                         FilterChip(vpn, { vpn = true; if (!manageRules) assignments = assignments.mapValues { true } }, { Text("Через VPN") }, Modifier.weight(1f).testTag("apps-vpn"))
                         FilterChip(!vpn, { vpn = false; if (!manageRules) assignments = assignments.mapValues { false } }, { Text("Напрямую") }, Modifier.weight(1f).testTag("apps-direct"))
                     }
-                    if (manageRules) Text("Без VPN-правил сайтов туннель получают только отмеченные приложения. «Напрямую» всегда исключает приложение из VPN, даже при правилах сайтов. Снять галочку — удалить правило.", fontSize = 11.sp, lineHeight = 15.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 8.dp))
+                    if (manageRules) Text("При выборе приложений VPN получают только отмеченные: остальные сохраняют обычную сеть и DNS. Правила сайтов действуют внутри выбранных приложений. Общую обработку сайтов можно включить в настройках. «Напрямую» исключает приложение; снять галочку — удалить правило.", fontSize = 11.sp, lineHeight = 15.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 8.dp))
                     if (manageRules) Text("ChatGPT с главного экрана браузера: добавьте готовый набор OpenAI / ChatGPT. Браузер при этом не должен иметь правило «Напрямую».", fontSize = 11.sp, lineHeight = 15.sp, color = MaterialTheme.colorScheme.secondary, modifier = Modifier.padding(bottom = 8.dp))
                     val visible = apps.filter { (!onlySelected || assignments[it.packageName] == vpn) && (it.label.contains(search, true) || it.packageName.contains(search, true)) }
                     LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("app-list"), verticalArrangement = Arrangement.spacedBy(3.dp)) {
@@ -105,7 +105,7 @@ fun installedApps(context: Context): List<InstalledApp> = context.packageManager
                                 Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
                                     Text(app.label, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     Text(app.packageName, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                    if (app.webDomain.isNotEmpty()) Text("Веб-приложение · правило сайта ${app.webDomain}", fontSize = 10.sp, color = MaterialTheme.colorScheme.secondary)
+                                    if (app.webDomain.isNotEmpty()) Text("Веб-приложение · использует сеть своего браузера", fontSize = 10.sp, color = MaterialTheme.colorScheme.secondary)
                                     if (manageRules && assignments.containsKey(app.packageName) && !checked) Text(if (vpn) "Сейчас: напрямую" else "Сейчас: через VPN", fontSize = 10.sp, color = MaterialTheme.colorScheme.secondary)
                                 }
                                 Checkbox(checked, onCheckedChange = null)

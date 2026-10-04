@@ -3,7 +3,7 @@ package com.bebekon.vpn
 import org.json.JSONObject
 
 object CoreConfig {
-    fun build(state: SavedState, geo: (String) -> JSONObject, tunnel: Boolean = true): String {
+    fun build(state: SavedState, geo: (String) -> JSONObject, tunnel: Boolean = true, policy: AppTunnelPolicy = appTunnelPolicy(state)): String {
         val node = state.selectedNode ?: error("Выберите сервер")
         require(node.unsupported.isEmpty()) { node.unsupported }
         val vpn = node.config.also { it.put("tag", "vpn"); it.put("domain_resolver", "direct-dns"); it.put("connect_timeout", "4s") }
@@ -26,14 +26,13 @@ object CoreConfig {
         }
         // The app-only TUN contains selected UIDs only. DNS from Android's resolver and isolated
         // app processes can lack package metadata: they must still use the selected VPN outbound.
-        val defaultVpn = state.preferences.routing == RoutingMode.ALL || appTunnelPolicy(state).appOnly
+        val defaultVpn = state.preferences.routing == RoutingMode.ALL || policy.appOnly
         val route = json("rules" to array(rules), "final" to if (defaultVpn) "vpn" else "direct", "auto_detect_interface" to true, "default_domain_resolver" to "direct-dns", "rule_set" to array(sets.values))
         val resolver = state.preferences.dnsResolver
-        val appDnsViaVpn = state.preferences.routing == RoutingMode.RULES && effectiveAppRules(state.rules).any { it.value }
         val dns = json("servers" to array(listOf(
             json("type" to "https", "tag" to "direct-dns", "server" to resolver.address, "server_port" to 443, "path" to "/dns-query", "tls" to json("enabled" to true, "server_name" to resolver.hostname)),
             json("type" to "https", "tag" to "vpn-dns", "server" to resolver.address, "server_port" to 443, "path" to "/dns-query", "tls" to json("enabled" to true, "server_name" to resolver.hostname), "detour" to "vpn")
-        )), "rules" to array(dnsRules), "final" to if (defaultVpn || appDnsViaVpn) "vpn-dns" else "direct-dns", "strategy" to "prefer_ipv4", "reverse_mapping" to true)
+        )), "rules" to array(dnsRules), "final" to if (defaultVpn) "vpn-dns" else "direct-dns", "strategy" to "prefer_ipv4", "reverse_mapping" to true)
         return json("log" to json("disabled" to !(BuildConfig.DEBUG && node.host == "10.0.2.2"), "level" to "debug"), "dns" to dns, "inbounds" to array(if (tunnel) listOf(json("type" to "tun", "tag" to "tun", "address" to array(listOf("172.19.0.1/30", "fdfe:dcba:9876::1/126")), "mtu" to state.preferences.mtu, "auto_route" to true, "strict_route" to true, "stack" to "gvisor")) else emptyList()), "outbounds" to array(listOf(vpn, json("type" to "direct", "tag" to "direct"))), "route" to route, "experimental" to json("clash_api" to json())).toString()
     }
     fun validateRule(r: Rule) {

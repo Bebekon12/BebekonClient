@@ -26,13 +26,22 @@ class RoutingPolicyTest {
         assertEquals(120, history.down.size); assertEquals(30L, history.down.first()); assertEquals(130L, history.totalDown)
         assertEquals("1.500 ГБ", trafficGb(1_500_000_000))
     }
-    @Test fun mixedSitesKeepTunnelButExplicitDirectAppsBypassIt() {
+    @Test fun siteRulesMustNotCaptureUnselectedApps() {
         val s = state(listOf(app("com.yandex.browser", false), app("com.openai.chatgpt"), Rule(name = "Site", kind = RuleKind.DOMAIN, values = listOf("example.com"))))
         val policy = appTunnelPolicy(s)
-        assertNull(policy.allowed); assertEquals(setOf("com.yandex.browser"), policy.excluded)
+        assertEquals(setOf("com.openai.chatgpt"), policy.allowed)
+        assertFalse("Unchecked Gosuslugi keeps the physical network", "ru.minsvyaz.gosuslugi" in policy.allowed!!)
         val config = JSONObject(CoreConfig.build(s, { error("No geo") }))
-        assertEquals("direct", config.getJSONObject("route").getString("final"))
+        assertEquals("vpn", config.getJSONObject("route").getString("final"))
         assertEquals("vpn-dns", config.getJSONObject("dns").getString("final"))
+        val shared = s.copy(preferences = s.preferences.copy(sitesInAllApps = true))
+        assertNull(appTunnelPolicy(shared).allowed)
+        assertEquals(setOf("com.yandex.browser"), appTunnelPolicy(shared).excluded)
+        val sharedConfig = JSONObject(CoreConfig.build(shared, { error("No geo") }))
+        assertEquals("direct", sharedConfig.getJSONObject("route").getString("final"))
+        assertEquals("Unmatched sites retain direct DNS in shared site mode", "direct-dns", sharedConfig.getJSONObject("dns").getString("final"))
+        val dnsApps = sharedConfig.getJSONObject("dns").getJSONArray("rules").objects().first { it.has("package_name") && "com.openai.chatgpt" in it.getJSONArray("package_name").strings() }
+        assertEquals("vpn-dns", dnsApps.getString("server"))
     }
     @Test fun emptySelectionIsExplicitAndNewestAppActionWins() {
         assertEquals(emptySet<String>(), appTunnelPolicy(state(emptyList())).allowed)
@@ -42,7 +51,7 @@ class RoutingPolicyTest {
     }
     @Test fun oldPreferencesAndNewSettingsRoundTrip() {
         assertEquals(Preferences(), Preferences.fromJson(JSONObject()))
-        val p = Preferences(mapLocation = false, dnsResolver = DnsResolver.GOOGLE, mtu = 1280, connectionNotifications = false, checkUpdates = false)
+        val p = Preferences(mapLocation = false, dnsResolver = DnsResolver.GOOGLE, mtu = 1280, connectionNotifications = false, checkUpdates = false, sitesInAllApps = true)
         assertEquals(p, Preferences.fromJson(p.toJson()))
         val c = JSONObject(CoreConfig.build(state(emptyList()).copy(preferences = p), { error("No geo") }))
         assertEquals(1280, c.getJSONArray("inbounds").getJSONObject(0).getInt("mtu"))
@@ -53,9 +62,24 @@ class RoutingPolicyTest {
         val resolved = resolveWebAppRules(s) { if (it == "org.chromium.webapk.chatgpt") WebApp("chatgpt.com", "com.yandex.browser") else null }
         assertEquals(RuleKind.DOMAIN, resolved.rules.single().kind)
         assertEquals(listOf("chatgpt.com"), resolved.rules.single().values)
-        assertFalse(appTunnelPolicy(resolved).appOnly)
+        val policy = resolveWebAppPolicy(s) { if (it == "org.chromium.webapk.chatgpt") WebApp("chatgpt.com", "com.yandex.browser") else null }
+        assertEquals(setOf("com.yandex.browser"), policy.allowed)
+        assertFalse("Other apps must not be captured by WebAPK conversion", "ru.minsvyaz.gosuslugi" in policy.allowed!!)
         val excludedBrowser = s.copy(rules = s.rules + app("com.yandex.browser", false))
         assertTrue(runCatching { resolveWebAppRules(excludedBrowser) { if (it.startsWith("org.chromium.webapk")) WebApp("chatgpt.com", "com.yandex.browser") else null } }.isFailure)
+    }
+    @Test fun appOnlyAndSitesOnlyRemainDistinctWithPresetsAndExceptions() {
+        val site = Rule(name = "Preset", kind = RuleKind.GEOSITE, values = listOf("openai"))
+        val selected = state(listOf(app("com.openai.chatgpt"), site))
+        assertEquals(setOf("com.openai.chatgpt"), appTunnelPolicy(selected).allowed)
+        assertNull(appTunnelPolicy(state(listOf(site))).allowed)
+        assertEquals(setOf("com.yandex.browser"), appTunnelPolicy(state(listOf(site, app("com.yandex.browser", false)))).excluded)
+    }
+    @Test fun pingResultsRiseAbovePendingNodesWithoutChangingSelectionOrSourceOrder() {
+        val nodes = (0..3).map { Node("$it", "$it", "{}") }
+        val results = mapOf("0" to PingResult(failed = true), "1" to PingResult(millis = 550), "2" to PingResult(millis = 120))
+        assertEquals(listOf("2", "1", "0", "3"), nodesByPing(nodes, results).map { it.id })
+        assertEquals(listOf("0", "1", "2", "3"), nodes.map { it.id })
     }
     @Test fun locationMustHaveValidRealCoordinates() {
         assertEquals(OriginPoint(37.6f, 55.7f, "RU"), parseOrigin("{\"success\":true,\"longitude\":37.6,\"latitude\":55.7,\"country_code\":\"RU\"}"))

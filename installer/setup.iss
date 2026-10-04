@@ -7,7 +7,7 @@
 [Setup]
 AppId={{31857247-067C-4DC1-BA47-44F01A87B70D}
 AppName=Bebekon VPN
-AppVersion=0.1.17
+AppVersion=0.1.18
 AppPublisher=Bebekon
 DefaultDirName={autopf}\Bebekon VPN
 DefaultGroupName=Bebekon VPN

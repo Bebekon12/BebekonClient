@@ -57,6 +57,7 @@ internal static class SmokeHarness
         await CheckWindowRestorationAsync(window, vm, report);
         await ConnectionChecks.RunAsync(Path.Combine(Root, "connection-regression"));
         await CheckStaleLatencyAsync(report);
+        await CheckLiveLatencySortingAsync(report);
         report.Add("Connection regressions: stable refreshed selection; coalesced rule edits; stable beyond 5 seconds; stale recovery ignored; manual off/cancel wins; edits during startup applied; traffic directions and units; XHTTP reaches helper.");
         vm.Go("Servers"); vm.LatencyIndex = 0; vm.LatencyIndex = 1; vm.LatencyIndex = 2; vm.LatencyIndex = 3; vm.LatencyIndex = 0; vm.CancelPing.Execute(null); vm.Go("Home");
         await Task.Delay(400);
@@ -68,6 +69,7 @@ internal static class SmokeHarness
         {
             vm.Go(page); await vm.StopScansAsync(); await Task.Delay(300); window.UpdateLayout();
             foreach (var (node, ms) in vm.Data.Servers.Zip(new long?[] { 25, 125, 310, 68, 91, 165, 240, null, 80 })) { node.LatencyMs = ms; node.Latency = ms is null ? "—" : ms + " ms"; }
+            vm.RefreshServers(); await Task.Delay(50);
             window.UpdateLayout();
             CheckGeometry(window, page);
             if (page == "Servers" && Descendants(window).OfType<FlagView>().Count(flag => flag.IsVisible) != vm.Data.Servers.Count) throw new InvalidOperationException("Odd server lists must not render an empty card.");
@@ -462,8 +464,8 @@ internal static class SmokeHarness
         }
         if (page == "Servers")
         {
-            var values = Descendants(window).OfType<TextBlock>().Where(t => t.DataContext is Server && t.Text.EndsWith(" ms")).ToArray();
-            if (values.Length != 8) throw new InvalidOperationException("Latency fixtures must actually be rendered.");
+            var values = Descendants(window).OfType<TextBlock>().Where(t => t.IsVisible && t.DataContext is Server && t.Text.EndsWith(" ms")).DistinctBy(t => ((Server)t.DataContext).Id).ToArray();
+            if (values.Length != 8) { Capture(window, "Servers-Geometry-Failure"); throw new InvalidOperationException($"Latency fixtures must actually be rendered: {values.Length} values."); }
             foreach (var value in values)
             {
                 var server = (Server)value.DataContext; var key = LatencyDisplay.Quality(server.LatencyMs) switch { LatencyQuality.Good => "PingGood", LatencyQuality.Moderate => "PingModerate", _ => "PingPoor" };
@@ -511,6 +513,25 @@ internal static class SmokeHarness
         while (!vm.PingServer.CanExecute(null)) await Task.Delay(10, deadline.Token);
         if (replacement.LatencyMs != 41) throw new InvalidOperationException("A retained active server removed from a subscription must still allow manual ping.");
         report.Add("Controlled latency races: GET → HEAD → GET and replaced nodes reject stale results; retained selected node can still be measured.");
+    }
+    private static async Task CheckLiveLatencySortingAsync(List<string> report)
+    {
+        var store = new StateStore(Path.Combine(Root, "live-ping-regression"));
+        var data = new AppState();
+        var slow = new Server { Name = "A pending", Host = "127.0.0.1", Port = 9 };
+        var fast = new Server { Name = "Z fast", Host = "127.0.0.1", Port = 9 };
+        data.Servers.Add(slow); data.Servers.Add(fast); data.SelectedServerId = slow.Id; store.Save(data);
+        var results = new Dictionary<string, TaskCompletionSource<LatencyResult>> { [slow.Id] = new(), [fast.Id] = new() };
+        using var vm = new MainViewModel(store, new ServiceClient(), null, (node, _, _, _, _) => results[node.Id].Task);
+        vm.ListMode = true; vm.SortIndex = 1; vm.PingAll.Execute(null);
+        results[fast.Id].SetResult(new(42, LatencyMode.HttpsGet, DateTimeOffset.UtcNow));
+        await Task.Delay(250);
+        if (!vm.Scanning || vm.ServerRows[0].Left.Id != fast.Id || vm.SelectedServer?.Id != slow.Id)
+            throw new InvalidOperationException("Green probes must rise during a running scan without changing the selected server.");
+        results[slow.Id].SetResult(new(null, LatencyMode.HttpsGet, DateTimeOffset.UtcNow, true));
+        await vm.StopScansAsync();
+        if (vm.ServerRows[0].Left.Id != fast.Id) throw new InvalidOperationException("Timeouts must stay below successful probes.");
+        report.Add("Live ping sorting: completed green server rises while other probes remain pending; selected server remains unchanged.");
     }
     private static async Task CheckHomeVirtualizationAsync(MainWindow window, MainViewModel vm, List<string> report)
     {

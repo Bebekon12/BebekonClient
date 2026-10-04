@@ -12,7 +12,7 @@ public sealed class LatencyService(string executable)
 {
     private readonly ConcurrentDictionary<string, LatencyResult> cache = new();
     private readonly SemaphoreSlim fastLimit = new(6);
-    private readonly SemaphoreSlim exactLimit = new(2);
+    private readonly SemaphoreSlim exactLimit = new(6);
     public static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(5);
     public async Task<LatencyResult> MeasureAsync(Server server, LatencyMode mode, bool force, CancellationToken ct, Action? started = null)
     {
@@ -80,23 +80,24 @@ public sealed class LatencyService(string executable)
         var spec = new ConnectSpec(server, new(), new(), FreePort(), Convert.ToHexString(RandomNumberGenerator.GetBytes(24)));
         try
         {
-            using var core = new CoreSession(executable, new(Paths.Logs, "core")); await core.StartAsync(spec, root, true, ct);
-            using var http = ProbeClient(spec); http.Timeout = Timeout.InfiniteTimeSpan;
-            return await MeasureHttpAsync(http, method, ct);
+            // Startup and child-process shutdown can wait on the OS. Keep both off the
+            // WPF dispatcher so completed results, map motion and Cancel remain responsive.
+            return await Task.Run(async () => {
+                using var core = new CoreSession(executable, new(Paths.Logs, "core")); await core.StartAsync(spec, root, true, ct).ConfigureAwait(false);
+                using var http = ProbeClient(spec); http.Timeout = Timeout.InfiniteTimeSpan;
+                return await MeasureHttpAsync(http, method, ct).ConfigureAwait(false);
+            }, ct).ConfigureAwait(false);
         }
         finally { Directory.Delete(root, true); }
     }
     internal static async Task<long> MeasureHttpAsync(HttpClient http, HttpMethod method, CancellationToken ct)
     {
-        var times = new List<long>();
-        for (var i = 0; i < 3; i++)
-        {
-            var sw = Stopwatch.StartNew();
-            using var request = new HttpRequestMessage(method, "https://www.gstatic.com/generate_204");
-            using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
-            response.EnsureSuccessStatusCode(); times.Add(sw.ElapsedMilliseconds);
-        }
-        times.Sort(); return times[1];
+        // Measure one complete, cold request, as on Android. Repeating requests both slows
+        // a large scan and reports a warm HTTP connection rather than initial VPN access.
+        var sw = Stopwatch.StartNew();
+        using var request = new HttpRequestMessage(method, "https://www.gstatic.com/generate_204");
+        using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+        response.EnsureSuccessStatusCode(); return sw.ElapsedMilliseconds;
     }
     public static HttpClient ProbeClient(ConnectSpec spec) => new(new SocketsHttpHandler { Proxy = new WebProxy("socks5://127.0.0.1:" + spec.ProbePort) { Credentials = new NetworkCredential("bebekon", spec.ProbePassword) }, UseProxy = true, AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(4) };
     public static async Task<string> VpnIpAsync(ConnectSpec spec, CancellationToken ct)

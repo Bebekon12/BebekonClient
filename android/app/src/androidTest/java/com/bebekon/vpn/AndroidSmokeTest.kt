@@ -181,6 +181,20 @@ class AndroidSmokeTest {
         }
         reloadRules(listOf(com.bebekon.vpn.Rule(name = "Chrome", kind = RuleKind.APP, values = listOf("com.android.chrome"))))
         verifyOtherAppTraffic(expectVpn = false)
+        // Stored app-only rules can become domain rules at runtime for recognizable WebAPKs.
+        // That conversion previously widened the VPN to every unselected Android UID.
+        assertEquals("com.android.chrome", webApp(context, "com.bebekon.webapkfixture")?.browser)
+        reloadRules(listOf(com.bebekon.vpn.Rule(name = "Web app", kind = RuleKind.APP, values = listOf("com.bebekon.webapkfixture"))))
+        verifyOtherAppTraffic(expectVpn = false)
+        reloadRules(listOf(com.bebekon.vpn.Rule(name = "Web app", kind = RuleKind.APP, values = listOf("com.bebekon.webapkfixture")), com.bebekon.vpn.Rule(name = "Native app", kind = RuleKind.APP, values = listOf("com.bebekon.vpn.test"))))
+        verifyOtherAppTraffic(); verifyOtherAppTraffic(stream = true)
+        // Regression: adding a preset/site to an app selection must not put unchecked apps
+        // into the VPN network (the Yandex/Gosuslugi report). Probe from a separate UID.
+        reloadRules(listOf(com.bebekon.vpn.Rule(name = "Chrome", kind = RuleKind.APP, values = listOf("com.android.chrome")), com.bebekon.vpn.Rule(name = "VPN site", kind = RuleKind.DOMAIN, values = listOf("example.com"))))
+        verifyOtherAppTraffic(expectVpn = false)
+        val domain = com.bebekon.vpn.Rule(name = "VPN site", kind = RuleKind.DOMAIN, values = listOf("example.com"))
+        reloadRules(listOf(com.bebekon.vpn.Rule(name = "Selected app", kind = RuleKind.APP, values = listOf("com.bebekon.vpn.test")), domain))
+        verifyOtherAppTraffic(); verifyOtherAppTraffic(stream = true)
         reloadRules(listOf(com.bebekon.vpn.Rule(name = "Selected app", kind = RuleKind.APP, values = listOf("com.bebekon.vpn.test"))))
         verifyOtherAppTraffic(); verifyOtherAppTraffic(stream = true)
         assertTrue("Session volume survives native counter reloads", VpnController.session.value.totalDown >= firstBytes)

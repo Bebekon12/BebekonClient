@@ -22,6 +22,7 @@ class Interfaces(private val values: List<NetworkInterface>) : NetworkInterfaceI
 }
 class AndroidPlatform(private val context: Context, private val vpn: BebekonVpnService? = null) : PlatformInterface {
     var tunnelState: SavedState? = null
+    var tunnelPolicy: AppTunnelPolicy? = null
     private val connectivity = context.getSystemService(ConnectivityManager::class.java)
     private val monitors = ConcurrentHashMap<InterfaceUpdateListener, ConnectivityManager.NetworkCallback>()
     @Volatile var descriptor: ParcelFileDescriptor? = null
@@ -36,7 +37,7 @@ class AndroidPlatform(private val context: Context, private val vpn: BebekonVpnS
         val dns = options.dnsServerAddress; while (dns.hasNext()) builder.addDnsServer(dns.next())
         fun routes(iterator: RoutePrefixIterator) { while (iterator.hasNext()) { val p = iterator.next(); builder.addRoute(p.address(), p.prefix()) } }
         routes(options.inet4RouteRange); routes(options.inet6RouteRange)
-        val policy = appTunnelPolicy(tunnelState ?: context.repo.state.value)
+        val policy = tunnelPolicy ?: appTunnelPolicy(tunnelState ?: context.repo.state.value)
         if (policy.appOnly) {
             var included = 0
             policy.allowed!!.filterNot { it == context.packageName }.forEach { pkg ->
@@ -51,6 +52,7 @@ class AndroidPlatform(private val context: Context, private val vpn: BebekonVpnS
         }
         val fd = builder.establish() ?: error("Разрешение на VPN отозвано")
         descriptor?.close(); descriptor = fd
+        context.repo.log(if (policy.appOnly) "Android: туннель только для выбранных приложений (${policy.allowed!!.size}); остальные используют обычную сеть" else "Android: общий туннель, исключений приложений: ${policy.excluded.size}")
         return fd.fd
     }
     override fun useProcFS() = false

@@ -91,15 +91,18 @@ class BebekonVpnService : VpnService(), CommandServerHandler {
         if (!reload && attempt == 0) { downTotal = TrafficTotals(); upTotal = TrafficTotals() }
         var validConfig = false
         try {
-            val saved = resolveWebAppRules(repo.state.value) { webApp(this, it) }; val node = saved.selectedNode ?: error("Добавьте подписку и выберите сервер")
-            val policy = appTunnelPolicy(saved)
+            val original = repo.state.value
+            val identify: (String) -> WebApp? = { webApp(this, it) }
+            val policy = resolveWebAppPolicy(original, identify)
+            val saved = resolveWebAppRules(original, identify); val node = saved.selectedNode ?: error("Добавьте подписку и выберите сервер")
             check(!isLockdownEnabled || !policy.appOnly && policy.excluded.isEmpty()) { "Android блокирует приложения вне VPN. Отключите «Блокировать соединения без VPN» в системных настройках или выберите «Весь трафик»" }
             NativeCore.setup(this)
-            val config = CoreConfig.build(saved, repo::geo); Libbox.checkConfig(config)
+            val config = CoreConfig.build(saved, repo::geo, policy = policy); Libbox.checkConfig(config)
             validConfig = true
             VpnController.publish(this) { if (reload) it.copy(phase = Phase.RECONNECTING, message = "Применение правил…") else it.copy(phase = Phase.STARTING, server = node.name) }
             if (server == null) { platform = AndroidPlatform(this, this); server = CommandServer(this, platform).also { it.start() } }
             platform!!.tunnelState = saved
+            platform!!.tunnelPolicy = policy
             // The serialized executor owns all native service changes; refresh never selects another node.
             client?.disconnect(); client = null
             server!!.startOrReloadService(config, OverrideOptions())

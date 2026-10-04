@@ -13,6 +13,7 @@ public sealed class CoreProcess : IDisposable
     private Process? process;
     private readonly object stopGate = new();
     private IntPtr job;
+    private bool assignedToJob;
     private bool disposed;
     private TaskCompletionSource ready = NewReady();
     public event Action? Exited;
@@ -48,6 +49,7 @@ public sealed class CoreProcess : IDisposable
         process.OutputDataReceived += OnOutput; process.ErrorDataReceived += OnOutput;
         process.Start();
         if (!Native.AssignProcessToJobObject(job, process.Handle)) { Stop(); throw new UserError("Не удалось привязать процесс ядра."); }
+        assignedToJob = true;
         process.BeginOutputReadLine(); process.BeginErrorReadLine();
         }
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct); timeout.CancelAfter(TimeSpan.FromSeconds(15));
@@ -71,10 +73,12 @@ public sealed class CoreProcess : IDisposable
     }
     public void Stop()
     {
-        Process? child; IntPtr ownedJob;
-        lock (stopGate) { child = process; process = null; ownedJob = job; job = IntPtr.Zero; }
-        if (ownedJob != IntPtr.Zero) Native.CloseHandle(ownedJob);
-        if (child is not null) { try { if (!child.HasExited) { child.Kill(true); child.WaitForExit(5000); } } catch (InvalidOperationException) { } child.Dispose(); }
+        Process? child; IntPtr ownedJob; bool assigned;
+        lock (stopGate) { child = process; process = null; ownedJob = job; job = IntPtr.Zero; assigned = assignedToJob; assignedToJob = false; }
+        var jobClosed = ownedJob != IntPtr.Zero && Native.CloseHandle(ownedJob);
+        // KILL_ON_JOB_CLOSE already terminates the entire owned tree. Enumerating all OS
+        // processes again with Kill(true) is expensive during parallel latency checks.
+        if (child is not null) { try { if (!child.HasExited) { if (!jobClosed || !assigned) child.Kill(true); child.WaitForExit(5000); } } catch (InvalidOperationException) { } child.Dispose(); }
     }
     public void Dispose() { lock (stopGate) disposed = true; Stop(); }
     private static class Native
