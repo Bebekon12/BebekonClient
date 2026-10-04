@@ -1,4 +1,4 @@
-param([string]$InnoCompiler, [switch]$SkipInstaller, [string]$PublishFolder = 'artifacts\release', [string]$UpdateFeedUrl = 'https://github.com/Bebekon12/BebekonClient/releases/latest/download/update.json', [string]$InstallerUrl, [string]$ReleaseNotes = 'Добавлены VMess, Shadowsocks / 2022, Trojan, Hysteria 1/2 и VLESS XHTTP. Импорт ссылок, Base64, Clash/Mihomo, Xray и sing-box JSON; улучшена стабильность запуска и отмены.')
+param([string]$InnoCompiler, [switch]$SkipInstaller, [string]$PublishFolder = 'artifacts\release', [string]$UpdateFeedUrl = 'https://github.com/Bebekon12/BebekonClient/releases/latest/download/update.json', [string]$InstallerUrl, [string]$ReleaseNotes = 'Улучшена совместимость отрисовки окна и восстановление из трея. Непрозрачный фон, сохранение развёрнутого состояния; снеговик на главной теперь в той же шляпе, что и логотип.')
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $projectRoot = $PSScriptRoot

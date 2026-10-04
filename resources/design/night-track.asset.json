@@ -1,19 +1,20 @@
 {
   "asset": "night-track.png",
   "generator": "Built-in image_gen.imagegen",
-  "created": "2026-10-03",
-  "usage": "Embedded hero illustration for the selected Night Track design; all labels, controls and graphs are native WPF elements.",
+  "created": "2026-10-04",
+  "usage": "Embedded Night Track home hero; controls, labels and graphs remain native WPF.",
+  "edit": "Add only the same dark navy fedora/trilby from the existing logo to the hero snowman; preserve composition, pose, blue/white palette and background.",
   "references": [
     {
-      "role": "User-selected design concept #3, generated in this conversation",
-      "source": "exec-4b51208d-1c13-41e1-95d4-4e77070e9379.png"
+      "role": "Edit target: existing Night Track hero",
+      "source": "night-track.png (previous revision)"
     },
     {
-      "role": "Existing Bebekon snowman mascot",
+      "role": "Hat reference: existing Bebekon logo",
       "source": "../icons/snowman.png"
     }
   ],
-  "prompt": "Use case: illustration-story / product UI asset. Create a NEW standalone panoramic background illustration for the hero panel of Bebekon VPN, inspired by the supplied references. Image 1 is a style/composition reference of the selected dark dashboard; Image 2 is the exact brand snowman mascot reference. Output only illustration, absolutely NO text, letters, UI controls, panels, borders, logos, watermarks or typography. Very wide 3:1 horizontal image, about 1536x512. The leftmost 45% is calm, nearly uniform midnight navy #0C1729 negative space for live UI text; transition subtly into the scene on the right. On the right half: the friendly white snowman from Image 2 wearing navy-blue sporty sunglasses and a flowing bright-blue scarf, smiling, leaning forward running toward the right, entire compact figure and feet visible, occupying about 36% of the total image height and positioned around 79% of image width. A luminous icy-blue curving road/track winds from background mountains toward the lower right foreground; subdued dark blue angular alpine mountains and silhouettes of conifers, snow mist and small blue speed streaks. Match the beautifully restrained premium 3D-illustrated snow-and-speed aesthetic of the hero in Image 1, but use the exact white/blue snowman colors from Image 2 including blue nose. No orange accents, no violet, no huge full-screen glow. Keep edges dark, enough safe margin that image cropping in a resizable desktop panel will not cut off the snowman. Beautiful cool blue illumination, realistic depth but clean simplified forms. The art will be placed behind editable WPF controls; do not bake any words or screen information into it.",
+  "prompt": "Use case: precise-object-edit. Asset type: existing panoramic WPF VPN home hero illustration. Image 1 is the EDIT TARGET, the existing very wide Night Track scene. Image 2 is ONLY a supporting reference for the exact hat already on the app logo. Change ONLY one thing in Image 1: add the same dark navy short-crowned fedora/trilby, with pinched crown, dark ribbon and curved brim with cool blue edge highlights from Image 2, naturally on the running snowman's head. Match its angle and scale to that existing snowman's smaller head. Preserve Image 1's exact 3:1 panoramic framing, snowman's running pose, proportions and location, face, sporty blue sunglasses, blue nose, smile, white snowy body, bright blue flowing scarf, arms, feet, buttons, icy road, speed streaks, mountains, trees, lighting, and midnight-blue palette. Do not replace the mascot or scene with Image 2. Keep the left 45% empty dark navy for live UI text. Leave generous safe margin above the hat. NO text, UI, watermark, border or additional accessories. Keep all pixels outside the local hat edit as close to Image 1 as possible. Output a full opaque PNG, 3:1 width-to-height, preserving the original 2172x724 composition.",
   "output": {
     "width": 2172,
     "height": 724,

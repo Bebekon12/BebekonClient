@@ -12,3 +12,5 @@ The hero is embedded from `resources/design/night-track.png` and decoded to 1536
 
 The WPF smoke harness renders disconnected, connecting, connected and error states, English and minimum-window layouts, all pages and the shared dialogs. Its fixtures use isolated storage and do not install or connect a live VPN.
 Rules show newest entries first without changing execution priority. The priority view retains drag reordering; entries without a creation timestamp retain their relative legacy priority. The [client review](CLIENT-REVIEW.md) records the source-backed behavior decisions. Settings uses the shared regular gear geometry, and the 76px sidebar keeps its logo/glow and status badge within bounds.
+
+Version 0.1.15 adds the same dark navy trilby to the hero snowman, preserving the illustration's scene, composition and white/blue palette. WPF uses process-local software rendering from startup for the dashboard and dialogs to avoid dependence on a GPU surface when restoring the window. The root client-area surface has an explicit opaque theme background. The tray Open action preserves maximized state and requests repaint after showing the window.

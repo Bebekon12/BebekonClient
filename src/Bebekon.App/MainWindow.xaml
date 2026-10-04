@@ -1,6 +1,6 @@
 <Window x:Class="Bebekon.App.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="clr-namespace:Bebekon.App" xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework" Title="Bebekon VPN" Width="1160" Height="840" MinWidth="860" MinHeight="660" WindowStyle="None" ResizeMode="CanResize" Background="{DynamicResource Background}" Foreground="{DynamicResource Text}" FontFamily="Segoe UI" WindowStartupLocation="CenterScreen" UseLayoutRounding="True" SnapsToDevicePixels="True">
  <shell:WindowChrome.WindowChrome><shell:WindowChrome CaptionHeight="36" ResizeBorderThickness="6" CornerRadius="0" GlassFrameThickness="0"/></shell:WindowChrome.WindowChrome>
- <Grid>
+ <Grid x:Name="WindowSurface" Background="{DynamicResource Background}">
  <Grid x:Name="AppSurface"><Grid.Style><Style TargetType="Grid"><Style.Triggers><DataTrigger Binding="{Binding UpdateOverlayOpen}" Value="True"><Setter Property="IsEnabled" Value="False"/><Setter Property="Effect"><Setter.Value><BlurEffect Radius="5" RenderingBias="Performance"/></Setter.Value></Setter></DataTrigger></Style.Triggers></Style></Grid.Style>
   <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
   <Border x:Name="SidebarHost" Width="200" ClipToBounds="True" Background="{DynamicResource Sidebar}" BorderBrush="{DynamicResource Border}" BorderThickness="0,0,1,0">

@@ -104,6 +104,13 @@ Version 0.1.8 adds 15 update tests (150 total): signed local feed and package do
 - Published WPF smoke passes all pages/dialogs and existing connection regressions, including XHTTP reaching the helper and mixed-protocol server labels at minimum size. Live existing-provider regression: 14 Snow nodes validated and node 2 returned forced-VPN HTTPS HTTP 204 in 582 ms; nine Ultima nodes validated and node 1 gRPC/Reality returned HTTP 204 in 437 ms. Private URLs/credentials remain excluded.
 - Native TCP/UDP and XHTTP tests are isolated loopback fixtures, not measurements of arbitrary external providers or physical TUN. Installer/UAC and privileged TUN acceptance remain pending below.
 
+## Version 0.1.15 — 2026-10-04
+
+- The reported transparent/empty window was not independently reproduced. The installed binary was 0.1.12, and recent application logs contained no matching rendering exception. GPU/compositor trouble is a working hypothesis, not a confirmed driver diagnosis. The candidate selects WPF software rendering before creating windows and gives the root client area an opaque theme background.
+- Release UI smoke passed 16 restore cycles through the actual tray Open command after Hide, Minimize, Close-to-tray and Maximized, with animations on/off and normal/OLED backgrounds. Sampled client-area alpha coverage remained 255; maximizing survives tray restoration. These render fixtures cannot prove a particular external GPU failure is eliminated.
+- The Night Track hero now includes the same navy hat as the application mascot. Connected Home renders were visually inspected; the scene, left text area and minimum-size layout remain intact.
+- Installer/UAC/TUN acceptance remains pending below.
+
 ## Required manual acceptance — pending
 
 Version 0.1.9 changes the bundled update channel to GitHub Releases with a version-specific installer URL. The existing signed-update tests and published UI smoke suite are rerun for this release; the smoke checks the candidate local manifest before public release. Post-publication checks must verify the public latest feed, RSA signature, asset sizes and installer hash.

@@ -6,6 +6,9 @@ public partial class App : Application
     private Mutex? single;
     protected override async void OnStartup(StartupEventArgs e)
     {
+        // A failed GPU surface can leave only the DWM frame visible after restore.
+        // Use the WPF software pipeline for this small 2D dashboard and its dialogs.
+        System.Windows.Media.RenderOptions.ProcessRenderMode = System.Windows.Interop.RenderMode.SoftwareOnly;
         base.OnStartup(e);
         var smoke = e.Args.Contains("--smoke");
         single = new(true, @"Local\BebekonVPN." + System.Security.Principal.WindowsIdentity.GetCurrent().User!.Value + (smoke ? ".Smoke" : ""), out var first);

@@ -51,6 +51,7 @@ internal static class SmokeHarness
         await Task.Delay(400); var report = new List<string> { "Startup selects TUN after a saved proxy session." };
         CheckTrayMenu(window, vm, report);
         await CheckCaptionButtonsAsync(window, vm, report);
+        await CheckWindowRestorationAsync(window, vm, report);
         await ConnectionChecks.RunAsync(Path.Combine(Root, "connection-regression"));
         await CheckStaleLatencyAsync(report);
         report.Add("Connection regressions: stable refreshed selection; coalesced rule edits; stable beyond 5 seconds; stale recovery ignored; manual off/cancel wins; edits during startup applied; traffic directions and units; XHTTP reaches helper.");
@@ -293,6 +294,45 @@ internal static class SmokeHarness
         window.Show();
         vm.Settings.MinimizeToTray = minimizeToTray;
         report.Add("Caption buttons: hit areas, minimize, maximize/restore icon and labels, language and close-to-tray behavior passed.");
+    }
+    private static async Task CheckWindowRestorationAsync(MainWindow window, MainViewModel vm, List<string> report)
+    {
+        var originalMotion = vm.AnimationsEnabled; var originalBlack = vm.PureBlack;
+        var surface = (Grid)window.FindName("WindowSurface");
+        var width = window.Width; var height = window.Height;
+        var paths = new[] { "Hide", "Minimize", "Close", "Maximized" };
+        var closeToTray = vm.Settings.MinimizeToTray; vm.Settings.MinimizeToTray = true;
+        try
+        {
+            foreach (var motion in new[] { false, true })
+            foreach (var black in new[] { false, true })
+            foreach (var path in paths)
+            {
+                vm.AnimationsEnabled = motion; vm.PureBlack = black;
+                if (path == "Minimize") window.WindowState = WindowState.Minimized;
+                else if (path == "Close") ((Button)window.FindName("CloseButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                else { if (path == "Maximized") window.WindowState = WindowState.Maximized; window.Hide(); }
+                // Exercise the actual tray Open command, not Window.Show directly.
+                window.BuildMenu().Items[5].PerformClick();
+                await window.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ContextIdle); window.UpdateLayout();
+                if (!window.IsVisible || window.WindowState == WindowState.Minimized || window.AllowsTransparency || window.Opacity != 1 || surface.Opacity != 1)
+                    throw new InvalidOperationException("Tray restore must present an opaque visible window.");
+                if (path == "Maximized" && window.WindowState != WindowState.Maximized) throw new InvalidOperationException("Tray restore lost the maximized state.");
+                if (window.Background is not SolidColorBrush background || background.Color.A != 255 || surface.Background is not SolidColorBrush fill || fill.Color != background.Color)
+                    throw new InvalidOperationException("The window and root surface must have the same solid opaque theme background.");
+                var bitmap = new RenderTargetBitmap((int)surface.ActualWidth, (int)surface.ActualHeight, 96, 96, PixelFormats.Pbgra32); bitmap.Render(surface);
+                var stride = bitmap.PixelWidth * 4; var pixels = new byte[stride * bitmap.PixelHeight]; bitmap.CopyPixels(pixels, stride, 0);
+                for (var y = 12; y < bitmap.PixelHeight - 12; y += 24)
+                    for (var x = 12; x < bitmap.PixelWidth - 12; x += 24)
+                        if (pixels[y * stride + x * 4 + 3] != 255) throw new InvalidOperationException("Restored window has transparent client-area pixels.");
+                if (System.Windows.Media.RenderOptions.ProcessRenderMode != System.Windows.Interop.RenderMode.SoftwareOnly)
+                    throw new InvalidOperationException("Compatible rendering must be selected before any window is created.");
+                window.WindowState = WindowState.Normal;
+            }
+            Capture(window, "Window-Restored");
+            report.Add("Window restore: 16 actual tray Open cycles after Hide, Minimize, Close and Maximized; opaque pixel coverage, OLED/reduced motion and maximized state passed. Software rendering enabled for all WPF windows.");
+        }
+        finally { vm.Settings.MinimizeToTray = closeToTray; vm.AnimationsEnabled = originalMotion; vm.PureBlack = originalBlack; window.WindowState = WindowState.Normal; window.Width = width; window.Height = height; }
     }
     private static async Task CheckUpdateOverlayAsync(MainWindow window, MainViewModel vm, List<string> report)
     {
