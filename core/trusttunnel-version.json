@@ -1,0 +1,6 @@
+{
+  "version": "1.1.7",
+  "archive": "trusttunnel_client-v1.1.7-windows-x86_64.zip",
+  "sha256": "aff81ff4ebcc00d9ede7f29d0fbb56d277d784168080513074ffb8f357ad3796",
+  "source": "https://github.com/TrustTunnel/TrustTunnelClient/releases/tag/v1.1.7"
+}

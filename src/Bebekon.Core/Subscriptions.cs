@@ -56,6 +56,7 @@ public static class VlessParser
     {
         if (content.Length > 4 * 1024 * 1024) throw new UserError("Подписка слишком большая.");
         content = content.Trim().TrimStart('\uFEFF').TrimStart();
+        if (TrustTunnelParser.LooksLikeToml(content)) return TrustTunnelParser.ParseToml(content);
         if (content.StartsWith('<')) throw new UserError("Провайдер вернул веб-страницу вместо подписки. Нужна прямая ссылка на список серверов.");
         if (!ProtocolParser.IsLink(content) && !IsJson(content) && !IsYaml(content))
         {
@@ -63,12 +64,14 @@ public static class VlessParser
             catch (Exception e) when (e is FormatException or DecoderFallbackException) { throw new UserError("Неизвестный формат подписки. Поддерживаются VPN-ссылки, Base64, JSON Xray и Clash/Mihomo YAML или JSON."); }
         }
         content = content.Trim().TrimStart('\uFEFF').TrimStart();
+        if (TrustTunnelParser.LooksLikeToml(content)) return TrustTunnelParser.ParseToml(content);
         if (content.StartsWith('<')) throw new UserError("Провайдер вернул веб-страницу вместо подписки. Нужна прямая ссылка на список серверов.");
         if (IsJson(content))
         {
             try
             {
                 using var document = JsonDocument.Parse(content, new() { MaxDepth = 32, AllowTrailingCommas = true, CommentHandling = JsonCommentHandling.Skip });
+                if (TrustTunnelParser.LooksLikeJson(document.RootElement)) return TrustTunnelParser.ParseJson(document.RootElement);
                 if (document.RootElement.ValueKind == JsonValueKind.Object && document.RootElement.TryGetProperty("proxies", out _))
                     return ClashSubscriptionParser.Parse(JsonSerializer.Serialize(document.RootElement));
                 if (document.RootElement.ValueKind == JsonValueKind.Object && document.RootElement.TryGetProperty("outbounds", out var outbounds) && outbounds.ValueKind == JsonValueKind.Array && outbounds.EnumerateArray().Any(node => node.ValueKind == JsonValueKind.Object && node.TryGetProperty("type", out _))) return SingBoxSubscriptionParser.Parse(document.RootElement);
@@ -99,11 +102,27 @@ public static class SubscriptionLoader
 {
     public static readonly HttpClient Http = new(new SocketsHttpHandler { UseProxy = false, AllowAutoRedirect = false, PooledConnectionLifetime = TimeSpan.FromMinutes(5) }) { Timeout = TimeSpan.FromSeconds(20) };
     public static async Task<List<Server>> LoadAsync(string source, CancellationToken ct = default)
+        => await LoadAsync(source, ct, 0);
+    private static async Task<List<Server>> LoadAsync(string source, CancellationToken ct, int depth)
     {
+        if (depth > 3) throw new UserError("Подписка содержит циклические или слишком вложенные ссылки.");
         source = source.Trim().TrimStart('\uFEFF').TrimStart();
+        if (source.StartsWith("tt://", StringComparison.OrdinalIgnoreCase) && !source.Contains('\n') && TrustTunnelParser.SubscriptionUrl(source) is { } subscriptionUrl)
+            return await LoadAsync(subscriptionUrl, ct, depth + 1);
         if (!source.StartsWith("http://", StringComparison.OrdinalIgnoreCase) && !source.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
             return VlessParser.ParseSubscription(source);
-        if (!Uri.TryCreate(source, UriKind.Absolute, out var uri) || uri.UserInfo.Length > 0) throw new UserError("Укажите URL подписки HTTP/HTTPS без логина в адресе.");
+        if (!Uri.TryCreate(source, UriKind.Absolute, out var uri)) throw new UserError("Укажите URL подписки HTTP/HTTPS.");
+        string? authorization = null;
+        if (uri.UserInfo.Length > 0)
+        {
+            if (uri.Scheme != "https" && !uri.IsLoopback) throw new UserError("Для подписки с логином и паролем требуется HTTPS.");
+            var parts = uri.UserInfo.Split(':', 2);
+            if (parts.Length != 2) throw new UserError("Укажите логин и пароль подписки.");
+            var username = Uri.UnescapeDataString(parts[0]); var password = Uri.UnescapeDataString(parts[1]);
+            if (username.Contains(':') || !TrustTunnelConfig.Safe(username, 1024) || !TrustTunnelConfig.Safe(password, 4096)) throw new UserError("Некорректные данные авторизации подписки.");
+            authorization = Convert.ToBase64String(Encoding.UTF8.GetBytes(username + ":" + password));
+            uri = new UriBuilder(uri) { UserName = "", Password = "" }.Uri;
+        }
         // Cover headers AND the streamed body. HttpClient's header timeout alone does not bound downloads.
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
         deadline.CancelAfter(TimeSpan.FromSeconds(20));
@@ -111,6 +130,7 @@ public static class SubscriptionLoader
         {
             // Providers often choose their subscription format using the client User-Agent.
             using var request = new HttpRequestMessage(HttpMethod.Get, uri);
+            if (authorization is not null) request.Headers.Authorization = new("Basic", authorization);
             request.Headers.UserAgent.ParseAdd("clash.meta BebekonVPN/" + (typeof(SubscriptionLoader).Assembly.GetName().Version?.ToString(3) ?? "1.0"));
             if (uri.Scheme == "https" || uri.IsLoopback)
             {
@@ -137,7 +157,9 @@ public static class SubscriptionLoader
             }
             try
             {
-                var servers = VlessParser.ParseSubscription(new UTF8Encoding(false, true).GetString(output.ToArray()));
+                var content = new UTF8Encoding(false, true).GetString(output.ToArray());
+                var servers = content.Trim().StartsWith("tt://", StringComparison.OrdinalIgnoreCase) && !content.Trim().Contains('\n')
+                    ? await LoadAsync(content, deadline.Token, depth + 1) : VlessParser.ParseSubscription(content);
                 if (servers.All(server => IPAddress.TryParse(server.Host, out var address) && (address.Equals(IPAddress.Any) || address.Equals(IPAddress.IPv6Any))))
                     throw new UserError("Провайдер вернул информационные записи вместо рабочих серверов. Проверьте HWID, лимит устройств и статус подписки в кабинете провайдера.");
                 return servers;

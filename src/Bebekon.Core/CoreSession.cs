@@ -49,57 +49,118 @@ public sealed class XhttpRuntime
 public sealed class CoreSession(string executable, SafeLog log) : IDisposable
 {
     private CoreProcess? primary;
-    private CoreProcess? companion;
-    private string? primaryPath;
-    private string? companionPath;
+    private readonly List<CoreProcess> companions = [];
+    private readonly List<string> configs = [];
     private int stopping;
     private readonly object shutdownGate = new();
-    internal int? CompanionPid => companion?.Pid;
-    public bool Running => Volatile.Read(ref stopping) == 0 && primary?.Running == true && (companion is null || companion.Running);
-    public int? Pid => primary?.Pid;
+    internal int? CompanionPid { get { lock (shutdownGate) return companions.FirstOrDefault()?.Pid; } }
+    internal int[] CompanionPids { get { lock (shutdownGate) return companions.Select(c => c.Pid).OfType<int>().ToArray(); } }
+    public bool Running { get { lock (shutdownGate) return stopping == 0 && primary?.Running == true && companions.All(c => c.Running); } }
+    public int? Pid { get { lock (shutdownGate) return primary?.Pid; } }
     public event Action? Exited;
     public async Task StartAsync(ConnectSpec spec, string directory, bool probeOnly, CancellationToken ct, Func<string, string>? decorate = null)
     {
-        if (primary is not null) throw new UserError("Подключение уже запущено.");
+        lock (shutdownGate) if (primary is not null || stopping != 0) throw new UserError("Подключение уже запущено или остановлено.");
+        var starts = new List<Task>();
         try
         {
+            ct.ThrowIfCancellationRequested();
             var runtime = XhttpRuntime.Create(spec, probeOnly);
-            var config = ConfigGenerator.Generate(spec, probeOnly, runtime);
-            Directory.CreateDirectory(directory); primaryPath = Path.Combine(directory, "sing-box.json"); companionPath = Path.Combine(directory, "xray.json");
-            await File.WriteAllTextAsync(primaryPath, decorate?.Invoke(config) ?? config, ct);
-            primary = new(executable, log); primary.Exited += ChildExited;
+            var trustTunnel = TrustTunnelRuntime.Create(spec, probeOnly, runtime);
+            var config = ConfigGenerator.Generate(spec, probeOnly, runtime, trustTunnel);
+            Directory.CreateDirectory(directory);
+            var primaryPath = await WriteConfigAsync(directory, "sing-box.json", decorate?.Invoke(config) ?? config, ct);
+            var main = Own(executable, false, false, true);
             if (runtime is not null)
-            { await File.WriteAllTextAsync(companionPath, runtime.Generate(spec), ct); companion = new(Path.Combine(Path.GetDirectoryName(executable)!, "xray.exe"), log, true); companion.Exited += ChildExited; await companion.StartAsync(companionPath, ct); }
-            await primary.StartAsync(primaryPath, ct);
+            {
+                var path = await WriteConfigAsync(directory, "xray.json", runtime.Generate(spec), ct);
+                var xray = Own(Path.Combine(Path.GetDirectoryName(executable)!, "xray.exe"), true, false);
+                await xray.StartAsync(path, ct);
+            }
+            // TrustTunnel's TLS/QUIC endpoint relays must exist before it can connect.
+            await main.StartAsync(primaryPath, ct);
+            if (trustTunnel is not null)
+            {
+                int index = 0;
+                foreach (var node in trustTunnel.Nodes.Values)
+                {
+                    var path = await WriteConfigAsync(directory, "trusttunnel-" + index++ + ".toml",
+                        TrustTunnelConfig.Generate(node.Server, node.Socks, node.Relays.Select(r => r.Port)), ct);
+                    var client = Own(Path.Combine(Path.GetDirectoryName(executable)!, "trusttunnel_client.exe"), false, true);
+                    starts.Add(client.StartAsync(path, ct));
+                }
+                // Await every start even after failure, so cancelled/failed startup cannot leave a late child.
+                await Task.WhenAll(starts);
+            }
             if (!Running) throw new UserError("Ядро завершилось при подключении.");
         }
-        catch { Dispose(); throw; }
+        catch { Dispose(); try { await Task.WhenAll(starts); } catch { } Dispose(); throw; }
+    }
+    private CoreProcess Own(string path, bool xray, bool trustTunnel, bool main = false)
+    {
+        lock (shutdownGate)
+        {
+            if (stopping != 0) throw new UserError("Подключение остановлено.");
+            var child = new CoreProcess(path, log, xray, trustTunnel); child.Exited += ChildExited;
+            if (main) primary = child; else companions.Add(child);
+            return child;
+        }
+    }
+    private async Task<string> WriteConfigAsync(string directory, string name, string content, CancellationToken ct)
+    {
+        var path = Path.Combine(directory, name);
+        lock (shutdownGate) { if (stopping != 0) throw new UserError("Подключение остановлено."); configs.Add(path); }
+        await File.WriteAllTextAsync(path, content, ct);
+        ct.ThrowIfCancellationRequested();
+        lock (shutdownGate) if (stopping != 0) throw new UserError("Подключение остановлено.");
+        return path;
     }
     public static async Task ValidateAsync(ConnectSpec spec, string executable, string directory, CancellationToken ct)
     {
-        var runtime = XhttpRuntime.Create(spec, false); var config = ConfigGenerator.Generate(spec, false, runtime);
+        var runtime = XhttpRuntime.Create(spec, false);
+        var trustTunnel = TrustTunnelRuntime.Create(spec, false, runtime);
+        var config = ConfigGenerator.Generate(spec, false, runtime, trustTunnel);
         Directory.CreateDirectory(directory);
         var mainPath = Path.Combine(directory, "validate-sing-box.json"); var xrayPath = Path.Combine(directory, "validate-xray.json");
         try
-        { await File.WriteAllTextAsync(mainPath, config, ct); using var checker = new CoreProcess(executable, new(directory, "validate")); await checker.ValidateAsync(mainPath, ct);
-            if (runtime is not null) { await File.WriteAllTextAsync(xrayPath, runtime.Generate(spec), ct); using var xray = new CoreProcess(Path.Combine(Path.GetDirectoryName(executable)!, "xray.exe"), new(directory, "validate"), true); await xray.ValidateAsync(xrayPath, ct); }
+        {
+            await File.WriteAllTextAsync(mainPath, config, ct);
+            using var checker = new CoreProcess(executable, new(directory, "validate")); await checker.ValidateAsync(mainPath, ct);
+            if (runtime is not null)
+            {
+                await File.WriteAllTextAsync(xrayPath, runtime.Generate(spec), ct);
+                using var xray = new CoreProcess(Path.Combine(Path.GetDirectoryName(executable)!, "xray.exe"), new(directory, "validate"), true);
+                await xray.ValidateAsync(xrayPath, ct);
+            }
+            if (trustTunnel is not null)
+            {
+                if (!File.Exists(Path.Combine(Path.GetDirectoryName(executable)!, "trusttunnel_client.exe"))) throw new UserError("Клиент TrustTunnel отсутствует. Обновите приложение.");
+                foreach (var node in trustTunnel.Nodes.Values) TrustTunnelConfig.Generate(node.Server, node.Socks, node.Relays.Select(r => r.Port));
+            }
         }
         finally { File.Delete(mainPath); File.Delete(xrayPath); }
     }
     private void ChildExited()
     {
         if (Volatile.Read(ref stopping) != 0) return;
-        // Stop the other child as well, including when the UI has not polled status yet.
         Dispose(); Exited?.Invoke();
     }
     public void Dispose()
     {
         lock (shutdownGate)
         {
-        if (Interlocked.Exchange(ref stopping, 1) != 0) return;
-        if (primary is { } p) { p.Exited -= ChildExited; p.Dispose(); primary = null; }
-        if (companion is { } x) { x.Exited -= ChildExited; x.Dispose(); companion = null; }
-        foreach (var path in new[] { primaryPath, companionPath }) if (path is not null) try { File.Delete(path); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { log.Write("Runtime config cleanup failed: " + e.GetType().Name); }
+            if (Interlocked.Exchange(ref stopping, 1) == 0)
+            {
+                // Unsubscribe every child before terminating any of them.
+                if (primary is { } p) p.Exited -= ChildExited;
+                foreach (var c in companions) c.Exited -= ChildExited;
+                primary?.Dispose(); primary = null;
+                foreach (var c in companions) c.Dispose();
+                companions.Clear();
+            }
+            // Repeat cleanup after an in-flight config write observes shutdown.
+            foreach (var path in configs)
+                try { File.Delete(path); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { log.Write("Runtime config cleanup failed: " + e.GetType().Name); }
         }
     }
 }

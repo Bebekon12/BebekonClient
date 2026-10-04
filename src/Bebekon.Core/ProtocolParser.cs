@@ -10,10 +10,11 @@ namespace Bebekon.Core;
 /// <summary>Connection data only; no provider listeners, routing, files or commands are imported.</summary>
 public static class ProtocolParser
 {
-    public static bool IsLink(string text) => new[] { "vless", "vmess", "ss", "trojan", "hysteria", "hysteria2", "hy2" }.Any(p => text.StartsWith(p + "://", StringComparison.OrdinalIgnoreCase));
+    public static bool IsLink(string text) => new[] { "vless", "vmess", "ss", "trojan", "hysteria", "hysteria2", "hy2", "tt" }.Any(p => text.StartsWith(p + "://", StringComparison.OrdinalIgnoreCase));
     public static Server Parse(string input)
     {
         input = input.Trim();
+        if (input.StartsWith("tt://", StringComparison.OrdinalIgnoreCase)) return TrustTunnelParser.ParseLink(input);
         if (input.StartsWith("vless://", StringComparison.OrdinalIgnoreCase)) return VlessParser.Parse(input);
         try
         {

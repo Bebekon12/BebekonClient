@@ -34,6 +34,9 @@ public sealed class Server : Observable
     // Default preserves VLESS nodes saved by earlier versions.
     public string Type { get; set; } = "vless";
     public string Password { get; set; } = "";
+    public TrustTunnelOptions? TrustTunnel { get; set; }
+    public string PreferredTrustTunnelTransport { get; set; } = "";
+    [JsonIgnore] public bool IsTrustTunnel => Type == "trusttunnel";
     public string Cipher { get; set; } = "auto";
     public int AlterId { get; set; }
     public bool GlobalPadding { get; set; }
@@ -70,7 +73,7 @@ public sealed class Server : Observable
     public bool Favorite { get => favorite; set { if (Set(ref favorite, value)) Notify(nameof(Star)); } }
     [JsonIgnore] public string Star => Favorite ? "★" : "☆";
     [JsonIgnore] public bool Supported => UnsupportedReason is null;
-    [JsonIgnore] public string Protocol => (Type == "shadowsocks" ? "Shadowsocks" : Type == "hysteria2" ? "Hysteria 2" : Type == "hysteria" ? "Hysteria" : Type.ToUpperInvariant()) + " · " + (Type is "hysteria" or "hysteria2" ? "QUIC" : Transport == "grpc" ? "gRPC" : Transport.ToUpperInvariant()) + (TlsInsecure ? " · TLS без проверки" : "");
+    [JsonIgnore] public string Protocol => (Type == "trusttunnel" ? "TrustTunnel" : Type == "shadowsocks" ? "Shadowsocks" : Type == "hysteria2" ? "Hysteria 2" : Type == "hysteria" ? "Hysteria" : Type.ToUpperInvariant()) + " · " + (Type == "trusttunnel" ? Transport switch { "http3" => "HTTP/3", "auto" => "Auto", _ => "HTTP/2" } : Type is "hysteria" or "hysteria2" ? "QUIC" : Transport == "grpc" ? "gRPC" : Transport.ToUpperInvariant()) + (TlsInsecure ? " · TLS без проверки" : "");
     private string subscriptionLabel = "";
     [JsonIgnore] public string SubscriptionLabel { get => subscriptionLabel; set { if (Set(ref subscriptionLabel, value)) Notify(nameof(ConnectionLabel)); } }
     [JsonIgnore] public string ConnectionLabel => SubscriptionLabel.Length == 0 ? Protocol : Protocol + " · " + SubscriptionLabel;

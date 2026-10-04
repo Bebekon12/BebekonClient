@@ -62,7 +62,7 @@ public sealed class SafeLog(string directory, string name)
     }
     public static string Redact(string message)
     {
-        message = Regex.Replace(message, @"(?i)(https?://|vless://|vmess://|ss://|trojan://|hysteria2?://|hy2://)\S+", "[private-link]");
+        message = Regex.Replace(message, @"(?i)(https?://|vless://|vmess://|ss://|trojan://|hysteria2?://|hy2://|tt://)\S+", "[private-link]");
         message = Regex.Replace(message, @"(?i)\b[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}\b", "[id]");
         message = Regex.Replace(message, @"(?i)(uuid|password|public_key|short_id|token)\s*[:=]\s*[^\s,]+", "$1=[secret]");
         return message.Length > 2000 ? message[..2000] : message;

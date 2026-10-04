@@ -71,13 +71,43 @@ public static class Dialogs
         var name = Field(body, I18n.T("Название (необязательно)", "Name (optional)"), old?.Name ?? "");
         name.Tag = I18n.T("Автоматически по ссылке", "Detected from the link"); var source = Field(body, I18n.T("URL / VPN-ссылка / текст подписки", "URL / VPN link / subscription text"), old?.Source ?? "");
         source.TextWrapping = TextWrapping.Wrap; source.MaxHeight = 120; source.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
-        var paste = new Button { Content = I18n.T("Вставить из буфера", "Paste from clipboard"), Margin = new(0, 10, 0, 0), HorizontalAlignment = HorizontalAlignment.Left }; paste.Click += (_, _) => { if (System.Windows.Clipboard.ContainsText()) source.Text = System.Windows.Clipboard.GetText().Trim(); }; body.Children.Add(paste);
+        var tools = new WrapPanel { Margin = new(0, 10, 0, 0) };
+        var paste = new Button { Content = I18n.T("Вставить из буфера", "Paste from clipboard"), Margin = new(0, 0, 8, 0) }; paste.Click += (_, _) => { if (System.Windows.Clipboard.ContainsText()) source.Text = System.Windows.Clipboard.GetText().Trim(); }; tools.Children.Add(paste);
+        var import = new Button { Content = I18n.T("Открыть файл", "Open file"), Tag = "ImportSubscriptionFile" }; tools.Children.Add(import); body.Children.Add(tools);
+        var error = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new(0, 8, 0, 0) }; error.SetResourceReference(TextBlock.ForegroundProperty, "Danger"); body.Children.Add(error);
+        import.Click += (_, _) =>
+        {
+            var file = new Microsoft.Win32.OpenFileDialog { Filter = "VPN configs (*.toml;*.json;*.yaml;*.yml;*.txt)|*.toml;*.json;*.yaml;*.yml;*.txt|All files|*.*" };
+            if (file.ShowDialog(w) != true) return;
+            try { if (new FileInfo(file.FileName).Length > 4 * 1024 * 1024) throw new UserError(I18n.T("Файл слишком большой (максимум 4 МБ).", "File is too large (maximum 4 MB).")); source.Text = File.ReadAllText(file.FileName).Trim(); error.Text = ""; }
+            catch (UserError e) { error.Text = e.Message; }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { error.Text = I18n.T("Не удалось прочитать файл.", "Could not read this file."); }
+        };
         body.Children.Add(new TextBlock { Text = I18n.T("Ссылка хранится в зашифрованном виде только на этом компьютере.", "The link is encrypted and stored only on this computer."), TextWrapping = TextWrapping.Wrap, Foreground = (Brush)Application.Current.Resources["Muted"], Margin = new(0, 12, 0, 0) });
         Submit(body, I18n.T("Сохранить", "Save"), () => { if (source.Text.Trim().Length > 0) w.DialogResult = true; });
         return w.ShowDialog() == true ? new() { Name = name.Text.Trim().Length > 0 ? name.Text.Trim() : SuggestSubscriptionName(source.Text.Trim()), Source = source.Text.Trim() } : null;
     }
     internal static string SuggestSubscriptionName(string source) => Uri.TryCreate(source, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https"
-        ? uri.IdnHost : ProtocolParser.IsLink(source) ? source.Split(':')[0].ToUpperInvariant() : I18n.T("Подписка", "Subscription");
+        ? uri.IdnHost : source.StartsWith("tt://", StringComparison.OrdinalIgnoreCase) ? "TrustTunnel" : ProtocolParser.IsLink(source) ? source.Split(':')[0].ToUpperInvariant() : I18n.T("Подписка", "Subscription");
+
+    public static string? TrustTunnelTransport(string current)
+    {
+        var w = Shell("TrustTunnel · " + I18n.T("Протокол соединения", "Connection protocol"), out var body);
+        body.Children.Add(new TextBlock { Text = I18n.T("Параметры TLS и правила маршрутизации сохраняются. Изменение применится к этому серверу.", "TLS settings and routing rules are preserved. This change applies to this server."), TextWrapping = TextWrapping.Wrap, Style = (Style)Application.Current.Resources["Subtitle"], Margin = new(0, 0, 0, 16) });
+        string? selected = null;
+        foreach (var (value, title, detail) in new[] {
+            ("auto", I18n.T("Автоматически", "Automatic"), I18n.T("HTTP/3 с переходом на HTTP/2 при недоступности UDP", "HTTP/3 with HTTP/2 fallback when UDP is unavailable")),
+            ("http2", "HTTP/2 · TCP", I18n.T("Для сетей, в которых UDP ограничен", "For networks that restrict UDP")),
+            ("http3", "HTTP/3 · QUIC", I18n.T("Соединение по UDP; сервер должен поддерживать HTTP/3", "UDP connection; the server must support HTTP/3")) })
+        {
+            var labels = new StackPanel(); labels.Children.Add(new TextBlock { Text = title, FontSize = 16, FontWeight = FontWeights.SemiBold });
+            labels.Children.Add(new TextBlock { Text = detail, TextWrapping = TextWrapping.Wrap, Style = (Style)Application.Current.Resources["Subtitle"], Margin = new(0, 5, 0, 0) });
+            var button = new Button { Content = labels, Tag = value, HorizontalContentAlignment = HorizontalAlignment.Left, Padding = new(18, 14, 18, 14), MinHeight = 80, Margin = new(0, 0, 0, 10) };
+            if (value == current) { button.BorderBrush = (Brush)Application.Current.Resources["Accent"]; button.Background = (Brush)Application.Current.Resources["AccentSoft"]; }
+            button.Click += (_, _) => { selected = value; w.DialogResult = true; }; body.Children.Add(button);
+        }
+        return w.ShowDialog() == true ? selected : null;
+    }
 
     public static RoutingRule? Rule(RoutingRule? old, IEnumerable<Server>? servers = null)
     {

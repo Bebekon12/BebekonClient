@@ -1,6 +1,20 @@
 # Subscription formats and device binding
 
-Bebekon VPN 0.1.14 accepts direct VLESS, VMess, Shadowsocks, Trojan, Hysteria and Hysteria 2 / `hy2` links, mixed newline-separated links, plain or URL-safe Base64 subscription text, Xray JSON profiles/arrays, sing-box JSON outbounds and Clash/Mihomo YAML or JSON containing inline `proxies`. Add the provider URL on Subscriptions; converting it through an external service is unnecessary. Pasted configuration text uses the same importer. A new subscription has an empty optional name: saving without a name derives it from the URL hostname (or uses the protocol / Subscription for pasted text); editing retains the existing name.
+Bebekon VPN 0.1.16 accepts direct VLESS, VMess, Shadowsocks, Trojan, Hysteria, Hysteria 2 / `hy2` and TrustTunnel links, mixed newline-separated links, plain or URL-safe Base64 subscription text, Xray JSON profiles/arrays, sing-box JSON outbounds and Clash/Mihomo YAML or JSON containing inline `proxies`. Add the provider URL on Subscriptions; converting it through an external service is unnecessary. Pasted configuration text uses the same importer. A new subscription has an empty optional name: saving without a name derives it from the URL hostname (or uses the protocol / Subscription for pasted text); editing retains the existing name.
+
+## TrustTunnel
+
+Accepts official QUIC-varint TLV `tt://?` links (versions 0–2), older unprefixed-query `tt://` links, exported `[endpoint]` TOML, endpoint JSON/arrays and version-1 subscription JSON with singular `address`. A v2 subscription link resolves its HTTPS subscription URL with bounded nesting. HTTPS `user:password@host` subscription credentials are sent only in a Basic Authorization header, never in the request URI; redirects are disabled. Public HTTP with credentials is rejected. **Add subscription → Open file** reads TOML/JSON/text locally; the resulting subscription is stored encrypted.
+
+Retains addresses, username/password, TLS hostname, custom SNI, IPv6 capability, PEM/DER certificate chain, client random prefix/mask, anti-DPI, post-quantum flag and DNS upstream hints. Explicit `skip_verification` is retained and visibly labeled; it is never enabled automatically. Provider listeners, exclusions and routing do not replace Bebekon's own settings. Unknown endpoint tuning, external certificate paths, executable/file DNS schemes, malformed/oversized links and unsupported future versions produce an error without credentials. `tls_profile` from newer development documentation is not supported by pinned client 1.1.7 and is explicitly rejected.
+
+The gear beside a TrustTunnel server selects `auto`, `http2` or `http3`; selection survives refresh. HTTP/3 requires working UDP and server support. The official client's transport fallback remains in effect. TCP/ICMP measure the first endpoint; recommended HTTPS GET measures the complete connection with the existing five-second deadline. Up to 8 selected/pinned TrustTunnel nodes and 16 addresses per node are supported per session. TrustTunnel is a separate protocol and requires a TrustTunnel provider; it cannot convert existing VLESS/VMess servers.
+
+TrustTunnel uses authenticated SOCKS locally and fixed TCP/UDP endpoint relays in sing-box. Endpoint traffic bypasses DNS capture/sniffing/user routing to prevent a TUN loop. All children are owned by Windows jobs and stopped together on disconnect/cancellation/crash. Private runtime TOML is deleted after shutdown. Official client loopback exclusions still apply to loopback destinations; ordinary public VPN destinations are tunneled.
+
+- [Official TrustTunnel client 1.1.7](https://github.com/TrustTunnel/TrustTunnelClient/releases/tag/v1.1.7), Apache-2.0 in `core/LICENSE-TrustTunnel`.
+- [Deep-link specification](https://github.com/TrustTunnel/TrustTunnel/blob/master/DEEP_LINK.md) and [client configuration](https://github.com/TrustTunnel/TrustTunnelClient/blob/v1.1.7/trusttunnel/README.md).
+- [Tomlyn 2.10.1](https://github.com/xoofx/Tomlyn/tree/2.10.1), BSD-2-Clause in `licenses/Tomlyn.txt`.
 
 Supported protocols:
 

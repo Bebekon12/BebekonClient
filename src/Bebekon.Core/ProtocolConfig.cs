@@ -9,6 +9,7 @@ internal static class ProtocolConfig
     internal static void Validate(Server s)
     {
         if (!s.Supported) throw new UserError(s.UnsupportedReason!);
+        if (s.Type == "trusttunnel") { TrustTunnelConfig.Validate(s); return; }
         if (s.Type is not ("vless" or "vmess" or "shadowsocks" or "trojan" or "hysteria" or "hysteria2") || s.Port is < 1 or > 65535 || Uri.CheckHostName(s.Host) == UriHostNameType.Unknown
             || IPAddress.TryParse(s.Host, out var ip) && (ip.Equals(IPAddress.Any) || ip.Equals(IPAddress.IPv6Any))
             || s.Security is not ("none" or "tls" or "reality") || s.Transport is not ("tcp" or "grpc" or "ws" or "http" or "httpupgrade" or "xhttp")

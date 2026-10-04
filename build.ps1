@@ -1,4 +1,4 @@
-param([string]$InnoCompiler, [switch]$SkipInstaller, [string]$PublishFolder = 'artifacts\release', [string]$UpdateFeedUrl = 'https://github.com/Bebekon12/BebekonClient/releases/latest/download/update.json', [string]$InstallerUrl, [string]$ReleaseNotes = 'Улучшена совместимость отрисовки окна и восстановление из трея. Непрозрачный фон, сохранение развёрнутого состояния; снеговик на главной теперь в той же шляпе, что и логотип.')
+param([string]$InnoCompiler, [switch]$SkipInstaller, [string]$PublishFolder = 'artifacts\release', [string]$UpdateFeedUrl = 'https://github.com/Bebekon12/BebekonClient/releases/latest/download/update.json', [string]$InstallerUrl, [string]$ReleaseNotes = 'Добавлена поддержка TrustTunnel: ссылки tt://, TOML/JSON и HTTPS-подписки, HTTP/2 и HTTP/3, импорт файла и выбор протокола сервера. Сохраняются текущие правила, TUN и выбранный сервер.')
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $projectRoot = $PSScriptRoot
@@ -38,6 +38,16 @@ Safe-Clean '.tools\xray-extracted'
 Expand-Archive -LiteralPath $xrayArchive -DestinationPath .tools\xray-extracted -Force
 Copy-Item -LiteralPath .tools\xray-extracted\xray.exe -Destination core\xray.exe -Force
 Copy-Item -LiteralPath .tools\xray-extracted\LICENSE -Destination core\LICENSE-Xray -Force
+$trustTunnelPin = Get-Content -LiteralPath core\trusttunnel-version.json -Raw | ConvertFrom-Json
+$trustTunnelArchive = Join-Path $projectRoot '.tools\trusttunnel-client.zip'
+if (-not (Test-Path -LiteralPath $trustTunnelArchive) -or (Get-FileHash -LiteralPath $trustTunnelArchive -Algorithm SHA256).Hash -ne $trustTunnelPin.sha256) {
+    Invoke-WebRequest ('https://github.com/TrustTunnel/TrustTunnelClient/releases/download/v' + $trustTunnelPin.version + '/' + $trustTunnelPin.archive) -OutFile $trustTunnelArchive
+}
+if ((Get-FileHash -LiteralPath $trustTunnelArchive -Algorithm SHA256).Hash -ne $trustTunnelPin.sha256) { throw 'TrustTunnel archive checksum mismatch.' }
+Safe-Clean '.tools\trusttunnel-extracted'
+Expand-Archive -LiteralPath $trustTunnelArchive -DestinationPath .tools\trusttunnel-extracted -Force
+Copy-Item -LiteralPath .tools\trusttunnel-extracted\trusttunnel_client.exe -Destination core\trusttunnel_client.exe -Force
+Copy-Item -LiteralPath .tools\trusttunnel-extracted\LICENSE.txt -Destination core\LICENSE-TrustTunnel -Force
 Invoke-Checked dotnet @('clean','Bebekon.sln','-c','Release','--nologo','-v','quiet')
 Invoke-Checked dotnet @('restore','Bebekon.sln','--nologo')
 Invoke-Checked dotnet @('test','tests\Bebekon.Tests','-c','Release','--nologo','--logger','trx;LogFileName=core.trx','--results-directory','artifacts\tests')
@@ -60,6 +70,7 @@ Copy-Item -LiteralPath docs\VALIDATION.md,docs\UPDATES.md,docs\DESIGN.md,docs\CL
 New-Item -ItemType Directory -Path (Join-Path $appPublishRoot 'resources\geo') -Force | Out-Null
 Copy-Item -LiteralPath resources\geo\README.md,resources\geo\LICENSE-SagerNet,resources\geo\sources.json -Destination (Join-Path $appPublishRoot 'resources\geo') -Force
 Copy-Item -LiteralPath core\LICENSE,core\version.json,core\LICENSE-Xray,core\xray-version.json -Destination (Join-Path $appPublishRoot 'core') -Force
+Copy-Item -LiteralPath core\LICENSE-TrustTunnel,core\trusttunnel-version.json -Destination (Join-Path $appPublishRoot 'core') -Force
 $channelSource = if ($UpdateFeedUrl) { $UpdateFeedUrl } else { Join-Path $projectRoot 'dist\update.json' }
 @{ source = $channelSource } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $appPublishRoot 'resources\update-channel.json') -Encoding utf8
 if (-not $SkipInstaller) {

@@ -64,11 +64,13 @@ public static class ConfigGenerator
     public const string CoreVersion = "1.14.2";
     private static JsonArray Strings(IEnumerable<string> values) => new(values.Select(v => (JsonNode?)JsonValue.Create(v)).ToArray());
     public static string Generate(ConnectSpec spec, bool probeOnly = false, XhttpRuntime? runtime = null)
+        => Generate(spec, probeOnly, runtime, null);
+    internal static string Generate(ConnectSpec spec, bool probeOnly, XhttpRuntime? runtime, TrustTunnelRuntime? trustTunnel)
     {
         var s = spec.Server;
         if (spec.ProbePort is < 1024 or > 65535 || spec.ProbePassword.Length < 24 || spec.Settings.Mtu is < 1280 or > 9000 || !Enum.IsDefined(spec.Settings.TunnelMode)) throw new UserError("Некорректные параметры подключения.");
         RuleValidation.Validate(spec.Profile);
-        var vpn = Vpn(s, "vpn", runtime);
+        var vpn = Vpn(s, "vpn", runtime, trustTunnel);
         var outbounds = new JsonArray { vpn, new JsonObject { ["type"] = "direct", ["tag"] = "direct", ["domain_resolver"] = "direct-dns" } };
         var dnsServers = new JsonArray { Dns("direct-dns", "direct"), Dns("vpn-dns", "vpn") };
         var serverTags = new Dictionary<string, string> { [s.Id] = "vpn" };
@@ -81,7 +83,7 @@ public static class ConfigGenerator
                 var nodes = spec.RuleServers?.Where(n => n.Id == id).ToArray();
                 if (nodes is null || nodes.Length != 1) throw new UserError("Сервер одного из правил недоступен. Измените правило или выберите «Авто».");
                 var tag = "vpn-rule-" + serverTags.Count;
-                serverTags.Add(id, tag); outbounds.Add(Vpn(nodes[0], tag, runtime)); dnsServers.Add(Dns(tag + "-dns", tag));
+                serverTags.Add(id, tag); outbounds.Add(Vpn(nodes[0], tag, runtime, trustTunnel)); dnsServers.Add(Dns(tag + "-dns", tag));
             }
         }
         var inbounds = new JsonArray { new JsonObject { ["type"] = "mixed", ["tag"] = "vpn-probe", ["listen"] = "127.0.0.1", ["listen_port"] = spec.ProbePort, ["users"] = new JsonArray { new JsonObject { ["username"] = "bebekon", ["password"] = spec.ProbePassword } } } };
@@ -97,6 +99,7 @@ public static class ConfigGenerator
             new JsonObject { ["protocol"] = "dns", ["action"] = "hijack-dns" }
         };
         if (runtime is not null) { inbounds.Add(new JsonObject { ["type"] = "mixed", ["tag"] = "xray-direct", ["listen"] = "127.0.0.1", ["listen_port"] = runtime.Direct.Port, ["users"] = new JsonArray { new JsonObject { ["username"] = "bebekon", ["password"] = runtime.Direct.Password } } }); routes.Insert(0, new JsonObject { ["inbound"] = Strings(["xray-direct"]), ["action"] = "route", ["outbound"] = "direct" }); }
+        trustTunnel?.AddRelays(inbounds, routes);
         var dnsRules = new JsonArray(); var sets = new JsonArray(); var setTags = new HashSet<string>();
         foreach (var rule in probeOnly ? [] : spec.Profile.Rules)
         {
@@ -115,11 +118,13 @@ public static class ConfigGenerator
         }.ToJsonString(Json.Options);
     }
     private static JsonObject Dns(string tag, string detour) => new() { ["type"] = "https", ["tag"] = tag, ["server"] = "1.1.1.1", ["detour"] = detour, ["tls"] = new JsonObject { ["server_name"] = "cloudflare-dns.com" } };
-    private static JsonObject Vpn(Server s, string tag, XhttpRuntime? runtime)
+    private static JsonObject Vpn(Server s, string tag, XhttpRuntime? runtime, TrustTunnelRuntime? trustTunnel)
     {
         ProtocolConfig.Validate(s);
-        if (s.Transport != "xhttp") return ProtocolConfig.Outbound(s, tag);
-        if (runtime is null || !runtime.Bridges.TryGetValue(s.Id, out var bridge)) throw new UserError("Для XHTTP требуется запуск комплектного ядра Xray.");
+        if (s.Type != "trusttunnel" && s.Transport != "xhttp") return ProtocolConfig.Outbound(s, tag);
+        LoopbackBridge bridge;
+        if (s.Type == "trusttunnel") bridge = trustTunnel?.Nodes.GetValueOrDefault(s.Id)?.Socks ?? throw new UserError("Для TrustTunnel требуется запуск комплектного клиента.");
+        else if (runtime is null || !runtime.Bridges.TryGetValue(s.Id, out bridge!)) throw new UserError("Для XHTTP требуется запуск комплектного ядра Xray.");
         var vpn = new JsonObject { ["type"] = "socks", ["tag"] = tag, ["server"] = "127.0.0.1", ["server_port"] = bridge.Port, ["version"] = "5", ["username"] = "bebekon", ["password"] = bridge.Password, ["connect_timeout"] = "4s" };
         if (!s.UdpEnabled) vpn["network"] = "tcp"; return vpn;
     }

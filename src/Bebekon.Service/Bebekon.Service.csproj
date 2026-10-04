@@ -3,6 +3,7 @@
   <ItemGroup>
     <ProjectReference Include="../Bebekon.Core/Bebekon.Core.csproj" />
     <Content Include="../../core/xray.exe" Link="core/xray.exe" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../../core/trusttunnel_client.exe" Link="core/trusttunnel_client.exe" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="../../core/sing-box.exe" Link="core/sing-box.exe" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

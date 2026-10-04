@@ -118,6 +118,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
     public ICommand CollapseSidebar { get; }
     public ICommand ToggleConnect { get; }
     public ICommand SelectServer { get; }
+    public ICommand ConfigureTrustTunnel { get; }
     public ICommand FavoriteServer { get; }
     public ICommand PingAll { get; }
     public ICommand PingServer { get; }
@@ -167,6 +168,15 @@ public sealed partial class MainViewModel : Observable, IDisposable
         Navigate = new Command(p => Go((string)p!)); CollapseSidebar = new Command(_ => SidebarCollapsed = !SidebarCollapsed);
         ToggleConnect = new Command(_ => _ = ToggleSafelyAsync(), () => State != ConnectionState.Disconnecting && !updateInstalling);
         SelectServer = new Command(p => { var node = (Server)p!; if (!node.Supported) Banner = node.UnsupportedReason; else SelectedServer = node; });
+        ConfigureTrustTunnel = new Command(p =>
+        {
+            if (p is not Server { IsTrustTunnel: true } node) return;
+            var transport = Dialogs.TrustTunnelTransport(node.Transport);
+            if (transport is null || transport == node.Transport) return;
+            node.Transport = transport; node.PreferredTrustTunnelTransport = transport; node.Notify(nameof(Server.Protocol)); node.Notify(nameof(Server.ConnectionLabel));
+            node.Latency = "—"; node.LatencyMs = null; Save(); RefreshServers();
+            if (SelectedServer?.Id == node.Id || ActiveProfile.Rules.Any(r => r.UseVpn && r.ServerId == node.Id)) QueueApply();
+        });
         FavoriteServer = new Command(p => { var s = (Server)p!; s.Favorite = !s.Favorite; Save(); });
         PingAll = Async(_ => ScanAsync(true), () => !Scanning);
         PingServer = Async(async p => { if ((p as Server ?? SelectedServer) is { } node) await MeasureServerAsync(node, true, lifetime.Token); }, () => !Scanning);

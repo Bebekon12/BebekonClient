@@ -231,7 +231,7 @@ public class ProtocolTests
     }
     private static async Task EchoUdp(UdpClient udp, CancellationToken ct)
     { var packet = await udp.ReceiveAsync(ct); await udp.SendAsync(packet.Buffer, packet.RemoteEndPoint, ct); }
-    private static async Task<string> SocksUdp(ConnectSpec spec, int port, CancellationToken ct)
+    internal static async Task<string> SocksUdp(ConnectSpec spec, int port, CancellationToken ct, string target = "127.0.0.1")
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct); timeout.CancelAfter(TimeSpan.FromSeconds(5)); ct = timeout.Token;
         using var tcp = new TcpClient(); await tcp.ConnectAsync(IPAddress.Loopback, spec.ProbePort, ct); await using var stream = tcp.GetStream();
@@ -242,7 +242,7 @@ public class ProtocolTests
         await stream.WriteAsync(new byte[] { 5, 3, 0, 1, 0, 0, 0, 0, 0, 0 }, ct); var header = new byte[4]; await stream.ReadExactlyAsync(header, ct); Assert.Equal(0, header[1]);
         var address = new byte[header[3] == 1 ? 4 : 16]; await stream.ReadExactlyAsync(address, ct); var portBytes = new byte[2]; await stream.ReadExactlyAsync(portBytes, ct); var relayPort = portBytes[0] * 256 + portBytes[1];
         using var udp = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
-        var packet = new byte[] { 0, 0, 0, 1, 127, 0, 0, 1, (byte)(port >> 8), (byte)port }.Concat(Encoding.UTF8.GetBytes("udp-fixture")).ToArray();
+        var packet = new byte[] { 0, 0, 0, 1 }.Concat(IPAddress.Parse(target).GetAddressBytes()).Concat(new byte[] { (byte)(port >> 8), (byte)port }).Concat(Encoding.UTF8.GetBytes("udp-fixture")).ToArray();
         await udp.SendAsync(packet, new IPEndPoint(IPAddress.Loopback, relayPort), ct); var reply = await udp.ReceiveAsync(ct); Assert.Equal(0, reply.Buffer[2]);
         var skip = reply.Buffer[3] == 1 ? 10 : reply.Buffer[3] == 4 ? 22 : 7 + reply.Buffer[4]; return Encoding.UTF8.GetString(reply.Buffer[skip..]);
     }

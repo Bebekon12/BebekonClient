@@ -27,6 +27,8 @@ internal static class SmokeHarness
         data.Servers[4].Type = "trojan"; data.Servers[4].Security = "tls"; data.Servers[4].Password = "fixture-secret";
         data.Servers[5].Transport = "xhttp";
         data.Servers[6].Type = "hysteria"; data.Servers[6].Security = "tls"; data.Servers[6].Password = "fixture-secret"; data.Servers[6].UpMbps = 100; data.Servers[6].DownMbps = 100; data.Servers[6].Fingerprint = "";
+        data.Servers[7].Type = "trusttunnel"; data.Servers[7].Security = "tls"; data.Servers[7].Transport = "http3"; data.Servers[7].Sni = "localhost"; data.Servers[7].Password = "fixture-secret";
+        data.Servers[7].TrustTunnel = new() { Username = "fixture", Addresses = ["127.0.0.1:9"] };
         data.Subscriptions.Add(new() { Name = "UI test fixture", Source = "https://example.invalid/private-token", ServerCount = data.Servers.Count });
         foreach (var server in data.Servers) server.SubscriptionId = data.Subscriptions[0].Id;
         data.SelectedServerId = data.Servers[0].Id;
@@ -197,12 +199,13 @@ internal static class SmokeHarness
             dialogName = "Preset"; Dialogs.Preset(vm.Presets);
             dialogName = "Application"; await Dialogs.ApplicationAsync();
             dialogName = "Confirm"; Dialogs.Confirm("Удалить правило?", "UI test fixture");
+            dialogName = "TrustTunnel"; Dialogs.TrustTunnelTransport("http3");
         }
         finally { Dialogs.RenderObserver = null; }
         if (renderFailure is not null) throw renderFailure;
         if (((UIElement)window.Content).Effect is not null || Dialogs.ModalOpen) throw new InvalidOperationException("Closing dialogs must restore the background.");
         report.Add("Rule editor: all six types, optional name, actions and server references; full button areas; modal blur/restoration passed.");
-        report.Add("Five native dialogs rendered with the shared theme.");
+        report.Add("Six native dialogs rendered with the shared theme, including TrustTunnel transport selection and file import.");
         var originalProfile = vm.ActiveProfile;
         var adminProfile = new Profile { Name = "Правила админа · UI fixture" }; vm.Data.Profiles.Add(adminProfile); vm.ActiveProfile = adminProfile;
         Dialogs.RenderObserver = dialog => dialog.Dispatcher.BeginInvoke(new Action(() => Descendants(dialog).OfType<Button>().Single(b => b.IsDefault).RaiseEvent(new RoutedEventArgs(Button.ClickEvent))));

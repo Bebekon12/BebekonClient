@@ -2,6 +2,12 @@
 
 Windows 10/11 x64, .NET 10, WPF, native UI. Default routing is **selected rules → VPN; everything else → Direct**.
 
+## Version 0.1.16 · TrustTunnel
+
+TrustTunnel servers can now be added on **Subscriptions** using official `tt://?` links, HTTPS subscription URLs, exported TOML or endpoint JSON. **Add subscription → Open file** imports a configuration from disk. The gear on a TrustTunnel server selects HTTP/2, HTTP/3 or automatic mode, retaining that choice when subscriptions refresh. Existing TUN, routing profiles, per-rule servers, pings and traffic reporting use the same interface. The official Windows TrustTunnel client 1.1.7 is bundled and verified during build; it starts only for selected/referenced TrustTunnel nodes. It does not convert VLESS or other subscriptions into TrustTunnel: the provider must supply a compatible server.
+
+See [TrustTunnel formats and limits](docs/SUBSCRIPTIONS.md#trusttunnel) and [validation](docs/VALIDATION.md). `scripts/test-trusttunnel.ps1` runs verified TCP/UDP fixtures against the official Linux endpoint in WSL Ubuntu without installing a service or changing Windows routes/proxy.
+
 ## Build and install
 
 Open Bebekon.sln in Rider. Install .NET SDK 10 (global.json pins 10.0.300). Run:

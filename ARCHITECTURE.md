@@ -5,9 +5,12 @@
        → Windows Service (LocalSystem, demand start)
        → sing-box 1.14.2 (native protocols, routing, DNS, counters, child job)
        → optional Xray 26.3.27 (VLESS XHTTP, separate child job, authenticated loopback bridges)
-       → TUN → ordered rules → VLESS VPN or Direct
+       → optional TrustTunnel client 1.1.7 (HTTP/2 / HTTP/3, child jobs, fixed TCP/UDP endpoint relays)
+       → TUN → ordered rules → selected VPN protocols or Direct
 
 App owns the DPAPI-protected subscription, servers, profiles and settings. Service owns the active privileged core and networking lifetime. Core is the only VLESS/TUN implementation; C# does not implement VPN cryptography.
+
+TrustTunnel keeps the existing sing-box TUN/rules/DNS/counters. One official SOCKS-mode client runs per selected/pinned TrustTunnel node, with a random authenticated loopback SOCKS listener. Its remote TLS/QUIC sockets connect to fixed raw TCP/UDP relays in sing-box; the first route overrides their destination to the provider endpoint via Direct, before probe/DNS/sniff/user rules. The original TLS verification hostname, SNI and certificate remain end-to-end. This avoids depending on process-name exclusions or competing TUN interfaces. The service generates only whitelisted connection fields and its own listener/general mode; provider routes, files and listeners never execute. It awaits endpoint connection readiness and the existing UI HTTP health probe. A failed child stops all children; partial startup observes every task and cleans every config. Non-TrustTunnel connections do not start the companion.
 
 Theme.xaml owns the shared palette and native control templates. IconView renders cached outline geometry; SettingRow gives searchable settings a common layout. View filtering stays local to presentation, while switches bind to the shared view model. TUN and Proxy always select one mode. Dialogs use the same tokens, keyboard focus, Escape/cancel and native window chrome. UI rendering and console helper tests have separate instance/pipe identities and cannot operate on the installed service.
 

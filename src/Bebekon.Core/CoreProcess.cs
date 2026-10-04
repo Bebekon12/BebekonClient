@@ -9,6 +9,7 @@ public sealed class CoreProcess : IDisposable
     private readonly string executable;
     private readonly SafeLog log;
     private readonly bool xray;
+    private readonly bool trustTunnel;
     private Process? process;
     private readonly object stopGate = new();
     private IntPtr job;
@@ -18,10 +19,12 @@ public sealed class CoreProcess : IDisposable
     public bool Running { get { lock (stopGate) return process is { HasExited: false }; } }
     public int? Pid { get { lock (stopGate) return process is { HasExited: false } p ? p.Id : null; } }
     private static TaskCompletionSource NewReady() => new(TaskCreationOptions.RunContinuationsAsynchronously);
-    public CoreProcess(string executable, SafeLog log, bool xray = false) { this.executable = executable; this.log = log; this.xray = xray; }
+    public CoreProcess(string executable, SafeLog log, bool xray = false, bool trustTunnel = false) { this.executable = executable; this.log = log; this.xray = xray; this.trustTunnel = trustTunnel; }
     public async Task ValidateAsync(string config, CancellationToken ct)
     {
         if (!File.Exists(executable)) throw new UserError("Ядро VPN отсутствует. Переустановите приложение.");
+        // The official TrustTunnel CLI has no offline --check. Its config is generated from validated typed fields.
+        if (trustTunnel) { ct.ThrowIfCancellationRequested(); return; }
         using var p = new Process { StartInfo = Info("check", config) };
         p.Start();
         var output = p.StandardOutput.ReadToEndAsync(ct); var error = p.StandardError.ReadToEndAsync(ct);
@@ -54,7 +57,8 @@ public sealed class CoreProcess : IDisposable
     private void OnOutput(object sender, DataReceivedEventArgs e)
     {
         if (e.Data is null) return;
-        if (e.Data.Contains("sing-box started", StringComparison.OrdinalIgnoreCase) || xray && e.Data.Contains("Xray ", StringComparison.OrdinalIgnoreCase) && e.Data.Contains(" started", StringComparison.OrdinalIgnoreCase)) { log.Write("Core started."); ready.TrySetResult(); }
+        if (e.Data.Contains("sing-box started", StringComparison.OrdinalIgnoreCase) || xray && e.Data.Contains("Xray ", StringComparison.OrdinalIgnoreCase) && e.Data.Contains(" started", StringComparison.OrdinalIgnoreCase)
+            || trustTunnel && e.Data.Contains("Successfully connected to endpoint", StringComparison.Ordinal)) { log.Write("Core started."); ready.TrySetResult(); }
         // Core output can contain destinations and private connection details. Do not persist raw lines.
         else if (e.Data.Contains("FATAL", StringComparison.OrdinalIgnoreCase)) { log.Write("Core fatal error. Connection parameters withheld."); ready.TrySetException(new UserError("Ядро не смогло запуститься. Возможен конфликт сетевых настроек или порта.")); }
         else if (e.Data.Contains("ERROR", StringComparison.OrdinalIgnoreCase)) log.Write("Core reported a network error (details withheld).");
@@ -62,7 +66,8 @@ public sealed class CoreProcess : IDisposable
     private ProcessStartInfo Info(string command, string config)
     {
         var info = new ProcessStartInfo(executable) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true, WorkingDirectory = Path.GetDirectoryName(executable)! };
-        info.ArgumentList.Add(xray ? "run" : command); if (xray && command == "check") info.ArgumentList.Add("-test"); info.ArgumentList.Add(xray ? "-config" : "-c"); info.ArgumentList.Add(config); return info;
+        if (!trustTunnel) { info.ArgumentList.Add(xray ? "run" : command); if (xray && command == "check") info.ArgumentList.Add("-test"); }
+        info.ArgumentList.Add(trustTunnel ? "--config" : xray ? "-config" : "-c"); info.ArgumentList.Add(config); return info;
     }
     public void Stop()
     {

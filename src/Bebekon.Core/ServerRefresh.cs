@@ -5,6 +5,7 @@ namespace Bebekon.Core;
 public static class ServerRefresh
 {
     public static string ConnectionKey(Server s) => JsonSerializer.Serialize(new {
+        s.TrustTunnel,
         s.Type, s.Password, s.Cipher, s.AlterId, s.GlobalPadding, s.AuthenticatedLength, s.Plugin, s.PluginOptions, s.Obfs, s.ObfsPassword, s.UpMbps, s.DownMbps, s.ServerPorts, s.HopIntervalSeconds, s.TlsInsecure, s.CertificatePin, s.VerifyCertificateName, s.XhttpMode, s.XhttpExtra,
         s.Host, s.Port, s.Uuid, s.Security, s.Sni, s.PublicKey, s.ShortId, s.Fingerprint,
         s.Alpn, s.Flow, s.PacketEncoding, s.UdpEnabled, s.Transport, s.ServiceName, s.Path, s.TransportHost, s.UnsupportedReason
@@ -18,6 +19,7 @@ public static class ServerRefresh
         foreach (var node in incoming)
         {
             var old = available.FirstOrDefault(s => s.Id == node.Id)
+                ?? available.FirstOrDefault(s => s.Id == subscriptionId + ":" + node.Id)
                 ?? available.FirstOrDefault(s => s.Name.Equals(node.Name, StringComparison.OrdinalIgnoreCase) && ConnectionKey(s) == ConnectionKey(node))
                 ?? available.FirstOrDefault(s => ConnectionKey(s) == ConnectionKey(node))
                 ?? available.FirstOrDefault(s => s.Name.Equals(node.Name, StringComparison.OrdinalIgnoreCase));
@@ -25,6 +27,8 @@ public static class ServerRefresh
             if (old is not null)
             {
                 available.Remove(old); node.Id = old.Id; node.Favorite = old.Favorite;
+                if (old.Type == "trusttunnel" && node.Type == "trusttunnel" && old.PreferredTrustTunnelTransport is "auto" or "http2" or "http3")
+                { node.Transport = old.PreferredTrustTunnelTransport; node.PreferredTrustTunnelTransport = old.PreferredTrustTunnelTransport; }
                 if (ConnectionKey(old) == ConnectionKey(node)) { node.Latency = old.Latency; node.LatencyMs = old.LatencyMs; }
             }
             else node.Id = subscriptionId + ":" + node.Id;

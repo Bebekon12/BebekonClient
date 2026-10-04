@@ -111,6 +111,16 @@ Version 0.1.8 adds 15 update tests (150 total): signed local feed and package do
 - The Night Track hero now includes the same navy hat as the application mascot. Connected Home renders were visually inspected; the scene, left text area and minimum-size layout remain intact.
 - Installer/UAC/TUN acceptance remains pending below.
 
+## Version 0.1.16 — 2026-10-04
+
+- Release solution, self-contained app/helper, installer and portable ZIP built successfully. The normal core suite passed 249 tests; the optional live TrustTunnel theory is skipped without its endpoint fixture. Its separate fixture run passed all 20 tests, including five live cases.
+- Official TrustTunnelClient 1.1.7 connected to official TrustTunnel endpoint 1.1.0 over HTTP/2, HTTP/3 and automatic selection. Real HTTP and UDP responses reported the endpoint-side source address, proving they traversed the tunnel. Both selected and separately pinned rule nodes were exercised; a mixed XHTTP/TrustTunnel session passed. The exported tt:// link, self-signed certificate and custom SNI were produced by the fixture, without changing Windows certificate trust.
+- Fixed loopback TCP/UDP endpoint relays keep companion upstream sockets on sing-box's Direct outbound, ahead of user routes and DNS interception. Schema checks cover main and pinned nodes. Child crash shuts down every owned process and removes runtime configs; a silent endpoint hits the five-second ping deadline and cleans up. These are isolated user-mode fixtures, not privileged physical TUN acceptance.
+- Import checks cover official TLV links (versions 0–2), TOML and JSON, HTTPS subscription references, Basic authentication without credentials in the request URI, DER/PEM certificate chains, canonical node identity and DPAPI persistence. Provider listeners/routes are ignored, unknown endpoint tuning is rejected, and a user-selected transport survives refresh with the node ID and favorite. Unsupported tls_profile is rejected because the pinned client does not implement it.
+- Published WPF smoke passed all pages, six themed dialogs, minimum-size layout and existing tray/connection/update regressions. TrustTunnel's transport dialog, file import and server gear were visually inspected at normal/minimum dimensions; 100/175% dialog renders passed. Rendering checks do not replace physical DPI or live TUN tests.
+- The existing traffic test now samples rates during its paced transfer, before the connection becomes idle; final byte totals remain checked. All native protocol, XHTTP, service, cancellation and signed-update regressions passed.
+- The working installation, installed service and system proxy/routes were preserved. Installer/UAC and privileged TUN acceptance remain pending below.
+
 ## Required manual acceptance — pending
 
 Version 0.1.9 changes the bundled update channel to GitHub Releases with a version-specific installer URL. The existing signed-update tests and published UI smoke suite are rerun for this release; the smoke checks the candidate local manifest before public release. Post-publication checks must verify the public latest feed, RSA signature, asset sizes and installer hash.
