@@ -28,8 +28,9 @@ class MainActivity : ComponentActivity() {
         if (intent.getBooleanExtra("tile_connect", false) && savedInstanceState == null) { intent.removeExtra("tile_connect"); if (repo.state.value.selectedNode != null) toggle() else model.message.value = "Сначала добавьте подписку" }
     }
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); model.receive(intent); if (intent.getBooleanExtra("tile_connect", false)) { intent.removeExtra("tile_connect"); toggle() } }
+    override fun onResume() { super.onResume(); updater.resumed(this); model.origin.refresh() }
     private fun toggle() {
-        if (VpnController.session.value.busy) return
+        if (VpnController.session.value.phase == Phase.STOPPING) return
         if (VpnController.session.value.active) { VpnController.stop(this); return }
         if (repo.state.value.selectedNode == null) { model.message.value = "Добавьте подписку на вкладке «Подписки»"; return }
         val consent = VpnService.prepare(this); if (consent != null) permission.launch(consent) else startPrepared()

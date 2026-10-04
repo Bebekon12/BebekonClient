@@ -43,6 +43,7 @@ internal static class SmokeHarness
         vm.AccentColor = "Violet"; vm.Dispose(); vm = new MainViewModel(store);
         if (vm.AccentColor != "Violet") throw new InvalidOperationException("A later custom accent must survive restart.");
         vm.AccentColor = "Blue";
+        vm.MapOrigin = new GeoPoint(37.6, 55.7); // Deterministic map fixture; never saved or queried in QA.
         if (vm.Settings.TunnelMode != TunnelMode.Tun) throw new InvalidOperationException("Startup must select TUN even after a prior proxy session.");
         if (vm.LatencyIndex != 1) throw new InvalidOperationException("Recommended HTTPS GET latency must be the default.");
         foreach (var server in vm.Data.Servers) if (CountryInfo.Resolve(server.Name) is not { } code || FlagView.GetImage(code) is null) throw new InvalidOperationException("Every known fixture country must have a bundled flag.");
@@ -410,17 +411,17 @@ internal static class SmokeHarness
         if (Motion.Enabled && !orbit.HasAnimatedProperties) throw new InvalidOperationException("Connecting must show a moving progress indicator.");
         Set(vm, nameof(vm.State), ConnectionState.Connected); Set(vm, nameof(vm.VpnIp), "203.0.113.42"); Set(vm, nameof(vm.Session), "00:16:42");
         TrafficSnapshot? sample = null;
-        var start = DateTimeOffset.UtcNow.AddSeconds(-60);
-        for (var i = 0; i < 60; i++)
+        var start = DateTimeOffset.UtcNow.AddSeconds(-150);
+        for (var i = 0; i < 150; i++)
         {
             sample = new((1.8 + Math.Cos(i * .45) * .6) * 125_000, (24 + Math.Sin(i * .35) * 8) * 125_000, 27_000_000, 410_000_000, start.AddSeconds(i));
             Traffic(vm, sample);
         }
         Traffic(vm, sample);
-        if (vm.DownloadHistory.Count != 48 || vm.UploadHistory.Count != 48) throw new InvalidOperationException("Traffic histories must retain only 48 samples and ignore a repeated timestamp.");
+        if (vm.DownloadHistory.Count != 120 || vm.UploadHistory.Count != 120) throw new InvalidOperationException("Traffic histories must retain only 120 samples and ignore a repeated timestamp.");
         await Task.Delay(200); window.UpdateLayout();
         foreach (var chart in Descendants(home).OfType<TrafficChart>())
-            if (chart.Samples?.Count != 48 || chart.ActualWidth <= 0 || chart.ActualHeight <= 0) throw new InvalidOperationException("Traffic charts must display their measured direction.");
+            if (chart.Samples?.Count != 120 || chart.ActualWidth <= 0 || chart.ActualHeight <= 0) throw new InvalidOperationException("Traffic charts must display their measured direction.");
         if (Motion.Enabled && (!shift.HasAnimatedProperties || orbit.HasAnimatedProperties)) throw new InvalidOperationException("Connected motion must replace the loading spinner.");
         Capture(window, "Home-Connected");
         var oldWidth = window.Width; var oldHeight = window.Height;
@@ -438,7 +439,7 @@ internal static class SmokeHarness
         window.UpdateLayout(); Capture(window, "Home-Error");
         Set(vm, nameof(vm.State), ConnectionState.Disconnected);
         if (vm.DownloadHistory.Count != 0 || vm.UploadHistory.Count != 0 || shift.HasAnimatedProperties || orbit.HasAnimatedProperties) throw new InvalidOperationException("Disconnected home must clear session traffic and stop motion.");
-        report.Add("Night Track: one-time theme migration preserves later accent choices; connecting/connected/error and English/minimum layouts; real-direction charts capped at 48 unique samples; reduced motion and hidden animation stop.");
+        report.Add("Night Track: one-time theme migration preserves later accent choices; connecting/connected/error and English/minimum layouts; real-direction charts capped at 120 unique samples; reduced motion and hidden animation stop.");
     }
     private static void Capture(Window window, string name)
     {

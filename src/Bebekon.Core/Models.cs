@@ -135,6 +135,7 @@ public sealed class Settings
     public int Mtu { get; set; } = 1500;
     public TunnelMode TunnelMode { get; set; } = TunnelMode.Tun;
     public bool Animations { get; set; } = true;
+    public bool MapLocation { get; set; } = true;
     public bool GlowEffects { get; set; } = true;
     public bool PureBlack { get; set; }
     public string AccentColor { get; set; } = "Blue";

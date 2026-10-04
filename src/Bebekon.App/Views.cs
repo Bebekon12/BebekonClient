@@ -13,6 +13,7 @@ public partial class HomeView : UserControl
         InitializeComponent(); Loaded += (_, _) => { vm = DataContext as MainViewModel; if (vm is not null) vm.PropertyChanged += OnState; owner = Window.GetWindow(this); if (owner is not null) owner.StateChanged += OwnerStateChanged; ThemeManager.Changed += UpdateGlow; Dialogs.ModalStateChanged += UpdateGlow; UpdateGlow(); };
         Unloaded += (_, _) => { if (vm is not null) vm.PropertyChanged -= OnState; if (owner is not null) owner.StateChanged -= OwnerStateChanged; ThemeManager.Changed -= UpdateGlow; Dialogs.ModalStateChanged -= UpdateGlow; vm = null; owner = null; StopMotion(); };
         IsVisibleChanged += (_, _) => UpdateGlow();
+        Hero.SizeChanged += (_, _) => HeroMascot.Width = Hero.ActualWidth < 760 ? 112 : 162;
     }
     private void OnState(object? sender, System.ComponentModel.PropertyChangedEventArgs e) { if (e.PropertyName is nameof(MainViewModel.Connected) or nameof(MainViewModel.ConnectionBusy) or nameof(MainViewModel.UpdateOverlayOpen)) UpdateGlow(); }
     private void OwnerStateChanged(object? sender, EventArgs e) => UpdateGlow();
@@ -20,6 +21,7 @@ public partial class HomeView : UserControl
     private void UpdateGlow()
     {
         StopMotion(); PowerHalo.Visibility = ThemeManager.Glow ? Visibility.Visible : Visibility.Hidden;
+        HeroMap.AnimationEnabled = IsVisible && owner?.WindowState != WindowState.Minimized && !Dialogs.ModalOpen && vm?.UpdateOverlayOpen != true && Motion.Enabled;
         if (!IsVisible || owner?.WindowState == WindowState.Minimized || Dialogs.ModalOpen || vm?.UpdateOverlayOpen == true || !Motion.Enabled) return;
         if (ThemeManager.Glow && vm?.Connected == true) PowerHalo.BeginAnimation(OpacityProperty, new System.Windows.Media.Animation.DoubleAnimation(.12, .24, TimeSpan.FromSeconds(2.8)) { AutoReverse = true, RepeatBehavior = System.Windows.Media.Animation.RepeatBehavior.Forever });
         if (vm?.Connected == true) SpeedShift.BeginAnimation(TranslateTransform.XProperty, new System.Windows.Media.Animation.DoubleAnimation(0, 12, TimeSpan.FromSeconds(2.8)) { AutoReverse = true, RepeatBehavior = System.Windows.Media.Animation.RepeatBehavior.Forever });

@@ -231,6 +231,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
         _ = WatchUpdatesAsync();
         try { var response = await service.SendAsync(new("GetStatus")); ApplyStatus(response.Status); if (Connected) { await DisconnectAsync(); await ConnectAsync(); } }
         catch { SystemProxy.Restore(); }
+        _ = RefreshMapOriginAsync();
         if (Settings.AutoConnect && !Connected && SelectedServer is not null) try { await ConnectAsync(); } catch (Exception e) { Report(e); }
     }
     public void Go(string name)
@@ -421,8 +422,8 @@ public sealed partial class MainViewModel : Observable, IDisposable
         else if (traffic?.SampledAt != value.SampledAt)
         {
             // One bounded history per direction, sampled from the core rather than decorative data.
-            DownloadHistory = DownloadHistory.TakeLast(47).Append(Math.Max(0, value.DownloadBytesPerSecond * 8 / 1_000_000)).ToArray();
-            UploadHistory = UploadHistory.TakeLast(47).Append(Math.Max(0, value.UploadBytesPerSecond * 8 / 1_000_000)).ToArray();
+            DownloadHistory = DownloadHistory.TakeLast(119).Append(Math.Max(0, value.DownloadBytesPerSecond * 8 / 1_000_000)).ToArray();
+            UploadHistory = UploadHistory.TakeLast(119).Append(Math.Max(0, value.UploadBytesPerSecond * 8 / 1_000_000)).ToArray();
         }
         traffic = value;
         foreach (var name in new[] { nameof(DownloadRate), nameof(UploadRate), nameof(DownloadTotal), nameof(UploadTotal), nameof(DownloadHistory), nameof(UploadHistory) }) Notify(name);
@@ -438,6 +439,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
     {
         localAddresses = NetworkAddresses.Read(); Notify(nameof(LocalIp)); Notify(nameof(LocalIpLabel)); Notify(nameof(LocalIpDetail));
         var currentUplink = UplinkSignature(); var changed = currentUplink != uplinkSignature; uplinkSignature = currentUplink;
+        if (changed) { originChecked = default; MapOrigin = null; _ = RefreshMapOriginAsync(); }
         if ((!force && !changed) || !desiredConnected || !Connected || recovering) return;
         networkDelay?.Cancel(); networkDelay?.Dispose(); networkDelay = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token); var token = networkDelay.Token;
         var generation = monitorId;

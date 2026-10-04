@@ -12,7 +12,7 @@ import kotlinx.coroutines.*
 class VpnTileService : TileService() {
     private var watching: Job? = null
     private fun render(s: Session) {
-        qsTile?.apply { label = "Bebekon VPN"; state = when { s.busy -> Tile.STATE_UNAVAILABLE; s.phase == Phase.ON -> Tile.STATE_ACTIVE; else -> Tile.STATE_INACTIVE }; subtitle = when (s.phase) { Phase.ON -> s.server; Phase.STARTING, Phase.RECONNECTING -> "Подключение…"; Phase.STOPPING -> "Отключение…"; Phase.ERROR -> "Ошибка подключения"; else -> "Отключён" }; updateTile() }
+        qsTile?.apply { label = "Bebekon VPN"; state = when { s.phase == Phase.STOPPING -> Tile.STATE_UNAVAILABLE; s.active -> Tile.STATE_ACTIVE; else -> Tile.STATE_INACTIVE }; subtitle = when (s.phase) { Phase.ON -> s.server; Phase.STARTING, Phase.RECONNECTING -> "Подключение… нажмите для отмены"; Phase.STOPPING -> "Отключение…"; Phase.ERROR -> "Ошибка подключения"; else -> "Отключён" }; updateTile() }
     }
     override fun onTileAdded() { super.onTileAdded(); render(VpnController.session.value) }
     override fun onStartListening() {
@@ -24,7 +24,7 @@ class VpnTileService : TileService() {
     @android.annotation.SuppressLint("StartActivityAndCollapseDeprecated") // Guarded fallback for Android 10–13; PendingIntent overload starts at API 34.
     override fun onClick() {
         super.onClick()
-        if (VpnController.session.value.busy) return
+        if (VpnController.session.value.phase == Phase.STOPPING) return
         if (VpnController.session.value.active) { VpnController.stop(this); return }
         unlockAndRun {
             if (VpnService.prepare(this) != null || repo.state.value.selectedNode == null) {

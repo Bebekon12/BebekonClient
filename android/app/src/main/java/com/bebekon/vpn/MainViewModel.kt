@@ -16,9 +16,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val busy = MutableStateFlow(false)
     val message = MutableStateFlow(repo.storageError.value)
     val importText = MutableStateFlow("")
+    val siteCheck = MutableStateFlow(SiteCheck())
+    val origin = OriginLocation(app, viewModelScope)
+    fun diagnoseSite(address: String) {
+        if (siteCheck.value.running) return
+        siteCheck.value = SiteCheck(running = true)
+        viewModelScope.launch {
+            siteCheck.value = try { checkSite(getApplication(), saved.value, address) }
+            catch (_: Exception) { SiteCheck(direct = "Не удалось проверить адрес", vpn = "Не удалось проверить адрес") }
+        }
+    }
     private val pingLimit = Semaphore(2)
     private val pingJobs = mutableMapOf<String, Job>()
     init {
+        viewModelScope.launch { saved.collect { origin.enabled(it.preferences.mapLocation) } }
         // Older Xray imports lost profile remarks. Refresh them once per launch; identity stays unchanged.
         saved.value.subscriptions.filter { sub -> sub.source.startsWith("https://") && sub.nodes.any { it.country.isBlank() && it.name.lowercase() in setOf("proxy", "vpn", "out", "outbound") } }.forEach(::refresh)
     }
@@ -42,23 +53,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun select(node: Node) { if (node.unsupported.isNotEmpty()) { message.value = node.unsupported; return }; task { repo.update { it.copy(selected = node.id) }; VpnController.reload(getApplication()) } }
     fun favorite(node: Node) = task { repo.update { it.copy(favorites = if (node.id in it.favorites) it.favorites - node.id else it.favorites + node.id) } }
     fun preferences(value: Preferences) = task {
+        require(value.mtu in 1280..1500)
         val old = saved.value.preferences; repo.update { it.copy(preferences = value) }
         if (old.ping != value.ping || old.pingTarget != value.pingTarget) withContext(Dispatchers.Main) { pingJobs.values.forEach { it.cancel() }; pingJobs.clear(); repo.pings.value = emptyMap() }
-        if (old.routing != value.routing || old.allowLan != value.allowLan) VpnController.reload(getApplication())
+        if (old.routing != value.routing || old.allowLan != value.allowLan || old.dnsResolver != value.dnsResolver || old.mtu != value.mtu) VpnController.reload(getApplication())
     }
-    fun saveAppRules(apps: List<InstalledApp>, vpn: Boolean) = task {
-        require(apps.isNotEmpty() && apps.size <= 256)
+    fun refreshAll() { saved.value.subscriptions.filter { it.source.startsWith("https://") }.forEach(::refresh) }
+    override fun onCleared() { origin.close(); super.onCleared() }
+    fun saveAppRules(apps: List<InstalledApp>, actions: Map<String, Boolean>) = task {
+        require(actions.size <= 256)
         repo.update { state ->
-            val packages = apps.map { it.packageName }.toSet()
-            val previous = state.rules.filter { it.kind == RuleKind.APP && it.values.size == 1 }.associateBy { it.values.single() }
-            val additions = apps.mapIndexed { i, app ->
-                (previous[app.packageName]?.copy(vpn = vpn, created = System.currentTimeMillis() + i)
-                    ?: Rule(name = app.label, kind = RuleKind.APP, values = listOf(app.packageName), vpn = vpn, created = System.currentTimeMillis() + i))
-                    .also(CoreConfig::validateRule)
-            }
-            state.copy(rules = state.rules.filterNot { it.kind == RuleKind.APP && it.values.size == 1 && it.values.single() in packages } + additions)
+            val rules = replaceAppRules(state.rules, actions, apps.associate { it.packageName to it.label }, System.currentTimeMillis())
+            rules.forEach(CoreConfig::validateRule)
+            state.copy(rules = rules)
         }
-        VpnController.reload(getApplication()); message.value = "Сохранено правил приложений: ${apps.size}"
+        VpnController.reload(getApplication()); message.value = "Сохранено правил приложений: ${actions.size}"
     }
     fun saveRule(rule: Rule) = task { CoreConfig.validateRule(rule); if (rule.kind in listOf(RuleKind.GEOSITE, RuleKind.GEOIP)) rule.values.forEach { repo.geo((if (rule.kind == RuleKind.GEOSITE) "geosite-" else "geoip-") + it) }; repo.update { it.copy(rules = it.rules.filterNot { r -> r.id == rule.id } + rule) }; VpnController.reload(getApplication()) }
     fun removeRule(id: String) = task { repo.update { it.copy(rules = it.rules.filterNot { r -> r.id == id }) }; VpnController.reload(getApplication()) }

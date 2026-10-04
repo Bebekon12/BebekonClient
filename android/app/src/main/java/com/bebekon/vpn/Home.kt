@@ -33,18 +33,14 @@ private val SignalGreen = Color(0xFF20D884)
 private val SignalRed = Color(0xFFFF687A)
 
 @Composable fun HomeScreen(saved: SavedState, session: Session, model: MainViewModel, toggle: () -> Unit, servers: () -> Unit, routing: () -> Unit, subscriptions: () -> Unit) {
+    val origin by model.origin.point.collectAsState()
+    val history by VpnController.trafficHistory.collectAsState()
     val pings by model.repo.pings.collectAsState()
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    val down = remember(session.started) { mutableStateListOf<Long>() }
-    val up = remember(session.started) { mutableStateListOf<Long>() }
     LaunchedEffect(session.started) { while (true) { now = System.currentTimeMillis(); delay(1000) } }
-    LaunchedEffect(session.down, session.up, session.phase) {
-        if (session.phase == Phase.ON) { down.add(session.down); up.add(session.up); if (down.size > 28) down.removeAt(0); if (up.size > 28) up.removeAt(0) }
-        else if (!session.active) { down.clear(); up.clear() }
-    }
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        val rowHeight = (maxHeight * .103f).coerceIn(48.dp, 62.dp)
-        val peek = rowHeight * 4 + 58.dp
+        val rowHeight = (maxHeight * .103f).coerceIn(64.dp, 74.dp)
+        val peek = rowHeight * 4 + 44.dp
         val markerLabelTop = ((maxHeight - peek) * .5f - maxWidth * (22f / 165f) - 20.dp).coerceAtLeast(68.dp)
         val node = saved.selectedNode
         BottomSheetScaffold(sheetPeekHeight = peek, sheetContainerColor = MaterialTheme.colorScheme.surface,
@@ -56,8 +52,8 @@ private val SignalRed = Color(0xFFFF687A)
                     item {
                         DashboardCard(Modifier.fillMaxWidth().height(rowHeight).clickable(onClick = servers)) {
                             Flag(node?.country.orEmpty(), Modifier.size(42.dp, 30.dp))
-                            Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
-                                Text(node?.name?.let(::displayName) ?: "Выбрать сервер", fontSize = 17.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Column(Modifier.weight(1f).fillMaxHeight().padding(horizontal = 12.dp), verticalArrangement = Arrangement.Center) {
+                                Text(node?.name?.let(::displayName) ?: "Выбрать сервер", fontSize = 17.sp, lineHeight = 20.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 if (node != null) PingText(pings[node.id] ?: PingResult(), { model.ping(node) })
                                 else Text("Добавьте вашу подписку", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
@@ -67,18 +63,18 @@ private val SignalRed = Color(0xFFFF687A)
                     item {
                         DashboardCard(Modifier.fillMaxWidth().height(rowHeight).clickable(onClick = routing)) {
                             DashboardIcon(Icons.Outlined.SwapHoriz)
-                            Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
-                                Text("Маршрутизация", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                Text(saved.preferences.routing.label, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 3.dp))
+                            Column(Modifier.weight(1f).fillMaxHeight().padding(horizontal = 12.dp), verticalArrangement = Arrangement.Center) {
+                                Text("Маршрутизация", fontSize = 11.sp, lineHeight = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(saved.preferences.routing.label, fontSize = 15.sp, lineHeight = 19.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 3.dp))
                             }
                             Icon(Icons.Outlined.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                     item {
                         DashboardCard(Modifier.fillMaxWidth().height(rowHeight).testTag("home-traffic")) {
-                            TrafficValue(Modifier.weight(1f), Icons.Outlined.South, "Загрузка", session.down, down, session.phase == Phase.ON)
+                            TrafficValue(Modifier.weight(1f), Icons.Outlined.South, "Загрузка", session.down, history.totalDown, history.down, session.phase == Phase.ON)
                             DashboardDivider()
-                            TrafficValue(Modifier.weight(1f), Icons.Outlined.North, "Отправка", session.up, up, session.phase == Phase.ON)
+                            TrafficValue(Modifier.weight(1f), Icons.Outlined.North, "Отправка", session.up, history.totalUp, history.up, session.phase == Phase.ON)
                         }
                     }
                     item {
@@ -88,13 +84,25 @@ private val SignalRed = Color(0xFFFF687A)
                             DashboardValue(Modifier.weight(1f), Icons.Outlined.Language, "Публичный IP", session.publicIp.ifEmpty { "—" }, 12.sp)
                         }
                     }
+                    item {
+                        Surface(shape = RoundedCornerShape(17.dp), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .68f), border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = .5f))) {
+                            Column(Modifier.fillMaxWidth().padding(14.dp)) {
+                                Text("Трафик · последние 2 минуты", fontSize = 13.sp, lineHeight = 17.sp, fontWeight = FontWeight.SemiBold)
+                                Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                                    HistoryGraph("Загрузка", history.down, history.totalDown, Modifier.weight(1f))
+                                    HistoryGraph("Отправка", history.up, history.totalUp, Modifier.weight(1f))
+                                }
+                                Text("Без запросов скорость падает до 0. График сохраняет активность в фоне, объём — за сессию.", Modifier.padding(top = 8.dp), fontSize = 10.sp, lineHeight = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
                     item { Row(Modifier.fillMaxWidth().padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) { Text("Все серверы", fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)); TextButton({ model.pingAll() }) { Icon(Icons.Outlined.Speed, null, Modifier.size(17.dp)); Text("Пинг", Modifier.padding(start = 5.dp)) } } }
                     if (saved.nodes.isEmpty()) item { Button(subscriptions, Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) { Text("Добавить подписку") } }
                     items(saved.nodes, key = { "home-" + it.id }) { server -> ServerRow(server, server.id == saved.selected, server.id in saved.favorites, pings[server.id] ?: PingResult(), { model.select(server) }, { model.favorite(server) }, { model.ping(server) }) }
                 }
             }) { contentPadding ->
             Box(Modifier.fillMaxSize().padding(contentPadding).clip(RoundedCornerShape(0.dp))) {
-                WorldMap(node?.country.orEmpty(), saved.preferences.animations, session.phase == Phase.ON)
+                WorldMap(node?.country.orEmpty(), saved.preferences.animations, session.active, origin)
                 Column(Modifier.align(Alignment.TopCenter).padding(top = 8.dp, start = 16.dp, end = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Surface(shape = RoundedCornerShape(22.dp), color = MaterialTheme.colorScheme.background.copy(alpha = .88f), border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = .28f))) {
                         Column(Modifier.padding(horizontal = 18.dp, vertical = 9.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -103,7 +111,7 @@ private val SignalRed = Color(0xFFFF687A)
                                 Box(Modifier.size(9.dp).clip(CircleShape).background(statusColor))
                                 Text(when (session.phase) { Phase.ON -> "Подключено"; Phase.STARTING -> "Подключение…"; Phase.RECONNECTING -> "Обновляем маршрут…"; Phase.STOPPING -> "Отключение…"; Phase.ERROR -> "Ошибка подключения"; else -> "Готов к подключению" }, Modifier.padding(start = 8.dp), fontSize = 17.sp, fontWeight = FontWeight.Bold)
                             }
-                            Text(when (session.phase) { Phase.ON -> if (saved.preferences.routing == RoutingMode.ALL) "Трафик через VPN" else "VPN для выбранных приложений и сайтов"; Phase.ERROR -> session.message; else -> "Ваш маршрут. Ваш интернет." }, fontSize = 11.sp, maxLines = 2, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 3.dp))
+                            Text(when (session.phase) { Phase.ON -> if (saved.preferences.routing == RoutingMode.ALL) "Трафик через VPN" else "VPN для выбранных приложений и сайтов"; Phase.ERROR, Phase.RECONNECTING -> session.message; else -> "Ваш маршрут. Ваш интернет." }, fontSize = 11.sp, lineHeight = 15.sp, maxLines = 2, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 3.dp))
                         }
                     }
                 }
@@ -132,12 +140,12 @@ private val SignalRed = Color(0xFFFF687A)
         }
         Box(Modifier.size(134.dp).clip(CircleShape).background(Brush.verticalGradient(listOf(Color(0xFF138FFF), Color(0xFF0054ED))))
             .border(1.5.dp, Color(0xFF67CAFF), CircleShape)
-            .clickable(enabled = !session.busy, role = Role.Button, onClick = onClick)
+            .clickable(enabled = session.phase != Phase.STOPPING, role = Role.Button, onClick = onClick)
             .semantics { contentDescription = if (session.active) "Отключить VPN" else "Подключить VPN" }, contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 if (session.busy) CircularProgressIndicator(Modifier.size(43.dp), color = Color.White, strokeWidth = 2.5.dp)
                 else Icon(Icons.Outlined.PowerSettingsNew, null, Modifier.size(49.dp), tint = Color.White)
-                Text(when (session.phase) { Phase.STARTING -> "Подключение…"; Phase.RECONNECTING -> "Обновление…"; Phase.STOPPING -> "Отключение…"; Phase.ON -> "Отключить"; else -> "Подключить" }, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Color.White, modifier = Modifier.padding(top = 7.dp))
+                Text(when (session.phase) { Phase.STARTING, Phase.RECONNECTING -> "Отменить"; Phase.STOPPING -> "Отключение…"; Phase.ON -> "Отключить"; else -> "Подключить" }, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Color.White, modifier = Modifier.padding(top = 7.dp))
             }
         }
     }
@@ -145,7 +153,7 @@ private val SignalRed = Color(0xFFFF687A)
 
 @Composable private fun DashboardCard(modifier: Modifier, content: @Composable RowScope.() -> Unit) {
     Surface(modifier, shape = RoundedCornerShape(17.dp), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .68f), border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = .12f))) {
-        Row(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically, content = content)
+        Row(Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically, content = content)
     }
 }
 @Composable private fun DashboardIcon(icon: ImageVector) {
@@ -155,23 +163,32 @@ private val SignalRed = Color(0xFFFF687A)
 @Composable private fun DashboardValue(modifier: Modifier, icon: ImageVector, label: String, value: String, fontSize: TextUnit = 16.sp) {
     Row(modifier, verticalAlignment = Alignment.CenterVertically) {
         DashboardIcon(icon)
-        Column(Modifier.weight(1f).padding(start = 8.dp)) {
-            Text(label, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(value, fontSize = fontSize, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
+        Column(Modifier.weight(1f).fillMaxHeight().padding(start = 8.dp), verticalArrangement = Arrangement.Center) {
+            Text(label, fontSize = 10.sp, lineHeight = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(value, fontSize = fontSize, lineHeight = (fontSize.value + 4).sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 3.dp))
         }
     }
 }
-@Composable private fun TrafficValue(modifier: Modifier, icon: ImageVector, label: String, bytes: Long, samples: List<Long>, online: Boolean) {
+@Composable private fun TrafficValue(modifier: Modifier, icon: ImageVector, label: String, bytes: Long, total: Long, samples: List<Long>, online: Boolean) {
     Row(modifier, verticalAlignment = Alignment.CenterVertically) {
         DashboardIcon(icon)
-        Column(Modifier.weight(1f).padding(start = 8.dp)) {
-            Text(label, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Column(Modifier.weight(1f).fillMaxHeight().padding(start = 8.dp), verticalArrangement = Arrangement.Center) {
+            Text(label, fontSize = 10.sp, lineHeight = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Row(verticalAlignment = Alignment.Bottom) {
-                Text(if (online) String.format(Locale.ROOT, "%.1f", bytes * 8.0 / 1_000_000) else "—", fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                if (online) Text(" Мбит/с", fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 2.dp))
+                Text(if (online) String.format(Locale.ROOT, "%.1f", bytes * 8.0 / 1_000_000) else "—", fontSize = 16.sp, lineHeight = 19.sp, fontWeight = FontWeight.Bold)
+                if (online) Text(" Мбит/с", fontSize = 9.sp, lineHeight = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 2.dp))
             }
-            Sparkline(samples, Modifier.fillMaxWidth().height(10.dp))
+            Text(trafficGb(total), fontSize = 9.sp, lineHeight = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Sparkline(samples, Modifier.fillMaxWidth().height(8.dp))
         }
+    }
+}
+@Composable private fun HistoryGraph(label: String, samples: List<Long>, total: Long, modifier: Modifier) {
+    Column(modifier) {
+        Text(label, fontSize = 11.sp, lineHeight = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(trafficGb(total), fontSize = 15.sp, lineHeight = 19.sp, fontWeight = FontWeight.SemiBold)
+        Text(String.format(Locale.ROOT, "%.1f МБ за сессию", total / 1_000_000.0), fontSize = 10.sp, lineHeight = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Sparkline(samples, Modifier.fillMaxWidth().height(64.dp).padding(top = 8.dp))
     }
 }
 @Composable private fun Sparkline(samples: List<Long>, modifier: Modifier) {

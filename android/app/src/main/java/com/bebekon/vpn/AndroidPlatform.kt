@@ -21,6 +21,7 @@ class Interfaces(private val values: List<NetworkInterface>) : NetworkInterfaceI
     override fun next() = values[index++]
 }
 class AndroidPlatform(private val context: Context, private val vpn: BebekonVpnService? = null) : PlatformInterface {
+    var tunnelState: SavedState? = null
     private val connectivity = context.getSystemService(ConnectivityManager::class.java)
     private val monitors = ConcurrentHashMap<InterfaceUpdateListener, ConnectivityManager.NetworkCallback>()
     @Volatile var descriptor: ParcelFileDescriptor? = null
@@ -35,8 +36,19 @@ class AndroidPlatform(private val context: Context, private val vpn: BebekonVpnS
         val dns = options.dnsServerAddress; while (dns.hasNext()) builder.addDnsServer(dns.next())
         fun routes(iterator: RoutePrefixIterator) { while (iterator.hasNext()) { val p = iterator.next(); builder.addRoute(p.address(), p.prefix()) } }
         routes(options.inet4RouteRange); routes(options.inet6RouteRange)
-        // Core sockets and subscription/update requests bypass the TUN. User app rules remain in libbox.
-        builder.addDisallowedApplication(context.packageName)
+        val policy = appTunnelPolicy(tunnelState ?: context.repo.state.value)
+        if (policy.appOnly) {
+            var included = 0
+            policy.allowed!!.filterNot { it == context.packageName }.forEach { pkg ->
+                try { builder.addAllowedApplication(pkg); included++ } catch (_: android.content.pm.PackageManager.NameNotFoundException) { }
+            }
+            check(included > 0) { "Выберите хотя бы одно установленное приложение для VPN в правилах" }
+        } else {
+            // Explicit direct apps bypass VPN transport and DNS, including mixed site/app routing.
+            (policy.excluded + context.packageName).forEach { pkg ->
+                try { builder.addDisallowedApplication(pkg) } catch (_: android.content.pm.PackageManager.NameNotFoundException) { }
+            }
+        }
         val fd = builder.establish() ?: error("Разрешение на VPN отозвано")
         descriptor?.close(); descriptor = fd
         return fd.fd

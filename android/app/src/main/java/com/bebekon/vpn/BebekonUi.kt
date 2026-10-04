@@ -47,6 +47,7 @@ private val Light = lightColorScheme(primary = Color(0xFF086AFF), onPrimary = Co
     val isDark = when (saved.preferences.theme) { ThemeChoice.DARK -> true; ThemeChoice.LIGHT -> false; ThemeChoice.SYSTEM -> isSystemInDarkTheme() }
     var tab by rememberSaveable { mutableIntStateOf(0) }; var settings by rememberSaveable { mutableStateOf(false) }; var addSubscription by remember { mutableStateOf(false) }; var editRule by remember { mutableStateOf<Rule?>(null) }; var newRule by remember { mutableStateOf(false) }; var presets by remember { mutableStateOf(false) }; var routing by remember { mutableStateOf(false) }
     var applications by remember { mutableStateOf(false) }
+    androidx.activity.compose.BackHandler(settings) { settings = false }
     val snackbar = remember { SnackbarHostState() }
     val activity = androidx.activity.compose.LocalActivity.current
     SideEffect { activity?.let { androidx.core.view.WindowCompat.getInsetsController(it.window, it.window.decorView).apply { isAppearanceLightStatusBars = !isDark; isAppearanceLightNavigationBars = !isDark } } }
@@ -71,7 +72,7 @@ private val Light = lightColorScheme(primary = Color(0xFF086AFF), onPrimary = Co
         }) { padding ->
             Box(Modifier.fillMaxSize().padding(padding)) {
                 when {
-                    settings -> SettingsScreen(saved.preferences, model, addTile)
+                    settings -> FullSettingsScreen(saved.preferences, model, addTile, { routing = true }, { applications = true }, { presets = true }, { settings = false; tab = 3 })
                     tab == 0 -> HomeScreen(saved, session, model, toggle, { tab = 1 }, { routing = true }, { tab = 3 })
                     tab == 1 -> ServersScreen(saved, model)
                     tab == 2 -> RulesScreen(saved, model, { newRule = true }, { editRule = it }, { presets = true }, { routing = true }, { applications = true })
@@ -83,14 +84,15 @@ private val Light = lightColorScheme(primary = Color(0xFF086AFF), onPrimary = Co
         if (addSubscription) SubscriptionDialog(imported, { addSubscription = false; model.importText.value = "" }) { source, name -> model.import(source, name); addSubscription = false }
         if (newRule || editRule != null) RuleDialog(editRule, { newRule = false; editRule = null }) { model.saveRule(it); newRule = false; editRule = null }
         if (presets) PresetsDialog(model, { presets = false })
-        if (applications) ApplicationPicker(emptySet(), true, saved.preferences.routing, { applications = false }) { apps, vpn -> model.saveAppRules(apps, vpn); applications = false }
+        UpdateDialog(LocalContext.current.updater)
+        if (applications) ApplicationRulesPicker(saved.rules, saved.preferences.routing, { applications = false }) { apps, actions -> model.saveAppRules(apps, actions); applications = false }
         if (routing) AlertDialog(onDismissRequest = { routing = false }, title = { Text("Маршрутизация") }, text = { Column { RoutingMode.entries.forEach { m -> Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { model.preferences(saved.preferences.copy(routing = m)); routing = false }.padding(12.dp), verticalAlignment = Alignment.CenterVertically) { RadioButton(saved.preferences.routing == m, onClick = null); Column(Modifier.padding(start = 10.dp)) { Text(m.label, fontWeight = FontWeight.SemiBold); Text(if (m == RoutingMode.ALL) "Всё через VPN, кроме исключений LAN" else "VPN для выбранных сайтов и приложений", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) } } } } }, confirmButton = { TextButton({ routing = false }) { Text("Готово") } })
     }
 }
 
 @Composable fun PingText(ping: PingResult, click: () -> Unit) {
     val color = when (ping.quality) { PingQuality.GOOD -> Green; PingQuality.FAIR -> Amber; PingQuality.POOR -> Red; PingQuality.UNKNOWN -> MaterialTheme.colorScheme.onSurfaceVariant }
-    Row(Modifier.clip(RoundedCornerShape(6.dp)).clickable(onClick = click).padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) { Text(ping.label, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = color); if (ping.running) CircularProgressIndicator(Modifier.padding(start = 5.dp).size(10.dp), color = color, strokeWidth = 1.dp) }
+    Row(Modifier.clip(RoundedCornerShape(6.dp)).clickable(onClick = click).padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) { Text(ping.label, fontSize = 11.sp, lineHeight = 14.sp, fontWeight = FontWeight.SemiBold, color = color); if (ping.running) CircularProgressIndicator(Modifier.padding(start = 5.dp).size(10.dp), color = color, strokeWidth = 1.dp) }
 }
 private fun cleanName(s: String) = s.replace(Regex("[\\x{1F1E6}-\\x{1F1FF}]"), "").trim()
 @Composable fun Flag(code: String, modifier: Modifier = Modifier.size(34.dp, 24.dp)) {
@@ -156,27 +158,10 @@ private fun cleanName(s: String) = s.replace(Regex("[\\x{1F1E6}-\\x{1F1FF}]"), "
         item { Text("Ссылки и ключи хранятся с шифрованием Android. Маршрутизация провайдера не заменяет ваши правила.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
     }
 }
-@Composable private fun SettingsScreen(p: Preferences, model: MainViewModel, addTile: () -> Unit) {
-    val context = LocalContext.current; var logs by remember { mutableStateOf(false) }; val events by model.repo.logs.collectAsState()
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        item { SectionLabel("Оформление") }
-        item { Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surface) { Column(Modifier.padding(16.dp)) { Text("Тема", fontWeight = FontWeight.SemiBold); Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) { ThemeChoice.entries.forEach { t -> FilterChip(p.theme == t, { model.preferences(p.copy(theme = t)) }, { Text(t.label, fontSize = 11.sp) }) } } } } }
-        item { ToggleCard(Icons.Outlined.Animation, "Плавные анимации", "Движение карты и подсветка подключения", p.animations) { model.preferences(p.copy(animations = it)) } }
-        item { SectionLabel("Подключение") }
-        item { ToggleCard(Icons.Outlined.Wifi, "Доступ к локальной сети", "Принтеры, домашние устройства и LAN", p.allowLan) { model.preferences(p.copy(allowLan = it)) } }
-        item { ActionCard(Icons.Outlined.Security, "Постоянный VPN и защита от утечек", "Включаются в системных настройках Android") { context.startActivity(Intent(Settings.ACTION_VPN_SETTINGS)) } }
-        item { ActionCard(Icons.Outlined.ToggleOn, "Кнопка в шторке", "Включайте VPN из быстрых настроек", addTile) }
-        item { SectionLabel("О приложении") }
-        item { ActionCard(Icons.Outlined.ListAlt, "Журнал подключения", "События без адресов подписок и ключей") { logs = true } }
-        item { ActionCard(Icons.Outlined.SystemUpdate, "Обновления", "Скачать новый APK поверх текущей версии") { context.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://github.com/Bebekon12/BebekonClient/releases/latest"))) } }
-        item { Text("Bebekon VPN ${BuildConfig.VERSION_NAME}\nAndroid 10+ · sing-box 1.14.2\nVLESS · VMess · SS · Trojan · Hysteria / Hysteria2", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 20.sp) }
-    }
-    if (logs) AlertDialog(onDismissRequest = { logs = false }, title = { Text("Журнал") }, text = { LazyColumn { if (events.isEmpty()) item { Text("Событий пока нет") }; items(events) { Text(it, fontSize = 12.sp, modifier = Modifier.padding(vertical = 5.dp)) } } }, confirmButton = { TextButton({ logs = false }) { Text("Закрыть") } })
-}
-@Composable private fun ToggleCard(icon: ImageVector, title: String, subtitle: String, value: Boolean, change: (Boolean) -> Unit) {
+@Composable internal fun ToggleCard(icon: ImageVector, title: String, subtitle: String, value: Boolean, change: (Boolean) -> Unit) {
     Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surface) { Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) { Icon(icon, null, Modifier.size(23.dp), tint = MaterialTheme.colorScheme.secondary); Column(Modifier.weight(1f).padding(horizontal = 12.dp)) { Text(title, fontWeight = FontWeight.SemiBold, fontSize = 14.sp); Text(subtitle, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp)) }; Switch(value, change) } }
 }
-@Composable private fun ActionCard(icon: ImageVector, title: String, subtitle: String, click: () -> Unit) {
+@Composable internal fun ActionCard(icon: ImageVector, title: String, subtitle: String, click: () -> Unit) {
     Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxWidth().clickable(onClick = click)) { Row(Modifier.padding(17.dp), verticalAlignment = Alignment.CenterVertically) { Icon(icon, null, Modifier.size(23.dp), tint = MaterialTheme.colorScheme.secondary); Column(Modifier.weight(1f).padding(horizontal = 12.dp)) { Text(title, fontSize = 14.sp, fontWeight = FontWeight.SemiBold); Text(subtitle, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp)) }; Icon(Icons.Outlined.ChevronRight, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant) } }
 }
 @Composable private fun SectionLabel(title: String) { Text(title.uppercase(), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp, bottom = 2.dp)) }

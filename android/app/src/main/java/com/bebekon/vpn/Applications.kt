@@ -22,6 +22,8 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -32,11 +34,11 @@ import androidx.core.graphics.drawable.toBitmap
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-data class InstalledApp(val packageName: String, val label: String)
+data class InstalledApp(val packageName: String, val label: String, val webDomain: String = "")
 
 fun installedApps(context: Context): List<InstalledApp> = context.packageManager
     .queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0)
-    .map { InstalledApp(it.activityInfo.packageName, it.loadLabel(context.packageManager).toString()) }
+    .map { InstalledApp(it.activityInfo.packageName, it.loadLabel(context.packageManager).toString(), webApp(context, it.activityInfo.packageName)?.domain.orEmpty()) }
     .distinctBy { it.packageName }.filter { it.packageName != context.packageName }
     .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.label })
 
@@ -52,14 +54,23 @@ fun installedApps(context: Context): List<InstalledApp> = context.packageManager
 }
 
 @Composable fun ApplicationPicker(initial: Set<String>, initialVpn: Boolean, routing: RoutingMode, dismiss: () -> Unit, choose: (List<InstalledApp>, Boolean) -> Unit) {
+    AppPicker(initial.associateWith { initialVpn }, initialVpn, false, routing, dismiss) { apps, actions, vpn -> choose(apps.filter { it.packageName in actions }, vpn) }
+}
+@Composable fun ApplicationRulesPicker(rules: List<Rule>, routing: RoutingMode, dismiss: () -> Unit, save: (List<InstalledApp>, Map<String, Boolean>) -> Unit) {
+    AppPicker(effectiveAppRules(rules), true, true, routing, dismiss) { apps, actions, _ -> save(apps, actions) }
+}
+@Composable private fun AppPicker(initial: Map<String, Boolean>, initialVpn: Boolean, manageRules: Boolean, routing: RoutingMode, dismiss: () -> Unit, choose: (List<InstalledApp>, Map<String, Boolean>, Boolean) -> Unit) {
     val context = LocalContext.current
     var search by remember { mutableStateOf("") }
-    var selected by remember { mutableStateOf(initial) }
+    var assignments by remember { mutableStateOf(initial) }
     var vpn by remember { mutableStateOf(initialVpn) }
     var onlySelected by remember { mutableStateOf(false) }
     var loading by remember { mutableStateOf(true) }
     val apps by produceState<List<InstalledApp>>(emptyList()) {
-        value = withContext(Dispatchers.IO) { installedApps(context) }
+        value = withContext(Dispatchers.IO) {
+            val installed = installedApps(context)
+            installed + initial.keys.filter { pkg -> installed.none { it.packageName == pkg } }.map { InstalledApp(it, it) }
+        }
         loading = false
     }
     Dialog(dismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
@@ -67,37 +78,42 @@ fun installedApps(context: Context): List<InstalledApp> = context.packageManager
             Surface(Modifier.fillMaxWidth().heightIn(max = maxHeight), shape = RoundedCornerShape(26.dp), color = MaterialTheme.colorScheme.surface, border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)) {
                 Column(Modifier.padding(16.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) { Text("Приложения", fontSize = 22.sp, fontWeight = FontWeight.Bold); Text("Выбрано: ${selected.size}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                        Column(Modifier.weight(1f)) { Text("Приложения", fontSize = 22.sp, fontWeight = FontWeight.Bold); Text("Правил приложений: ${assignments.size}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                         IconButton(dismiss) { Icon(Icons.Outlined.Close, "Закрыть выбор приложений") }
                     }
                     OutlinedTextField(search, { search = it }, Modifier.fillMaxWidth().padding(top = 12.dp).testTag("app-search"), placeholder = { Text("Найти приложение") }, leadingIcon = { Icon(Icons.Outlined.Search, null) }, singleLine = true, shape = RoundedCornerShape(15.dp))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         FilterChip(!onlySelected, { onlySelected = false }, { Text("Все приложения") })
-                        FilterChip(onlySelected, { onlySelected = true }, { Text("Выбранные (${selected.size})") })
+                        FilterChip(onlySelected, { onlySelected = true }, { Text("Выбранные (${assignments.count { it.value == vpn }})") })
                     }
                     Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        FilterChip(vpn, { vpn = true }, { Text("Через VPN") }, Modifier.weight(1f))
-                        FilterChip(!vpn, { vpn = false }, { Text("Напрямую") }, Modifier.weight(1f))
+                        FilterChip(vpn, { vpn = true; if (!manageRules) assignments = assignments.mapValues { true } }, { Text("Через VPN") }, Modifier.weight(1f).testTag("apps-vpn"))
+                        FilterChip(!vpn, { vpn = false; if (!manageRules) assignments = assignments.mapValues { false } }, { Text("Напрямую") }, Modifier.weight(1f).testTag("apps-direct"))
                     }
-                    val visible = apps.filter { (!onlySelected || it.packageName in selected) && (it.label.contains(search, true) || it.packageName.contains(search, true)) }
+                    if (manageRules) Text("Без VPN-правил сайтов туннель получают только отмеченные приложения. «Напрямую» всегда исключает приложение из VPN, даже при правилах сайтов. Снять галочку — удалить правило.", fontSize = 11.sp, lineHeight = 15.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 8.dp))
+                    if (manageRules) Text("ChatGPT с главного экрана браузера: добавьте готовый набор OpenAI / ChatGPT. Браузер при этом не должен иметь правило «Напрямую».", fontSize = 11.sp, lineHeight = 15.sp, color = MaterialTheme.colorScheme.secondary, modifier = Modifier.padding(bottom = 8.dp))
+                    val visible = apps.filter { (!onlySelected || assignments[it.packageName] == vpn) && (it.label.contains(search, true) || it.packageName.contains(search, true)) }
                     LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("app-list"), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                         if (loading) item { Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() } }
                         else if (visible.isEmpty()) item { Text("Приложения не найдены", Modifier.padding(vertical = 24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant) }
                         items(visible, key = { it.packageName }) { app ->
-                            Row(Modifier.fillMaxWidth().testTag("app-${app.packageName}").clip(RoundedCornerShape(14.dp)).background(if (app.packageName in selected) MaterialTheme.colorScheme.primary.copy(alpha = .10f) else androidx.compose.ui.graphics.Color.Transparent)
-                                .clickable { selected = if (app.packageName in selected) selected - app.packageName else selected + app.packageName }
+                            val checked = assignments[app.packageName] == vpn
+                            Row(Modifier.fillMaxWidth().testTag("app-${app.packageName}").clip(RoundedCornerShape(14.dp)).background(if (checked) MaterialTheme.colorScheme.primary.copy(alpha = .10f) else androidx.compose.ui.graphics.Color.Transparent)
+                                .toggleable(value = checked, role = Role.Checkbox) { assignments = if (checked) assignments - app.packageName else assignments + (app.packageName to vpn) }
                                 .padding(horizontal = 8.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                                 ApplicationIcon(app.packageName)
                                 Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
                                     Text(app.label, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     Text(app.packageName, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    if (app.webDomain.isNotEmpty()) Text("Веб-приложение · правило сайта ${app.webDomain}", fontSize = 10.sp, color = MaterialTheme.colorScheme.secondary)
+                                    if (manageRules && assignments.containsKey(app.packageName) && !checked) Text(if (vpn) "Сейчас: напрямую" else "Сейчас: через VPN", fontSize = 10.sp, color = MaterialTheme.colorScheme.secondary)
                                 }
-                                Checkbox(app.packageName in selected, onCheckedChange = null)
+                                Checkbox(checked, onCheckedChange = null)
                             }
                         }
                     }
                     if (routing == RoutingMode.ALL) Text("Правила приложений работают в режиме «По правилам». Его можно выбрать на странице правил.", Modifier.padding(top = 8.dp), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Button({ choose(apps.filter { it.packageName in selected }, vpn) }, Modifier.fillMaxWidth().padding(top = 12.dp).height(48.dp).testTag("save-apps"), enabled = selected.isNotEmpty() && selected.size <= 256 && !loading, shape = RoundedCornerShape(15.dp)) { Text("Сохранить (${selected.size})") }
+                    Button({ choose(apps, assignments, vpn) }, Modifier.fillMaxWidth().padding(top = 12.dp).height(48.dp).testTag("save-apps"), enabled = (manageRules || assignments.isNotEmpty()) && assignments.size <= 256 && !loading, shape = RoundedCornerShape(15.dp)) { Text("Сохранить (${assignments.size})") }
                 }
             }
         }

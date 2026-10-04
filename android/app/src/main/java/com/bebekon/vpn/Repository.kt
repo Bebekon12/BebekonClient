@@ -22,7 +22,8 @@ import javax.crypto.spec.GCMParameterSpec
 
 class BebekonApplication : Application() {
     lateinit var repository: Repository; private set
-    override fun onCreate() { super.onCreate(); repository = Repository(this) }
+    lateinit var updates: AppUpdater; private set
+    override fun onCreate() { super.onCreate(); repository = Repository(this); updates = AppUpdater(this) }
 }
 val Context.repo get() = (applicationContext as BebekonApplication).repository
 

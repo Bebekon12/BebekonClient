@@ -32,13 +32,45 @@ data class Rule(val id: String = UUID.randomUUID().toString(), val name: String,
     fun toJson() = json("id" to id, "name" to name, "kind" to kind.name, "values" to array(values), "vpn" to vpn, "created" to created)
     companion object { fun fromJson(o: JSONObject) = Rule(o.getString("id"), o.getString("name"), RuleKind.valueOf(o.getString("kind")), o.getJSONArray("values").strings(), o.optBoolean("vpn", true), o.optLong("created")) }
 }
+fun effectiveAppRules(rules: List<Rule>): Map<String, Boolean> {
+    val actions = linkedMapOf<String, Boolean>()
+    rules.filter { it.kind == RuleKind.APP }.sortedByDescending { it.created }.forEach { rule -> rule.values.forEach { actions.putIfAbsent(it, rule.vpn) } }
+    return actions
+}
+fun replaceAppRules(rules: List<Rule>, actions: Map<String, Boolean>, labels: Map<String, String>, now: Long): List<Rule> {
+    val old = rules.filter { it.kind == RuleKind.APP }.sortedByDescending { it.created }
+    return rules.filterNot { it.kind == RuleKind.APP } + actions.map { (pkg, vpn) ->
+        val previous = old.firstOrNull { pkg in it.values }
+        Rule(id = previous?.takeIf { it.values.size == 1 }?.id ?: UUID.randomUUID().toString(),
+            name = previous?.takeIf { it.values.size == 1 }?.name ?: labels[pkg] ?: pkg, kind = RuleKind.APP, values = listOf(pkg), vpn = vpn,
+            created = if (previous != null && previous.vpn == vpn) previous.created else now)
+    }
+}
 enum class ThemeChoice(val label: String) { DARK("Тёмная"), LIGHT("Светлая"), SYSTEM("Как в системе") }
 enum class RoutingMode(val label: String) { ALL("Весь трафик"), RULES("По правилам") }
 enum class PingMethod(val label: String) { HTTPS_GET("HTTPS GET · рекомендуется"), HTTPS_HEAD("HTTPS HEAD"), TCP("TCP") }
 enum class PingTarget(val label: String, val url: String) { CLOUDFLARE("Cloudflare", "https://cp.cloudflare.com/generate_204"), GOOGLE("Google", "https://www.gstatic.com/generate_204") }
-data class Preferences(val theme: ThemeChoice = ThemeChoice.DARK, val routing: RoutingMode = RoutingMode.ALL, val ping: PingMethod = PingMethod.HTTPS_GET, val animations: Boolean = true, val allowLan: Boolean = true, val autoReconnect: Boolean = true, val pingTarget: PingTarget = PingTarget.CLOUDFLARE) {
-    fun toJson() = json("theme" to theme.name, "routing" to routing.name, "ping" to ping.name, "animations" to animations, "allowLan" to allowLan, "autoReconnect" to autoReconnect, "pingTarget" to pingTarget.name)
-    companion object { fun fromJson(o: JSONObject) = Preferences(ThemeChoice.valueOf(o.optString("theme", "DARK")), RoutingMode.valueOf(o.optString("routing", "ALL")), PingMethod.valueOf(o.optString("ping", "HTTPS_GET")), o.optBoolean("animations", true), o.optBoolean("allowLan", true), o.optBoolean("autoReconnect", true), PingTarget.valueOf(o.optString("pingTarget", "CLOUDFLARE"))) }
+enum class DnsResolver(val label: String, val address: String, val hostname: String) {
+    CLOUDFLARE("Cloudflare", "1.1.1.1", "cloudflare-dns.com"), GOOGLE("Google", "8.8.8.8", "dns.google")
+}
+data class Preferences(val theme: ThemeChoice = ThemeChoice.DARK, val routing: RoutingMode = RoutingMode.ALL, val ping: PingMethod = PingMethod.HTTPS_GET, val animations: Boolean = true, val allowLan: Boolean = true, val autoReconnect: Boolean = true, val pingTarget: PingTarget = PingTarget.CLOUDFLARE,
+    val mapLocation: Boolean = true, val dnsResolver: DnsResolver = DnsResolver.CLOUDFLARE, val mtu: Int = 1400, val connectionNotifications: Boolean = true, val checkUpdates: Boolean = true) {
+    fun toJson() = json("theme" to theme.name, "routing" to routing.name, "ping" to ping.name, "animations" to animations, "allowLan" to allowLan, "autoReconnect" to autoReconnect, "pingTarget" to pingTarget.name,
+        "mapLocation" to mapLocation, "dnsResolver" to dnsResolver.name, "mtu" to mtu, "connectionNotifications" to connectionNotifications, "checkUpdates" to checkUpdates)
+    companion object { fun fromJson(o: JSONObject) = Preferences(ThemeChoice.valueOf(o.optString("theme", "DARK")), RoutingMode.valueOf(o.optString("routing", "ALL")), PingMethod.valueOf(o.optString("ping", "HTTPS_GET")), o.optBoolean("animations", true), o.optBoolean("allowLan", true), o.optBoolean("autoReconnect", true), PingTarget.valueOf(o.optString("pingTarget", "CLOUDFLARE")),
+        o.optBoolean("mapLocation", true), DnsResolver.valueOf(o.optString("dnsResolver", "CLOUDFLARE")), o.optInt("mtu", 1400).also { require(it in 1280..1500) }, o.optBoolean("connectionNotifications", true), o.optBoolean("checkUpdates", true)) }
+}
+
+/** Site rules need a shared tunnel; an app-only selection can be isolated by Android itself. */
+data class AppTunnelPolicy(val allowed: Set<String>? = null, val excluded: Set<String> = emptySet()) {
+    val appOnly get() = allowed != null
+}
+fun appTunnelPolicy(state: SavedState): AppTunnelPolicy {
+    if (state.preferences.routing == RoutingMode.ALL) return AppTunnelPolicy()
+    val apps = effectiveAppRules(state.rules)
+    val sitesNeedTunnel = state.rules.any { it.kind != RuleKind.APP && it.vpn }
+    return if (sitesNeedTunnel) AppTunnelPolicy(excluded = apps.filterValues { !it }.keys)
+    else AppTunnelPolicy(allowed = apps.filterValues { it }.keys)
 }
 data class SavedState(val subscriptions: List<Subscription> = emptyList(), val selected: String? = null, val favorites: Set<String> = emptySet(), val rules: List<Rule> = emptyList(), val preferences: Preferences = Preferences()) {
     val nodes get() = subscriptions.flatMap { it.nodes }.distinctBy { it.id }
