@@ -51,12 +51,38 @@ class RoutingPolicyTest {
     }
     @Test fun oldPreferencesAndNewSettingsRoundTrip() {
         assertEquals(Preferences(), Preferences.fromJson(JSONObject()))
-        val p = Preferences(mapLocation = false, dnsResolver = DnsResolver.GOOGLE, mtu = 1280, connectionNotifications = false, checkUpdates = false, sitesInAllApps = true, routingDiagnostics = true)
+        val p = Preferences(mapLocation = false, dnsResolver = DnsResolver.GOOGLE, mtu = 1280, connectionNotifications = false, checkUpdates = false, sitesInAllApps = true, routingDiagnostics = true, ipv6 = true)
         assertEquals(p, Preferences.fromJson(p.toJson()))
         val c = JSONObject(CoreConfig.build(state(emptyList()).copy(preferences = p), { error("No geo") }))
         assertEquals(1280, c.getJSONArray("inbounds").getJSONObject(0).getInt("mtu"))
         assertEquals("8.8.8.8", c.getJSONObject("dns").getJSONArray("servers").getJSONObject(0).getString("server"))
         assertFalse(c.getJSONObject("log").getBoolean("disabled"))
+    }
+    @Test fun ipv4CompatibilityDefaultMigratesOldSettingsAndMatchesTunnelDns() {
+        val s = state(listOf(app("com.openai.chatgpt"))).copy(preferences = Preferences.fromJson(json("routing" to "RULES", "sitesInAllApps" to true)))
+        assertFalse(s.preferences.ipv6)
+        val c = JSONObject(CoreConfig.build(s, { error("No geo") }))
+        assertEquals(listOf("172.19.0.1/30"), c.getJSONArray("inbounds").getJSONObject(0).getJSONArray("address").strings())
+        assertEquals("ipv4_only", c.getJSONObject("dns").getString("strategy"))
+        assertEquals("direct", c.getJSONObject("route").getString("final"))
+        assertEquals("direct-dns", c.getJSONObject("dns").getString("final"))
+        assertEquals("Direct sites must not be rerouted to VPN to work around IPv6", "direct", c.getJSONArray("outbounds").getJSONObject(1).getString("type"))
+    }
+    @Test fun ipv6OptInRestoresBothTunnelFamiliesAndDnsWithoutChangingAppScope() {
+        val s = state(listOf(app("com.openai.chatgpt")))
+        val v6 = s.copy(preferences = s.preferences.copy(ipv6 = true))
+        assertEquals(appTunnelPolicy(s), appTunnelPolicy(v6))
+        val c = JSONObject(CoreConfig.build(v6, { error("No geo") }))
+        assertEquals(listOf("172.19.0.1/30", "fdfe:dcba:9876::1/126"), c.getJSONArray("inbounds").getJSONObject(0).getJSONArray("address").strings())
+        assertEquals("prefer_ipv4", c.getJSONObject("dns").getString("strategy"))
+        assertEquals("vpn", c.getJSONObject("route").getString("final"))
+    }
+    @Test fun ipv4TunnelDoesNotPreventResolvingAnIpv6OnlyVpnEndpoint() {
+        val c = JSONObject(CoreConfig.build(state(emptyList()), { error("No geo") }))
+        val resolver = c.getJSONArray("outbounds").getJSONObject(0).getJSONObject("domain_resolver")
+        assertEquals("direct-dns", resolver.getString("server"))
+        assertEquals("prefer_ipv4", resolver.getString("strategy"))
+        assertEquals("ipv4_only", c.getJSONObject("dns").getString("strategy"))
     }
     @Test fun routingDiagnosticsRedactsCredentialsButKeepsFailureAndRoutingEvidence() {
         val s = state(emptyList())

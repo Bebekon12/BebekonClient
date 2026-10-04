@@ -16,18 +16,26 @@ class AndroidSmokeTest {
     private val context: Context get() = InstrumentationRegistry.getInstrumentation().targetContext
     private val uuid = "3bf154da-0ee6-4c45-b5f4-8512b4a2d2bd"
     private fun seed(link: String) { val node = SubscriptionParser.link(link); context.repo.update { SavedState(subscriptions = listOf(Subscription(name = "Test fixture", source = "", nodes = listOf(node))), selected = node.id) } }
-    private fun verifyOtherAppTraffic(expectVpn: Boolean = true, stream: Boolean = false, url: String = "https://example.com/", routeMatch: String? = null) {
+    private fun verifyOtherAppTraffic(expectVpn: Boolean = true, stream: Boolean = false, url: String = "https://example.com/", routeMatch: String? = null, ipv4Checks: Boolean = false) {
         if (routeMatch != null) shell("logcat -c")
         val status = java.util.concurrent.atomic.AtomicInteger(0)
         val transport = java.util.concurrent.atomic.AtomicInteger(-1)
-        val reply = android.os.Messenger(android.os.Handler(android.os.Looper.getMainLooper()) { transport.set(it.arg2); status.set(it.arg1); true })
+        val checks = java.util.concurrent.atomic.AtomicReference<android.os.Bundle>()
+        val reply = android.os.Messenger(android.os.Handler(android.os.Looper.getMainLooper()) { checks.set(it.data); transport.set(it.arg2); status.set(it.arg1); true })
         val connection = object : android.content.ServiceConnection {
-            override fun onServiceConnected(name: android.content.ComponentName?, binder: android.os.IBinder?) { android.os.Messenger(binder).send(android.os.Message.obtain().apply { replyTo = reply; arg2 = if (stream) 1 else 0; data = android.os.Bundle().apply { putString("url", url) } }) }
+            override fun onServiceConnected(name: android.content.ComponentName?, binder: android.os.IBinder?) { android.os.Messenger(binder).send(android.os.Message.obtain().apply { replyTo = reply; arg2 = if (ipv4Checks) 2 else if (stream) 1 else 0; data = android.os.Bundle().apply { putString("url", url) } }) }
             override fun onServiceDisconnected(name: android.content.ComponentName?) = Unit
         }
         val intent = android.content.Intent().setComponent(android.content.ComponentName("com.bebekon.vpn.test", "com.bebekon.vpn.TrafficProbeService"))
         assertTrue(context.bindService(intent, connection, Context.BIND_AUTO_CREATE))
         try { compose.waitUntil(20_000) { status.get() != 0 }; assertEquals("Traffic from a separate Android UID", 200, status.get()); assertEquals("Actual Android VPN transport", if (expectVpn) 1 else 0, transport.get()); if (expectVpn) compose.waitUntil(5000) { VpnController.session.value.totalDown > 0 && VpnController.session.value.totalUp > 0 } } finally { context.unbindService(connection) }
+        if (ipv4Checks) {
+            val evidence = checks.get()
+            assertTrue("Android VPN has no IPv6 address or DNS server", evidence.getBoolean("ipv4Only"))
+            assertTrue("Native DNS still returns A records", evidence.getInt("aAnswers") > 0)
+            assertEquals("Native DNS suppresses AAAA in IPv4 mode", 0, evidence.getInt("aaaaAnswers", -1))
+            assertTrue("Android blocks cached literal IPv6 without falling through to physical networking", evidence.getBoolean("ipv6Blocked"))
+        }
         if (routeMatch != null) {
             compose.waitUntil(5000) { shellOutput("logcat -d -s BebekonCoreTest:D *:S").contains(routeMatch) }
             context.cacheDir.resolve("routing-evidence.txt").appendText("Expected: $routeMatch\n" + shellOutput("logcat -d -s BebekonCoreTest:D *:S") + "\n")
@@ -152,6 +160,8 @@ class AndroidSmokeTest {
             "hy2://secret@vpn.example:443?obfs=salamander&obfs-password=obfs"
         )
         for (link in samples) { seed(link); Libbox.checkConfig(CoreConfig.build(context.repo.state.value, context.repo::geo)) }
+        context.repo.update { it.copy(preferences = it.preferences.copy(ipv6 = true)) }
+        Libbox.checkConfig(CoreConfig.build(context.repo.state.value, context.repo::geo))
         val presets = context.repo.presets(); for ((_, rules) in presets) { context.repo.update { it.copy(rules = rules, preferences = it.preferences.copy(routing = RoutingMode.RULES)) }; Libbox.checkConfig(CoreConfig.build(context.repo.state.value, context.repo::geo)) }
         context.repo.update { it.copy(rules = listOf(Rule(name = "Browser", kind = RuleKind.APP, values = listOf("com.yandex.browser"))), preferences = it.preferences.copy(routing = RoutingMode.RULES)) }
         Libbox.checkConfig(CoreConfig.build(context.repo.state.value, context.repo::geo))
@@ -218,6 +228,13 @@ class AndroidSmokeTest {
         reloadRules(listOf(com.bebekon.vpn.Rule(name = "Chrome", kind = RuleKind.APP, values = listOf("com.android.chrome")), com.bebekon.vpn.Rule(name = "VPN site", kind = RuleKind.DOMAIN, values = listOf("example.com"))))
         verifyOtherAppTraffic(expectVpn = false)
         val domain = com.bebekon.vpn.Rule(name = "VPN site", kind = RuleKind.DOMAIN, values = listOf("example.com"))
+        // Reported failure: a shared site tunnel advertised IPv6 even when the
+        // physical Wi-Fi could not dial it. Unmatched browser HTTPS must stay direct.
+        context.repo.update { it.copy(preferences = it.preferences.copy(sitesInAllApps = true)) }
+        reloadRules(listOf(domain))
+        verifyOtherAppTraffic(url = "https://example.org/", routeMatch = "outbound/direct[direct]: outbound connection to", ipv4Checks = true)
+        verifyOtherAppTraffic(routeMatch = "domain_suffix=example.com => route(vpn)", ipv4Checks = true)
+        context.repo.update { it.copy(preferences = it.preferences.copy(sitesInAllApps = false)) }
         reloadRules(listOf(com.bebekon.vpn.Rule(name = "Selected app", kind = RuleKind.APP, values = listOf("com.bebekon.vpn.test")), domain))
         verifyOtherAppTraffic(); verifyOtherAppTraffic(stream = true)
         reloadRules(listOf(com.bebekon.vpn.Rule(name = "Selected app", kind = RuleKind.APP, values = listOf("com.bebekon.vpn.test"))))

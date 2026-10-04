@@ -6,7 +6,9 @@ object CoreConfig {
     fun build(state: SavedState, geo: (String) -> JSONObject, tunnel: Boolean = true, policy: AppTunnelPolicy = appTunnelPolicy(state)): String {
         val node = state.selectedNode ?: error("Выберите сервер")
         require(node.unsupported.isEmpty()) { node.unsupported }
-        val vpn = node.config.also { it.put("tag", "vpn"); it.put("domain_resolver", "direct-dns"); it.put("connect_timeout", "4s") }
+        // The outer connection may still need IPv6 (e.g. an IPv6-only mobile network).
+        // It is independent from which address families apps see inside the tunnel.
+        val vpn = node.config.also { it.put("tag", "vpn"); it.put("domain_resolver", json("server" to "direct-dns", "strategy" to "prefer_ipv4")); it.put("connect_timeout", "4s") }
         val rules = mutableListOf<JSONObject>()
         rules += json("action" to "sniff", "timeout" to "300ms")
         rules += json("protocol" to "dns", "action" to "hijack-dns")
@@ -39,9 +41,10 @@ object CoreConfig {
         val dns = json("servers" to array(listOf(
             json("type" to "https", "tag" to "direct-dns", "server" to resolver.address, "server_port" to 443, "path" to "/dns-query", "tls" to json("enabled" to true, "server_name" to resolver.hostname)),
             json("type" to "https", "tag" to "vpn-dns", "server" to resolver.address, "server_port" to 443, "path" to "/dns-query", "tls" to json("enabled" to true, "server_name" to resolver.hostname), "detour" to "vpn")
-        )), "rules" to array(dnsRules), "final" to if (defaultVpn) "vpn-dns" else "direct-dns", "strategy" to "prefer_ipv4", "reverse_mapping" to true)
+        )), "rules" to array(dnsRules), "final" to if (defaultVpn) "vpn-dns" else "direct-dns", "strategy" to if (state.preferences.ipv6) "prefer_ipv4" else "ipv4_only", "reverse_mapping" to true)
         val log = json("disabled" to !(state.preferences.routingDiagnostics || BuildConfig.DEBUG && node.host == "10.0.2.2"), "level" to "debug")
-        return json("log" to log, "dns" to dns, "inbounds" to array(if (tunnel) listOf(json("type" to "tun", "tag" to "tun", "address" to array(listOf("172.19.0.1/30", "fdfe:dcba:9876::1/126")), "mtu" to state.preferences.mtu, "auto_route" to true, "strict_route" to true, "stack" to "gvisor")) else emptyList()), "outbounds" to array(listOf(vpn, json("type" to "direct", "tag" to "direct"))), "route" to route, "experimental" to json("clash_api" to json())).toString()
+        val addresses = listOf("172.19.0.1/30") + if (state.preferences.ipv6) listOf("fdfe:dcba:9876::1/126") else emptyList()
+        return json("log" to log, "dns" to dns, "inbounds" to array(if (tunnel) listOf(json("type" to "tun", "tag" to "tun", "address" to array(addresses), "mtu" to state.preferences.mtu, "auto_route" to true, "strict_route" to true, "stack" to "gvisor")) else emptyList()), "outbounds" to array(listOf(vpn, json("type" to "direct", "tag" to "direct"))), "route" to route, "experimental" to json("clash_api" to json())).toString()
     }
     fun validateRule(r: Rule) {
         require(r.values.isNotEmpty() && r.values.size <= 256 && r.values.all { it.isNotBlank() && it.length <= 253 && it.none(Char::isISOControl) }) { "Укажите значение правила" }

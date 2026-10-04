@@ -11,6 +11,7 @@ public final class TrafficProbeService extends Service {
     private final Messenger messenger = new Messenger(new Handler(Looper.getMainLooper(), message -> {
         Messenger reply = message.replyTo;
         boolean streaming = message.arg2 == 1;
+        boolean ipv4Checks = message.arg2 == 2;
         String url = message.getData().getString("url", "https://example.com/");
         new Thread(() -> {
             android.util.Log.i("BebekonTrafficTest", "HTTPS probe started; UID=" + android.os.Process.myUid());
@@ -19,8 +20,25 @@ public final class TrafficProbeService extends Service {
             android.util.Log.i("BebekonTrafficTest", "Traffic uses VPN: " + (capabilities != null && capabilities.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN)));
             boolean usesVpn = capabilities != null && capabilities.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN);
             int status = -1;
+            Bundle checks = new Bundle();
             HttpURLConnection connection = null;
             try {
+                if (ipv4Checks) {
+                    android.net.LinkProperties link = network.getLinkProperties(network.getActiveNetwork());
+                    if (link == null) throw new IOException("No active VPN link");
+                    checks.putBoolean("ipv4Only", link.getLinkAddresses().stream().noneMatch(a -> a.getAddress() instanceof Inet6Address)
+                        && link.getDnsServers().stream().noneMatch(a -> a instanceof Inet6Address));
+                    InetAddress dns = link.getDnsServers().get(0);
+                    checks.putInt("aAnswers", dnsAnswers(dns, 1));
+                    checks.putInt("aaaaAnswers", dnsAnswers(dns, 28));
+                    long began = android.os.SystemClock.elapsedRealtime();
+                    try (Socket socket = new Socket()) {
+                        socket.connect(new InetSocketAddress("2001:db8::1", 443), 1500);
+                    } catch (SocketException blocked) {
+                        checks.putBoolean("ipv6Blocked", android.os.SystemClock.elapsedRealtime() - began < 1000);
+                    }
+                    android.util.Log.i("BebekonTrafficTest", "IPv4 compatibility: " + checks);
+                }
                 if (streaming) {
                     // This virtual destination can only be reached through the loopback VPN fixture.
                     try (Socket socket = new Socket()) {
@@ -46,10 +64,28 @@ public final class TrafficProbeService extends Service {
             } catch (Exception error) { android.util.Log.e("BebekonTrafficTest", "Fixture HTTPS failed", error); }
             finally { if (connection != null) connection.disconnect(); }
             android.util.Log.i("BebekonTrafficTest", "HTTPS probe finished: " + status);
-            try { Message response = Message.obtain(); response.arg1 = status; response.arg2 = usesVpn ? 1 : 0; reply.send(response); } catch (RemoteException ignored) { }
+            try { Message response = Message.obtain(); response.arg1 = status; response.arg2 = usesVpn ? 1 : 0; response.setData(checks); reply.send(response); } catch (RemoteException ignored) { }
         }, "BebekonTrafficFixture").start();
         return true;
     }));
+    private static int dnsAnswers(InetAddress server, int type) throws IOException {
+        ByteArrayOutputStream query = new ByteArrayOutputStream();
+        DataOutputStream writer = new DataOutputStream(query);
+        writer.writeShort(0xBE05); writer.writeShort(0x0100); writer.writeShort(1);
+        writer.writeShort(0); writer.writeShort(0); writer.writeShort(0);
+        for (String label : "example.com".split("\\.")) { writer.writeByte(label.length()); writer.writeBytes(label); }
+        writer.writeByte(0); writer.writeShort(type); writer.writeShort(1);
+        byte[] request = query.toByteArray();
+        try (DatagramSocket socket = new DatagramSocket()) {
+            socket.connect(server, 53); socket.setSoTimeout(5000);
+            socket.send(new DatagramPacket(request, request.length));
+            DatagramPacket response = new DatagramPacket(new byte[4096], 4096); socket.receive(response);
+            if (response.getLength() < 12) throw new IOException("Truncated DNS response");
+            DataInputStream reader = new DataInputStream(new ByteArrayInputStream(response.getData(), 0, response.getLength()));
+            if (reader.readUnsignedShort() != 0xBE05 || (reader.readUnsignedShort() & 15) != 0) throw new IOException("Invalid DNS response");
+            reader.readUnsignedShort(); return reader.readUnsignedShort();
+        }
+    }
     @Override public IBinder onBind(Intent intent) { return messenger.getBinder(); }
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
         // Black-box check of an installed release APK without depending on obfuscated app classes.

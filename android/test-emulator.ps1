@@ -14,6 +14,9 @@ $configPath = Join-Path $output 'fixture.json'
 $config | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $configPath -Encoding utf8
 $fixture = Start-Process -FilePath $FixtureExecutable -ArgumentList @('run','-c',('"'+$configPath+'"')) -PassThru -WindowStyle Hidden -RedirectStandardOutput (Join-Path $output 'fixture.log') -RedirectStandardError (Join-Path $output 'fixture-error.log')
 try {
+    # Reinstalling over a retained emulator can leave SystemUI holding the old
+    # TileService binder/state. The live test adds a fresh tile after connection.
+    & $adb -s $Serial shell cmd statusbar remove-tile com.bebekon.vpn/.VpnTileService
     & $adb -s $Serial install -r (Join-Path $PSScriptRoot 'app/build/outputs/apk/debug/app-debug.apk')
     if ($LASTEXITCODE -ne 0) { throw 'App install failed.' }
     & $adb -s $Serial install -r (Join-Path $PSScriptRoot 'app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk')

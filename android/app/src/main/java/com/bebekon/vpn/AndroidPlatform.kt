@@ -34,6 +34,8 @@ class AndroidPlatform(private val context: Context, private val vpn: BebekonVpnS
         val builder = service.Builder().setSession("Bebekon VPN").setMtu(options.mtu).setBlocking(false).setMetered(false)
         fun addresses(iterator: RoutePrefixIterator) { while (iterator.hasNext()) { val p = iterator.next(); builder.addAddress(p.address(), p.prefix()) } }
         addresses(options.inet4Address); addresses(options.inet6Address)
+        // No allowFamily(AF_INET6): in IPv4 mode Android must block IPv6 for
+        // captured apps, rather than let it bypass the VPN on the physical network.
         val dns = options.dnsServerAddress; while (dns.hasNext()) builder.addDnsServer(dns.next())
         fun routes(iterator: RoutePrefixIterator) { while (iterator.hasNext()) { val p = iterator.next(); builder.addRoute(p.address(), p.prefix()) } }
         routes(options.inet4RouteRange); routes(options.inet6RouteRange)
@@ -54,6 +56,7 @@ class AndroidPlatform(private val context: Context, private val vpn: BebekonVpnS
         descriptor?.close(); descriptor = fd
         context.repo.log(if (policy.appOnly) "Android: туннель только для выбранных приложений (${policy.allowed!!.size}); остальные используют обычную сеть" else "Android: общий туннель, исключений приложений: ${policy.excluded.size}")
         if (policy.siteOnlyBrowsers.isNotEmpty()) context.repo.log("Браузеры веб-приложений: ${policy.siteOnlyBrowsers.joinToString()}; через VPN только сайты из правил")
+        context.repo.log(if ((tunnelState ?: context.repo.state.value).preferences.ipv6) "Адреса туннеля: IPv4 + IPv6" else "Адреса туннеля: IPv4; IPv6 внутри туннеля отключён")
         return fd.fd
     }
     override fun useProcFS() = false

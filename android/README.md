@@ -54,6 +54,14 @@ Server lists default to live ping ordering (green, amber, red, unknown). Home us
 
 The isolated validation setup includes a tiny **test-only WebAPK metadata fixture**, in addition to a separate-UID HTTPS/streaming companion. It exercises app-only stored rules that become site rules at runtime, mixed native/WebAPK app selections, and unselected-app physical networking. The fixture APK is never included in public release assets.
 
+## Android 0.1.5: IPv4 compatibility
+
+The affected phone's route journal confirmed correct ownership (`com.yandex.browser`), TLS domain (`yandex.ru`) and Direct selection, followed by literal IPv6 dials on `wlan0` failing with `network is unreachable` or timeout. The previous configuration always advertised a synthetic IPv6 TUN address and accepted AAAA answers even when the physical network could not reach those destinations. `prefer_ipv4` does not suppress explicit AAAA queries or change an already resolved literal IPv6 destination.
+
+Android now defaults to an IPv4-only TUN with DNS strategy `ipv4_only`. Settings → Connection → «IPv6 в туннеле» restores dual-stack TUN/DNS when both the physical network and VPN server support it; changing the option reloads the active service. Existing saved settings without this field migrate to the compatibility default without altering app/site rules. Disabled IPv6 is blocked by Android for captured applications: no IPv6 address, route, DNS server or `allowFamily(AF_INET6)` is added, so it cannot fall through to the physical network. Applications outside the OS allowlist remain on their own network. The outer VPN endpoint's domain resolver keeps an explicit dual-stack preference independently of the apps' tunnel family.
+
+This addresses the demonstrated IPv6 failure mechanism. The user's exact phone/browser session still requires confirmation after installing the patch; no physical user device is connected to this workspace. IPv6-only destinations inside the tunnel require enabling the IPv6 setting.
+
 ## Build
 
 Required: JDK 17, Go 1.26.8, Android SDK platform 36, NDK 28.2.13676358. Set `JAVA_HOME`, `ANDROID_HOME` and `ANDROID_NDK_HOME`, and add Go to PATH. Gradle 8.13 is pinned by the wrapper and SHA-256.
@@ -116,3 +124,7 @@ The actual signed 0.1.2 APK reproduced the WebAPK-only scope defect (unchecked c
 ## Release 0.1.4 verification
 
 49 JVM tests passed; debug/release Lint reported zero errors and 18 advisory warnings. The final real-tunnel suite reported OK (9 tests), with two optional external-input methods returning early. A test WebAPK identifies a separate companion UID as its host browser: native route logs confirm VPN for the matched site and Direct for an unmatched HTTPS page, including mixed native-app selection. Explicit whole-browser selection retains VPN. The signed R8 universal APK retains the original certificate and 16 KiB alignment; updating over signed 0.1.3 preserved encrypted fixture data and the app rule. Its optional route journal populated and Copy was checked. No exact physical Yandex failure was reproduced; the journal provides evidence for that remaining investigation. Full evidence and tool limitations are recorded in docs/VALIDATION.md.
+
+## Release 0.1.5 verification
+
+52 JVM tests passed; debug/release Lint reported zero errors and 18 advisory warnings. The final real-service suite passed OK (9 tests), 159.942 seconds, with two optional external-input methods returning early. Fresh native logs distinguish the shared-mode Direct HTTPS request from the matched VPN site. From a separate captured UID, A DNS returns addresses, AAAA returns none, and a literal IPv6 connection fails immediately. Android's actual release VPN link has an IPv4 address/DNS and an unreachable IPv6 default route, with bypass disabled. Signed R8 0.1.5 installed over published 0.1.4, preserved the encrypted fixture subscription/selected node/light theme and carried a companion HTTPS request with HTTP 200. The default-off IPv6 setting was visually inspected. Physical phone confirmation and real dual-stack IPv6 forwarding remain outside this validation.
