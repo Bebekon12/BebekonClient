@@ -15,9 +15,11 @@ public sealed partial class MainViewModel
     private string? endpointLookupKey;
     private Task? endpointLookup;
     private DateTimeOffset endpointAttempted;
+    private readonly LocationLookup mapLookup = new();
     public GeoPoint? MapDestination => MapLocationEnabled && SelectedServer?.Id == mapEndpointServer ? mapEndpoint?.Point : null;
     public string MapCountry => MapDestination is null ? "" : mapEndpoint?.Country ?? "";
-    private void ResetMapDestination() { mapEndpoint = null; mapEndpointServer = null; endpointLookupKey = null; Notify(nameof(MapDestination)); Notify(nameof(MapCountry)); }
+    public string SelectedCountry => CountryInfo.Resolve(SelectedServer?.Name) ?? MapCountry;
+    private void ResetMapDestination() { mapEndpoint = null; mapEndpointServer = null; endpointLookupKey = null; Notify(nameof(MapDestination)); Notify(nameof(MapCountry)); Notify(nameof(SelectedCountry)); }
     public bool MapLocationEnabled {
         get => Settings.MapLocation;
         set { Settings.MapLocation = value; Save(); Notify(); QueueApply(); ResetMapDestination(); if (!value) MapOrigin = null; else { originChecked = default; originAttempted = default; _ = RefreshMapOriginAsync(); } }
@@ -34,23 +36,18 @@ public sealed partial class MainViewModel
         var uplink = uplinkSignature;
         var connectedSpec = Connected ? spec : null;
         originAttempted = DateTimeOffset.UtcNow;
-        foreach (var fallback in new[] { false, true }) {
             try {
-                using var limit = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token); limit.CancelAfter(TimeSpan.FromSeconds(4));
                 using var handler = new SocketsHttpHandler { UseProxy = false, ConnectTimeout = TimeSpan.FromSeconds(2), AllowAutoRedirect = false };
                 if (connectedSpec is not null) {
                     handler.UseProxy = true;
                     handler.Proxy = new System.Net.WebProxy("socks5://127.0.0.1:" + connectedSpec.OriginProbePort) { Credentials = new System.Net.NetworkCredential("bebekon", connectedSpec.ProbePassword) };
                 }
                 using var http = new HttpClient(handler) { MaxResponseContentBufferSize = 16 * 1024 };
-                var text = await http.GetStringAsync(fallback ? "https://ipapi.co/json/" : "https://ipwho.is/?fields=success,latitude,longitude", limit.Token);
-                var result = fallback ? MapLocation.ParseFallback(text) : MapLocation.Parse(text);
+                var result = await mapLookup.LookupAsync(http, null, lifetime.Token);
                 // Never accept a result from a replaced tunnel or a different uplink.
-                if (MapLocationEnabled && (!ConnectionBusy || locatingBeforeTunnel) && (connectedSpec is null ? !Connected : ReferenceEquals(spec, connectedSpec)) && uplink == uplinkSignature && !lifetime.IsCancellationRequested) { MapOrigin = result; originChecked = DateTimeOffset.UtcNow; }
+                if (result is not null && MapLocationEnabled && (!ConnectionBusy || locatingBeforeTunnel) && (connectedSpec is null ? !Connected : ReferenceEquals(spec, connectedSpec)) && uplink == uplinkSignature && !lifetime.IsCancellationRequested) { MapOrigin = result.Point; originChecked = DateTimeOffset.UtcNow; }
                 return;
             } catch (Exception e) when (e is HttpRequestException or OperationCanceledException or FormatException or System.Text.Json.JsonException or KeyNotFoundException or InvalidOperationException) { }
-            if (lifetime.IsCancellationRequested) return;
-        }
     }
     private Task RefreshMapDestinationAsync()
     {
@@ -58,24 +55,19 @@ public sealed partial class MainViewModel
         if (!MapLocationEnabled || !Connected || ConnectionBusy || spec is null || spec.OriginProbePort == 0 || appliedConfigurationVersion != configurationVersion || CountryInfo.Resolve(SelectedServer?.Name) is not null || !System.Net.IPAddress.TryParse(VpnIp, out var address)) return Task.CompletedTask;
         var key = spec.Server.Id + "/" + address;
         if (endpointLookupKey == key && (mapEndpoint is not null || DateTimeOffset.UtcNow - endpointAttempted < TimeSpan.FromSeconds(30))) return Task.CompletedTask;
-        if (endpointLookupKey != key) { mapEndpoint = null; mapEndpointServer = null; Notify(nameof(MapDestination)); Notify(nameof(MapCountry)); }
+        if (endpointLookupKey != key) { mapEndpoint = null; mapEndpointServer = null; Notify(nameof(MapDestination)); Notify(nameof(MapCountry)); Notify(nameof(SelectedCountry)); }
         endpointLookupKey = key; endpointAttempted = DateTimeOffset.UtcNow;
         return endpointLookup = LookupMapDestinationAsync(spec, address.ToString());
     }
     private async Task LookupMapDestinationAsync(ConnectSpec current, string ip)
     {
-        foreach (var fallback in new[] { false, true }) {
             try {
-                using var limit = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token); limit.CancelAfter(TimeSpan.FromSeconds(4));
                 using var http = LatencyService.ProbeClient(current with { ProbePort = current.OriginProbePort }); http.MaxResponseContentBufferSize = 16 * 1024;
-                var text = await http.GetStringAsync(fallback ? $"https://ipapi.co/{ip}/json/" : $"https://ipwho.is/{ip}?fields=success,latitude,longitude,country_code", limit.Token);
-                var result = MapLocation.ParseEndpoint(text, fallback);
-                if (MapLocationEnabled && Connected && ReferenceEquals(spec, current) && SelectedServer?.Id == current.Server.Id && VpnIp == ip) {
-                    mapEndpoint = result; mapEndpointServer = current.Server.Id; Notify(nameof(MapDestination)); Notify(nameof(MapCountry));
+                var result = await mapLookup.LookupAsync(http, ip, lifetime.Token);
+                if (result is not null && MapLocationEnabled && Connected && ReferenceEquals(spec, current) && SelectedServer?.Id == current.Server.Id && System.Net.IPAddress.TryParse(VpnIp, out var actual) && actual.Equals(System.Net.IPAddress.Parse(ip))) {
+                    mapEndpoint = result; mapEndpointServer = current.Server.Id; Notify(nameof(MapDestination)); Notify(nameof(MapCountry)); Notify(nameof(SelectedCountry));
                 }
                 return;
             } catch (Exception e) when (e is HttpRequestException or OperationCanceledException or FormatException or System.Text.Json.JsonException or KeyNotFoundException or InvalidOperationException) { }
-            if (lifetime.IsCancellationRequested) return;
-        }
     }
 }

@@ -32,13 +32,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     init {
         viewModelScope.launch { saved.collect { origin.enabled(it.preferences.mapLocation) } }
         viewModelScope.launch { combine(saved, session) { state, current -> state to current }.collect { (state, current) ->
-            val node = state.selectedNode
-            val ip = if (current.phase == Phase.ON && node?.country.isNullOrBlank() && current.server == node?.name) current.publicIp else ""
-            origin.serverIp("${node?.id}/$ip", ip)
+            refreshMapDestination(state, current)
         } }
-        viewModelScope.launch { while (isActive) { delay(30_000); origin.refresh() } }
+        viewModelScope.launch { while (isActive) { delay(30_000); origin.refresh(); refreshMapDestination(saved.value, session.value) } }
         // Older Xray imports lost profile remarks. Refresh them once per launch; identity stays unchanged.
         saved.value.subscriptions.filter { sub -> sub.source.startsWith("https://") && sub.nodes.any { it.country.isBlank() && it.name.lowercase() in setOf("proxy", "vpn", "out", "outbound") } }.forEach(::refresh)
+    }
+    private fun refreshMapDestination(state: SavedState, current: Session) {
+        val node = state.selectedNode
+        val ip = if (current.phase == Phase.ON && node?.country.isNullOrBlank() && current.server == node?.name) current.publicIp else ""
+        origin.serverIp(node?.id.orEmpty(), ip)
     }
     fun task(action: suspend () -> Unit) = viewModelScope.launch {
         busy.value = true

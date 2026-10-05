@@ -4,6 +4,7 @@ Native Kotlin/Jetpack Compose client for Android 10+ (API 29), using a separatel
 
 ## Features
 
+- Version 0.1.10 adds `ipapi.is` to the HTTPS map lookup providers and parses the anonymous country-name/lat/lon response. Resolved countries drive Home/list flags without renaming or persisting changes to profiles. HTTP 403/429 backoff, echoed-IP checks, cancellation and idle destination retries are supported. Map gestures and dimensions are unchanged.
 - Version 0.1.9 excludes core/TrustTunnel startup from displayed HTTPS latency while retaining the five-second total probe budget. Generic server names can resolve approximate destination coordinates/country using the VPN public IP; map lookup remains optional and coordinates stay in memory. Back returns Servers, Rules, Subscriptions and Settings to Home, then backgrounds the task from Home.
 - Dark, light and system themes, local interactive map, draggable connection sheet and a separate bottom navigation bar.
 - URL, text, file, share-intent and QR imports; plain links, Base64, Clash/Mihomo YAML, Xray JSON and sing-box outbound JSON.

@@ -424,6 +424,10 @@ internal static class SmokeHarness
     }
     private static async Task CheckHomeStatesAsync(MainWindow window, MainViewModel vm, List<string> report)
     {
+        // Earlier tray fixtures may leave a hidden-launch window minimized.
+        // Visible animation assertions require a restored foreground surface.
+        window.WindowState = WindowState.Normal; window.Show(); window.Activate();
+        await window.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
         // Presentation fixtures use actual traffic snapshots without starting a tunnel.
         static void Set(MainViewModel target, string name, object value) => typeof(MainViewModel).GetProperty(name)!.SetValue(target, value);
         static void Traffic(MainViewModel target, TrafficSnapshot? value) => typeof(MainViewModel).GetMethod("SetTraffic", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.Invoke(target, [value]);
@@ -433,7 +437,7 @@ internal static class SmokeHarness
         var orbit = (RotateTransform)home.FindName("Orbit"); var shift = (TranslateTransform)home.FindName("SpeedShift");
         Set(vm, nameof(vm.State), ConnectionState.Connecting);
         await Task.Delay(180); window.UpdateLayout(); Capture(window, "Home-Connecting");
-        if (Motion.Enabled && !orbit.HasAnimatedProperties) throw new InvalidOperationException("Connecting must show a moving progress indicator.");
+        if (Motion.Enabled && !orbit.HasAnimatedProperties) throw new InvalidOperationException($"Connecting must show a moving progress indicator: loaded={home.IsLoaded}, visible={home.IsVisible}, window={window.WindowState}, modal={Dialogs.ModalOpen}, overlay={vm.UpdateOverlayOpen}, busy={vm.ConnectionBusy}, context={home.DataContext?.GetType().Name}, subscribed={typeof(HomeView).GetField("vm", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(home) is MainViewModel}.");
         Set(vm, nameof(vm.State), ConnectionState.Connected); Set(vm, nameof(vm.VpnIp), "203.0.113.42"); Set(vm, nameof(vm.Session), "00:16:42");
         TrafficSnapshot? sample = null;
         var start = DateTimeOffset.UtcNow.AddSeconds(-150);

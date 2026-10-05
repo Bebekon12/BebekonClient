@@ -103,10 +103,10 @@ private fun cleanName(s: String) = s.replace(Regex("[\\x{1F1E6}-\\x{1F1FF}]"), "
     if (bitmap != null) Image(bitmap, code, modifier.clip(RoundedCornerShape(4.dp))) else Icon(Icons.Outlined.Public, "Сервер", modifier, tint = MaterialTheme.colorScheme.secondary)
 }
 @Composable private fun StatusPill(text: String, color: Color) { Text(text, fontSize = 10.sp, color = color, fontWeight = FontWeight.SemiBold, modifier = Modifier.clip(CircleShape).background(color.copy(alpha = .12f)).padding(horizontal = 9.dp, vertical = 5.dp)) }
-@Composable fun ServerRow(node: Node, selected: Boolean, favorite: Boolean, ping: PingResult, select: () -> Unit, star: () -> Unit, probe: () -> Unit) {
+@Composable fun ServerRow(node: Node, selected: Boolean, favorite: Boolean, ping: PingResult, select: () -> Unit, star: () -> Unit, probe: () -> Unit, country: String = node.country) {
     Surface(shape = RoundedCornerShape(18.dp), color = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = .09f) else MaterialTheme.colorScheme.surface, border = BorderStroke(if (selected) 1.5.dp else 1.dp, if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = .45f)), modifier = Modifier.fillMaxWidth().clickable(onClick = select)) {
         Row(Modifier.padding(start = 13.dp, top = 12.dp, bottom = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            Flag(node.country); Column(Modifier.weight(1f).padding(horizontal = 10.dp)) { Text(cleanName(node.name), fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis); Text(if (node.unsupported.isEmpty()) "${node.protocol} · ${node.transport}" else "Доступен в Windows", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp)) }
+            Flag(country); Column(Modifier.weight(1f).padding(horizontal = 10.dp)) { Text(cleanName(node.name), fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis); Text(if (node.unsupported.isEmpty()) "${node.protocol} · ${node.transport}" else "Доступен в Windows", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp)) }
             PingText(ping, probe); IconButton(star, Modifier.size(42.dp)) { Icon(if (favorite) Icons.Outlined.Star else Icons.Outlined.StarBorder, "Избранное", Modifier.size(19.dp), tint = if (favorite) Amber else MaterialTheme.colorScheme.onSurfaceVariant) }
         }
     }
@@ -114,7 +114,8 @@ private fun cleanName(s: String) = s.replace(Regex("[\\x{1F1E6}-\\x{1F1FF}]"), "
 @Composable private fun ServersScreen(saved: SavedState, model: MainViewModel, addTrustTunnel: () -> Unit, editTrustTunnel: (Node) -> Unit) {
     var search by rememberSaveable { mutableStateOf("") }; var favorites by rememberSaveable { mutableStateOf(false) }; var methods by remember { mutableStateOf(false) }; var sortPing by rememberSaveable { mutableStateOf(true) }
     val ping by model.repo.pings.collectAsState()
-    val nodes = saved.visibleNodes.filter { (!favorites || it.id in saved.favorites) && it.name.contains(search, true) }.let { if (sortPing) nodesByPing(it, ping) else it }
+    val countries by model.origin.countries.collectAsState()
+    val nodes = saved.visibleNodes.filter { (!favorites || it.id in saved.favorites) && (it.name.contains(search, true) || Locale("", it.displayCountry(countries)).getDisplayCountry(Locale("ru")).contains(search, true) || Locale("", it.displayCountry(countries)).getDisplayCountry(Locale.ENGLISH).contains(search, true)) }.let { if (sortPing) nodesByPing(it, ping) else it }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item { PageTitle("Выбор сервера", "${saved.visibleNodes.size} серверов · ${saved.subscriptions.size} подписок") }
         item { OutlinedButton(addTrustTunnel, Modifier.fillMaxWidth().height(48.dp), shape = RoundedCornerShape(14.dp)) { Icon(Icons.Outlined.Add, null); Text("TrustTunnel · ввести вручную", Modifier.padding(start = 8.dp)) } }
@@ -129,7 +130,7 @@ private fun cleanName(s: String) = s.replace(Regex("[\\x{1F1E6}-\\x{1F1FF}]"), "
             }
         }
         if (nodes.isEmpty()) item { EmptyState(Icons.Outlined.Public, "Серверов пока нет", "Добавьте подписку или измените фильтр") }
-        items(nodes, key = { it.id }) { node -> Column { ServerRow(node, node.id == saved.selected, node.id in saved.favorites, ping[node.id] ?: PingResult(), { model.select(node) }, { model.favorite(node) }, { model.ping(node) }); if (node.config.optString("type") == "trusttunnel") TextButton({ editTrustTunnel(node) }) { Icon(Icons.Outlined.Edit, null, Modifier.size(16.dp)); Text("Изменить TrustTunnel", Modifier.padding(start = 6.dp), fontSize = 12.sp) } } }
+        items(nodes, key = { it.id }) { node -> Column { ServerRow(node, node.id == saved.selected, node.id in saved.favorites, ping[node.id] ?: PingResult(), { model.select(node) }, { model.favorite(node) }, { model.ping(node) }, node.displayCountry(countries)); if (node.config.optString("type") == "trusttunnel") TextButton({ editTrustTunnel(node) }) { Icon(Icons.Outlined.Edit, null, Modifier.size(16.dp)); Text("Изменить TrustTunnel", Modifier.padding(start = 6.dp), fontSize = 12.sp) } } }
         item { Text(if (saved.preferences.ping == PingMethod.TCP) "TCP: соединение с адресом сервера. До 100 мс — зелёный, до 250 — оранжевый. Доступ через VPN этот тест не проверяет." else "HTTPS: DNS, VPN-соединение, TLS и ответ сайта. До 300 мс — зелёный, до 600 — оранжевый. Обычно выше TCP; это разные замеры.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         item { Text("Тестовый сайт: ${saved.preferences.pingTarget.label}. Таймаут каждой проверки — 5 секунд. На мобильной сети результат зависит также от сигнала, маршрута оператора и выбранного сайта.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
     }

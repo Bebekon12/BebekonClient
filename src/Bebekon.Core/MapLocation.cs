@@ -6,7 +6,7 @@ public sealed record GeoPoint(double Longitude, double Latitude);
 public sealed record GeoEndpoint(GeoPoint Point, string Country);
 public static class MapLocation
 {
-    public static readonly IReadOnlyList<string> LookupHosts = Array.AsReadOnly(new[] { "ipwho.is", "ipapi.co" });
+    public static readonly IReadOnlyList<string> LookupHosts = Array.AsReadOnly(new[] { "api.ipapi.is", "ipwho.is", "ipapi.co" });
     public sealed record MapViewport(double Longitude, double Latitude, double LongitudeSpan, double LatitudeSpan);
     public static MapViewport Viewport(GeoPoint? destination, GeoPoint? origin)
     {
@@ -39,5 +39,16 @@ public static class MapLocation
         using var doc = JsonDocument.Parse(text);
         var code = doc.RootElement.TryGetProperty("country_code", out var country) && country.ValueKind == JsonValueKind.String ? country.GetString()! : "";
         return new(point, code.Length == 2 && CountryInfo.Resolve(code) == code ? code : "");
+    }
+    public static GeoEndpoint ParseIpapiIs(string text)
+    {
+        using var doc = JsonDocument.Parse(text); var root = doc.RootElement;
+        if (root.TryGetProperty("error", out _) || root.TryGetProperty("is_bogon", out var bogon) && bogon.GetBoolean() || !System.Net.IPAddress.TryParse(root.GetProperty("ip").GetString(), out _)) throw new FormatException("Location unavailable");
+        var location = root.TryGetProperty("location", out var nested) ? nested : root;
+        var lon = location.GetProperty(location.TryGetProperty("longitude", out _) ? "longitude" : "lon").GetDouble();
+        var lat = location.GetProperty(location.TryGetProperty("latitude", out _) ? "latitude" : "lat").GetDouble();
+        if (!double.IsFinite(lon) || !double.IsFinite(lat) || lon is < -180 or > 180 || lat is < -90 or > 90) throw new FormatException("Location unavailable");
+        var label = location.TryGetProperty("country_code", out var country) ? country.GetString() : location.TryGetProperty("country", out country) ? country.GetString() : "";
+        return new(new(lon, lat), CountryInfo.Resolve(label) ?? "");
     }
 }
