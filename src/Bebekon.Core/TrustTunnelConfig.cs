@@ -35,6 +35,7 @@ internal static class TrustTunnelConfig
     }
     internal static void Validate(Server s)
     {
+        if (s.TlsInsecure) throw new UserError(s.UnsupportedReason!);
         var o = s.TrustTunnel;
         if (o is null || o.Addresses is null || o.DnsUpstreams is null || !Host(s.Host) || !Host(s.Sni) || s.Port is < 1 or > 65535
             || s.Security != "tls" || s.Transport is not ("http2" or "http3" or "auto")

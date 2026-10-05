@@ -38,8 +38,8 @@ public class ProtocolTests
     [Fact]
     public void PortHoppingAndBuiltInPluginsArePreserved()
     {
-        var s = ProtocolParser.Parse("hy2://secret@edge.example.com:443,5000-5010/?obfs=salamander&obfs-password=obfs-secret&insecure=1");
-        Assert.Equal(new[] { "443", "5000:5010" }, s.ServerPorts); Assert.True(s.TlsInsecure); Assert.Contains("без проверки", s.Protocol);
+        var s = ProtocolParser.Parse("hy2://secret@edge.example.com:443,5000-5010/?obfs=salamander&obfs-password=obfs-secret");
+        Assert.Equal(new[] { "443", "5000:5010" }, s.ServerPorts); Assert.False(s.TlsInsecure);
         var config = JsonNode.Parse(ConfigGenerator.Generate(CoreTests.Spec(node: s)))!;
         Assert.Null(config["outbounds"]![0]!["server_port"]); Assert.Equal("salamander", (string?)config["outbounds"]![0]!["obfs"]!["type"]);
         var ss = ProtocolParser.Parse("ss://" + Enc("aes-128-gcm:secret") + "@edge.example.com:443?plugin=obfs-local%3Bobfs%3Dtls%3Bobfs-host%3Dexample.com");
@@ -107,7 +107,7 @@ public class ProtocolTests
         {
             var port = LatencyService.FreePort(); var password = cipher.StartsWith("2022-") ? Convert.ToBase64String(RandomNumberGenerator.GetBytes(16)) : "fixture-password";
             var s = new Server { Type = type, Host = "127.0.0.1", Port = port, Uuid = CoreTests.Id, Password = password, Cipher = cipher, Fingerprint = "", UpMbps = 100, DownMbps = 100 };
-            var inbound = new JsonObject { ["type"] = type, ["listen"] = "127.0.0.1", ["listen_port"] = port };
+            var inbound = new JsonObject { ["type"] = type, ["listen"] = "127.0.0.1", ["listen_port"] = port }; string? trustedFixtureCertificate = null;
             if (type == "vmess") inbound["users"] = new JsonArray { new JsonObject { ["uuid"] = CoreTests.Id } };
             if (type == "shadowsocks") { inbound["method"] = cipher; inbound["password"] = password; }
             if (type == "trojan" || type == "hysteria2") inbound["users"] = new JsonArray { new JsonObject { ["password"] = password } };
@@ -115,14 +115,19 @@ public class ProtocolTests
             if (type is "trojan" or "hysteria" or "hysteria2")
             {
                 using var rsa = RSA.Create(2048); var request = new CertificateRequest("CN=localhost", rsa, System.Security.Cryptography.HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+                var names = new SubjectAlternativeNameBuilder(); names.AddDnsName("localhost"); request.CertificateExtensions.Add(names.Build());
                 using var certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-1), DateTimeOffset.UtcNow.AddHours(1));
                 var certPath = Path.Combine(root, "cert.pem"); var keyPath = Path.Combine(root, "key.pem"); await File.WriteAllTextAsync(certPath, certificate.ExportCertificatePem()); await File.WriteAllTextAsync(keyPath, rsa.ExportPkcs8PrivateKeyPem());
-                inbound["tls"] = new JsonObject { ["enabled"] = true, ["certificate_path"] = certPath, ["key_path"] = keyPath }; s.Security = "tls"; s.Sni = "localhost"; s.TlsInsecure = true;
+                inbound["tls"] = new JsonObject { ["enabled"] = true, ["certificate_path"] = certPath, ["key_path"] = keyPath }; s.Security = "tls"; s.Sni = "localhost"; trustedFixtureCertificate = certificate.ExportCertificatePem();
             }
             var config = new JsonObject { ["log"] = new JsonObject { ["level"] = "info" }, ["inbounds"] = new JsonArray(inbound), ["outbounds"] = new JsonArray { new JsonObject { ["type"] = "direct", ["inet4_bind_address"] = "127.0.0.2" } } };
             var path = Path.Combine(root, "fixture.json"); await File.WriteAllTextAsync(path, config.ToJsonString()); using var server = new CoreProcess(CoreExe, new(root, "server")); await server.StartAsync(path, lifetime.Token);
             var spec = new ConnectSpec(s, new(), new(), LatencyService.FreePort(), new string('b', 48));
-            using var client = new CoreSession(CoreExe, new(root, "client")); await client.StartAsync(spec, Path.Combine(root, "client"), true, lifetime.Token);
+            using var client = new CoreSession(CoreExe, new(root, "client")); await client.StartAsync(spec, Path.Combine(root, "client"), true, lifetime.Token, decorate: generated => {
+                if (trustedFixtureCertificate is null) return generated;
+                // Trust only this fixture certificate, without changing the user's root store or disabling verification.
+                var document = JsonNode.Parse(generated)!; document["outbounds"]![0]!["tls"]!["certificate"] = new JsonArray(trustedFixtureCertificate); return document.ToJsonString();
+            });
             using var http = LatencyService.ProbeClient(spec); Assert.Equal("127.0.0.2", await http.GetStringAsync($"http://127.0.0.1:{targetPort}/", lifetime.Token));
             using var udp = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0)); var echo = EchoUdp(udp, lifetime.Token);
             Assert.Equal("udp-fixture", await SocksUdp(spec, ((IPEndPoint)udp.Client.LocalEndPoint!).Port, lifetime.Token)); await echo;

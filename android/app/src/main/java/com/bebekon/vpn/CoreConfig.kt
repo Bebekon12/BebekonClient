@@ -8,7 +8,7 @@ object CoreConfig {
         require(node.unsupported.isEmpty()) { node.unsupported }
         // The outer connection may still need IPv6 (e.g. an IPv6-only mobile network).
         // It is independent from which address families apps see inside the tunnel.
-        val vpn = node.config.also { it.put("tag", "vpn"); it.put("domain_resolver", json("server" to "direct-dns", "strategy" to "prefer_ipv4")); it.put("connect_timeout", "4s") }
+        val vpn = node.config.also { config -> val reason = ConnectionSafety.reason(config); require(reason.isEmpty()) { reason }; config.put("tag", "vpn"); config.put("domain_resolver", json("server" to "direct-dns", "strategy" to "prefer_ipv4")); config.put("connect_timeout", "4s") }
         val rules = mutableListOf<JSONObject>()
         rules += json("action" to "sniff", "timeout" to "300ms")
         rules += json("protocol" to "dns", "action" to "hijack-dns")

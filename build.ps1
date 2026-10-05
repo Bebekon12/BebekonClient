@@ -3,6 +3,10 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $projectRoot = $PSScriptRoot
 Set-Location -LiteralPath $projectRoot
+$env:DOTNET_GENERATE_ASPNET_CERTIFICATE = 'false'
+$env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'
+$localDotnet = Join-Path $projectRoot '.tools/security/dotnet/dotnet.exe'
+if (Test-Path -LiteralPath $localDotnet) { $env:PATH = (Split-Path -Parent $localDotnet) + [IO.Path]::PathSeparator + $env:PATH }
 $appPublishRoot = [IO.Path]::GetFullPath((Join-Path $projectRoot $PublishFolder))
 $artifactsRoot = [IO.Path]::GetFullPath((Join-Path $projectRoot 'artifacts')).TrimEnd('\') + '\'
 if (-not $appPublishRoot.StartsWith($artifactsRoot, [StringComparison]::OrdinalIgnoreCase) -or $appPublishRoot -eq (Join-Path $projectRoot 'artifacts\service-publish')) { throw 'PublishFolder must be a dedicated app folder within artifacts.' }
@@ -48,6 +52,10 @@ Safe-Clean '.tools\trusttunnel-extracted'
 Expand-Archive -LiteralPath $trustTunnelArchive -DestinationPath .tools\trusttunnel-extracted -Force
 Copy-Item -LiteralPath .tools\trusttunnel-extracted\trusttunnel_client.exe -Destination core\trusttunnel_client.exe -Force
 Copy-Item -LiteralPath .tools\trusttunnel-extracted\LICENSE.txt -Destination core\LICENSE-TrustTunnel -Force
+# Upstream packages include optional features and stale transitive dependencies.
+# Release only our reproducible build with the security pins and supported features.
+$secureGo = if (Test-Path -LiteralPath (Join-Path $projectRoot '.tools/android/go/bin/go.exe')) { Join-Path $projectRoot '.tools/android/go/bin/go.exe' } else { (Get-Command go -ErrorAction Stop).Source }
+& (Join-Path $projectRoot 'scripts/build-secure-cores.ps1') -GoExecutable $secureGo
 Invoke-Checked dotnet @('clean','Bebekon.sln','-c','Release','--nologo','-v','quiet')
 Invoke-Checked dotnet @('restore','Bebekon.sln','--nologo')
 $testArgs = @('test','tests\Bebekon.Tests','-c','Release','--nologo','--logger','trx;LogFileName=core.trx','--results-directory','artifacts\tests')
@@ -68,10 +76,10 @@ Copy-Item -LiteralPath scripts -Destination $appPublishRoot -Recurse -Force
 Copy-Item -LiteralPath licenses -Destination $appPublishRoot -Recurse -Force
 Copy-Item -LiteralPath README.md,ARCHITECTURE.md,LICENSE -Destination $appPublishRoot -Force
 New-Item -ItemType Directory -Path (Join-Path $appPublishRoot 'docs') -Force | Out-Null
-Copy-Item -LiteralPath docs\VALIDATION.md,docs\UPDATES.md,docs\DESIGN.md,docs\CLIENT-REVIEW.md,docs\RUSSIA-RULES.md,docs\SUBSCRIPTIONS.md -Destination (Join-Path $appPublishRoot 'docs') -Force
+Copy-Item -LiteralPath docs\VALIDATION.md,docs\UPDATES.md,docs\DESIGN.md,docs\CLIENT-REVIEW.md,docs\RUSSIA-RULES.md,docs\SUBSCRIPTIONS.md,docs\SECURITY-AUDIT.md -Destination (Join-Path $appPublishRoot 'docs') -Force
 New-Item -ItemType Directory -Path (Join-Path $appPublishRoot 'resources\geo') -Force | Out-Null
 Copy-Item -LiteralPath resources\geo\README.md,resources\geo\LICENSE-SagerNet,resources\geo\sources.json -Destination (Join-Path $appPublishRoot 'resources\geo') -Force
-Copy-Item -LiteralPath core\LICENSE,core\version.json,core\LICENSE-Xray,core\xray-version.json -Destination (Join-Path $appPublishRoot 'core') -Force
+Copy-Item -LiteralPath core\LICENSE,core\version.json,core\LICENSE-Xray,core\xray-version.json,core\security-pins.json -Destination (Join-Path $appPublishRoot 'core') -Force
 Copy-Item -LiteralPath core\LICENSE-TrustTunnel,core\trusttunnel-version.json -Destination (Join-Path $appPublishRoot 'core') -Force
 $channelSource = if ($UpdateFeedUrl) { $UpdateFeedUrl } else { Join-Path $projectRoot 'dist\update.json' }
 @{ source = $channelSource } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $appPublishRoot 'resources\update-channel.json') -Encoding utf8

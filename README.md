@@ -30,7 +30,7 @@ See [TrustTunnel formats and limits](docs/SUBSCRIPTIONS.md#trusttunnel) and [val
 
 ## Build and install
 
-Open Bebekon.sln in Rider. Install .NET SDK 10 (global.json pins 10.0.300). Run:
+Open Bebekon.sln in Rider. Install .NET SDK 10.0.401+ (global.json pins the patched SDK; releases include runtime 10.0.12). Run:
 
     .\build.ps1
 
@@ -103,7 +103,7 @@ Changes to server, profile, rule, routing mode, or saved DNS settings regenerate
 Appearance settings apply immediately: four coordinated accent palettes, smooth interaction/page/sidebar animations, connection glow and an OLED black background. Motion respects the Windows animation preference and can be disabled. State-bound looping animations stop when their view is hidden, minimized or unloaded. Country flags are bundled locally from [Flagpedia / FlagCDN](https://flagpedia.net/download/api), recognizing ISO codes, emoji and Russian/English provider labels; a flag reflects the provider label, not verified geolocation. Subscriptions can be pasted directly into the inline field or added through the named-subscription dialog.
 ## Core and DNS
 
-Pinned official stable **sing-box 1.14.2**, Windows amd64. Archive SHA256 is in core/version.json. Documentation snapshots in docs/ come from the exact v1.14.2 tag. The bundled executable is downloaded and checked by build.ps1. To update: review official tagged docs and release notes, change version/archive/hash, rerun core schema and routing tests and repeat the Windows acceptance matrix. Do not replace just the executable without validating fields.
+Pinned **sing-box 1.14.2** source, Windows amd64. Documentation snapshots in docs/ come from that tag. Releases rebuild sing-box and Xray with Go 1.26.8 or newer and the dependency security versions in `core/security-pins.json`, retaining the supported client features. `build.ps1` verifies upstream archives and then replaces their executables with these builds. Install Go 1.26.8+ before building; the existing local Android toolchain is also recognized. Review tagged docs, dependency advisories and configuration/traffic tests before changing pins.
 
 - TUN captures IPv4 and IPv6; auto_detect_interface binds outbound traffic to the real uplink.
 - DNS hijack and 300ms HTTP/TLS/QUIC sniffing precede the ordered user routes.
@@ -146,4 +146,6 @@ Known limits:
 - Unsigned personal build: no Authenticode signing key was provided.
 - UI Russian/English navigation is supported; some validation/detail strings currently remain Russian.
 
-The optional XHTTP companion is official Xray 26.3.27, archive pinned by SHA256 in core/xray-version.json; its MPL-2.0 license is included in core/LICENSE-Xray and corresponding tagged sources are at https://github.com/XTLS/Xray-core/tree/v26.3.27. Xray is started only for XHTTP. sing-box is GPLv3; its license is distributed in core/LICENSE. If redistributing this application/core, provide the corresponding sources and comply with dependency licenses. This repository is provided under GPL-3.0-or-later (LICENSE).
+The optional XHTTP companion uses Xray 26.3.27 source with the dependency security pins above; its MPL-2.0 license is included in core/LICENSE-Xray. Xray is started only for XHTTP. sing-box is GPLv3; its license is distributed in core/LICENSE. Release source archives include the modified module manifests and Android bridge. If redistributing the application/core, provide corresponding sources and comply with dependency licenses. This repository is provided under GPL-3.0-or-later (LICENSE).
+
+See [the security audit](docs/SECURITY-AUDIT.md) for findings, attack scenarios, verification and unresolved limits. Unsafe TLS certificate bypass and subscription-supplied certificate-file plugin options are rejected at connection time, including old saved configurations. Non-loopback subscription downloads require HTTPS. These controls do not make an untrusted VPN provider trustworthy.

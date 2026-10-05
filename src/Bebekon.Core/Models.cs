@@ -68,7 +68,8 @@ public sealed class Server : Observable
     public string ServiceName { get; set; } = "";
     public string Path { get; set; } = "/";
     public string TransportHost { get; set; } = "";
-    public string? UnsupportedReason { get; set; }
+    private string? unsupportedReason;
+    public string? UnsupportedReason { get => TlsInsecure ? "Небезопасный TLS: проверка сертификата VPN-сервера обязательна. Попросите провайдера безопасную конфигурацию." : unsupportedReason; set => unsupportedReason = value; }
     private bool favorite;
     public bool Favorite { get => favorite; set { if (Set(ref favorite, value)) Notify(nameof(Star)); } }
     [JsonIgnore] public string Star => Favorite ? "★" : "☆";

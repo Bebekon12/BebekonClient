@@ -71,7 +71,9 @@ Required: JDK 17, Go 1.26.8, Android SDK platform 36, NDK 28.2.13676358. Set `JA
 ./android/gradlew.bat -p android :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest :webapp-fixture:assembleDebug
 ```
 
-The core script pins the official source commit and adds the small `core/bebekon.go` bridge for independent, deadline-bound VPN probes. It builds arm64-v8a, armeabi-v7a and x86_64. Generated AARs, SDKs, local settings and private signing keys are excluded from Git.
+The core script pins the official source commit, updates dependency security versions from `../core/security-pins.json` and adds the small `core/bebekon.go` bridge for independent, deadline-bound VPN probes. It builds arm64-v8a, armeabi-v7a and x86_64. Generated AARs, SDKs, local settings and private signing keys are excluded from Git. The source archive supplied with releases contains the exact modified module manifests and bridge.
+
+Security changes in 0.1.6 reject certificate-verification bypass and certificate-file plugin options, isolate Quick Settings consent in a private Activity, bound import complexity/download duration, redact diagnostic secrets and recheck APK SHA-256 immediately before installation. See [the security audit](../docs/SECURITY-AUDIT.md) for attack scenarios, evidence and remaining limits.
 
 Release builds shrink code/resources. Provide `BEBEKON_ANDROID_KEYSTORE` and `BEBEKON_ANDROID_KEY_PASSWORD`, with alias `bebekon`, then run `:app:assembleRelease`. Keep the same signing key for every update; never put it in the repository. Increment both Android's numeric `versionCode` and semantic `versionName`. The build emits one universal `app-release.apk` with all three supported architectures. Publish it as `Bebekon-Android.apk` so users do not have to choose an architecture. The common latest stable release title must include `Android X.Y.Z`, and its single `Bebekon-Android.apk` asset must have GitHub's SHA-256 digest; this is the Android updater's publication contract. Preserve these Android assets/title when publishing a subsequent Windows release. Android version comparisons are independent of the Windows release tag.
 

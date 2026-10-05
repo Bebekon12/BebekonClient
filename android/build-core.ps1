@@ -18,6 +18,7 @@ if ($LASTEXITCODE -ne 0) { throw 'gomobile installation failed.' }
 & go install github.com/sagernet/gomobile/cmd/gobind@v0.1.12
 if ($LASTEXITCODE -ne 0) { throw 'gobind installation failed.' }
 $env:PATH = $GoBinDirectory + [IO.Path]::PathSeparator + $env:PATH
+if ($env:JAVA_HOME) { $env:PATH = (Join-Path $env:JAVA_HOME 'bin') + [IO.Path]::PathSeparator + $env:PATH }
 Copy-Item -LiteralPath (Join-Path $androidRoot 'core/bebekon.go') -Destination (Join-Path $SourceDirectory 'experimental/libbox/bebekon.go')
 $generated = [IO.Path]::GetFullPath((Join-Path $SourceDirectory 'build'))
 if (Test-Path -LiteralPath $generated) {
@@ -27,6 +28,11 @@ if (Test-Path -LiteralPath $generated) {
 New-Item -ItemType Directory (Join-Path $androidRoot 'app/libs') -Force | Out-Null
 Push-Location $SourceDirectory
 try {
+    $securityPins = Get-Content -LiteralPath (Join-Path (Split-Path -Parent $androidRoot) 'core/security-pins.json') -Raw | ConvertFrom-Json
+    $compilerVersion = ((& go version) -split ' ')[2].Replace('go','')
+    if ([version]$compilerVersion -lt [version]$securityPins.goVersion) { throw 'Upgrade Go to the pinned security patch before building libbox.' }
+    & go get @($securityPins.modules)
+    if ($LASTEXITCODE -ne 0) { throw 'Native dependency security update failed.' }
     & gomobile init
     if ($LASTEXITCODE -ne 0) { throw 'gomobile init failed.' }
     $arguments = @('bind', '-target=android/arm64,android/arm,android/amd64', '-androidapi', '29', '-javapkg=io.nekohasekai', '-libname=box', '-trimpath', '-buildvcs=false', '-ldflags', '-X github.com/sagernet/sing-box/constant.Version=1.14.2 -checklinkname=0 -s -w -buildid=', '-tags', 'with_gvisor,with_quic,with_utls,with_clash_api,with_low_memory', '-o', (Join-Path $androidRoot 'app/libs/libbox.aar'), './experimental/libbox')

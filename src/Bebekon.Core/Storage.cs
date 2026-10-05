@@ -35,7 +35,9 @@ public sealed class StateStore(string? root = null)
     public void SaveConnection(ConnectSpec spec)
     {
         var dir = Path.Combine(Root, "runtime"); Directory.CreateDirectory(dir);
-        File.WriteAllBytes(Path.Combine(dir, "connection.dpapi"), ProtectedData.Protect(JsonSerializer.SerializeToUtf8Bytes(spec, Json.Options), null, DataProtectionScope.CurrentUser));
+        var data = JsonSerializer.SerializeToUtf8Bytes(spec, Json.Options);
+        try { File.WriteAllBytes(Path.Combine(dir, "connection.dpapi"), ProtectedData.Protect(data, null, DataProtectionScope.CurrentUser)); }
+        finally { CryptographicOperations.ZeroMemory(data); }
     }
 }
 public sealed class SafeLog(string directory, string name)

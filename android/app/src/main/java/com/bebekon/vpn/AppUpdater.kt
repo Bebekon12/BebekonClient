@@ -23,6 +23,7 @@ class AppUpdater(private val context: Context, private val releaseSource: () -> 
     private val mutable = MutableStateFlow(UpdateState())
     val state = mutable.asStateFlow()
     private var operation: Job? = null
+    private var installation: Job? = null
     private var ignored = ""
     private var permissionPending = false
     private val directory get() = File(context.cacheDir, "updates").apply { mkdirs() }
@@ -30,7 +31,7 @@ class AppUpdater(private val context: Context, private val releaseSource: () -> 
     init { if (automatic) scope.launch { delay(3000); if (context.repo.state.value.preferences.checkUpdates) check(false) } }
 
     fun check(manual: Boolean = true) {
-        if (operation?.isActive == true) { if (manual) mutable.value = mutable.value.copy(visible = true); return }
+        if (operation?.isActive == true || installation?.isActive == true) { if (manual) mutable.value = mutable.value.copy(visible = true); return }
         if (mutable.value.phase in listOf(UpdatePhase.READY, UpdatePhase.PERMISSION) && apk.exists()) { mutable.value = mutable.value.copy(visible = manual); return }
         mutable.value = UpdateState(UpdatePhase.CHECKING, visible = manual)
         operation = scope.launch {
@@ -45,7 +46,7 @@ class AppUpdater(private val context: Context, private val releaseSource: () -> 
     fun dismiss() { if (mutable.value.phase != UpdatePhase.DOWNLOADING) { ignored = mutable.value.info?.version.orEmpty(); mutable.value = mutable.value.copy(visible = false) } }
     fun download() {
         val info = mutable.value.info ?: return
-        if (operation?.isActive == true) return
+        if (operation?.isActive == true || installation?.isActive == true) return
         mutable.value = UpdateState(UpdatePhase.DOWNLOADING, info, visible = true, installAfterDownload = true)
         operation = scope.launch {
             val part = File(directory, "download.part")
@@ -70,6 +71,7 @@ class AppUpdater(private val context: Context, private val releaseSource: () -> 
     }
     fun cancelDownload() { operation?.cancel() }
     fun install(activity: Activity) {
+        if (installation?.isActive == true) return
         if (!apk.exists() || mutable.value.info == null) return
         mutable.value = mutable.value.copy(installAfterDownload = false)
         if (!activity.packageManager.canRequestPackageInstalls()) {
@@ -79,12 +81,17 @@ class AppUpdater(private val context: Context, private val releaseSource: () -> 
                 .onFailure { permissionPending = false; mutable.value = mutable.value.copy(phase = UpdatePhase.READY, message = "Разрешите установку обновлений для Bebekon VPN в настройках Android") }
             return
         }
-        try {
-            val info = mutable.value.info!!
-            verifyUpdateApk(context, apk, info)
-            activity.startActivity(updateInstallIntent(context, apk))
-            mutable.value = mutable.value.copy(phase = UpdatePhase.READY, message = "Подтвердите обновление в системном окне Android")
-        } catch (_: Exception) { mutable.value = mutable.value.copy(phase = UpdatePhase.ERROR, message = "Не удалось открыть установщик. Повторите загрузку") }
+        val info = mutable.value.info!!
+        mutable.value = mutable.value.copy(message = "Проверяем загруженный APK…")
+        installation = scope.launch {
+            try {
+                withContext(Dispatchers.IO) { verifyUpdateApk(context, apk, info) }
+                if (activity.isFinishing || activity.isDestroyed) return@launch
+                activity.startActivity(updateInstallIntent(context, apk))
+                mutable.value = mutable.value.copy(phase = UpdatePhase.READY, message = "Подтвердите обновление в системном окне Android")
+            } catch (e: CancellationException) { throw e }
+            catch (_: Exception) { mutable.value = mutable.value.copy(phase = UpdatePhase.ERROR, message = "Не удалось открыть установщик. Повторите загрузку") }
+        }
     }
     fun resumed(activity: Activity) {
         if (!permissionPending) return
@@ -98,11 +105,12 @@ class AppUpdater(private val context: Context, private val releaseSource: () -> 
 fun fetchAndroidRelease(): String {
     val connection = URL(AndroidRelease.API).openConnection() as HttpURLConnection
     try {
-        connection.connectTimeout = 10_000; connection.readTimeout = 10_000
+        connection.connectTimeout = 10_000; connection.readTimeout = 10_000; connection.instanceFollowRedirects = false
+        val budget = NetworkBudget(20_000)
         connection.setRequestProperty("User-Agent", "BebekonAndroid/${BuildConfig.VERSION_NAME}")
         connection.setRequestProperty("Accept", "application/vnd.github+json")
         require(connection.responseCode == 200)
-        return connection.inputStream.use { it.readLimited(2 * 1024 * 1024) }.toString(Charsets.UTF_8)
+        return connection.inputStream.use { it.readLimited(2 * 1024 * 1024, budget) }.toString(Charsets.UTF_8)
     } finally { connection.disconnect() }
 }
 fun openUpdateDownload(info: AndroidUpdate): java.io.InputStream {
@@ -130,10 +138,11 @@ fun openUpdateDownload(info: AndroidUpdate): java.io.InputStream {
 
 fun copyUpdate(input: java.io.InputStream, destination: File, info: AndroidUpdate, progress: (Long) -> Unit) {
     val hash = MessageDigest.getInstance("SHA-256"); var received = 0L; var last = 0L
+    val budget = NetworkBudget(300_000)
     destination.outputStream().use { output ->
         val buffer = ByteArray(64 * 1024)
         while (true) {
-            val count = input.read(buffer); if (count < 0) break
+            budget.check(); val count = input.read(buffer); budget.check(); if (count < 0) break
             received += count; require(received <= info.bytes && received <= AndroidRelease.MAX_APK)
             hash.update(buffer, 0, count); output.write(buffer, 0, count)
             val now = System.nanoTime(); if (now - last > 200_000_000) { progress(received); last = now }
@@ -145,6 +154,11 @@ fun copyUpdate(input: java.io.InputStream, destination: File, info: AndroidUpdat
 }
 
 fun verifyUpdateApk(context: Context, file: File, info: AndroidUpdate) {
+    // Recheck at installation too, not just at the end of the original download.
+    require(file.length() == info.bytes)
+    val hash = MessageDigest.getInstance("SHA-256")
+    file.inputStream().use { input -> val buffer = ByteArray(65536); while (true) { val count = input.read(buffer); if (count < 0) break; hash.update(buffer, 0, count) } }
+    require(hash.digest().joinToString("") { "%02x".format(it) } == info.sha256)
     val pm = context.packageManager
     val candidate = pm.getPackageArchiveInfo(file.path, PackageManager.GET_SIGNING_CERTIFICATES) ?: error("Неверный APK")
     val installed = pm.getPackageInfo(context.packageName, PackageManager.GET_SIGNING_CERTIFICATES)

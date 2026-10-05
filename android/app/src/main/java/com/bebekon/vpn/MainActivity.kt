@@ -23,11 +23,12 @@ class MainActivity : ComponentActivity() {
     private val scan = registerForActivityResult(ScanContract()) { it.contents?.let { text -> model.importText.value = text } }
     private val importFile = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) model.task { contentResolver.openInputStream(uri)?.use { val bytes = it.readLimited(4 * 1024 * 1024); model.importText.value = bytes.toString(Charsets.UTF_8) } } }
     override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState); enableEdgeToEdge(); model.receive(intent)
+        super.onCreate(savedInstanceState); enableEdgeToEdge(); if (Build.VERSION.SDK_INT >= 31) window.setHideOverlayWindows(true); model.receive(intent)
         setContent { BebekonApp(model, ::toggle, ::addTile, { scan.launch(ScanOptions().setPrompt("Сканируйте QR-код VPN или подписки").setBeepEnabled(false).setOrientationLocked(false)) }, { importFile.launch(arrayOf("text/*", "application/json", "application/octet-stream")) }) }
-        if (intent.getBooleanExtra("tile_connect", false) && savedInstanceState == null) { intent.removeExtra("tile_connect"); if (repo.state.value.selectedNode != null) toggle() else model.message.value = "Сначала добавьте подписку" }
     }
-    override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); model.receive(intent); if (intent.getBooleanExtra("tile_connect", false)) { intent.removeExtra("tile_connect"); toggle() } }
+    // This activity is exported for the launcher and subscription sharing. External
+    // intents may suggest an import, but must never start or stop the VPN.
+    override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); model.receive(intent) }
     override fun onResume() { super.onResume(); updater.resumed(this); model.origin.refresh() }
     private fun toggle() {
         if (VpnController.session.value.phase == Phase.STOPPING) return

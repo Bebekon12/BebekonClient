@@ -44,12 +44,15 @@ internal sealed class VpnService : ServiceBase
         owner = new(ownerSid); this.console = console;
         pipeName = console ? PipeProtocol.PipeName + ".test." + Environment.ProcessId : PipeProtocol.PipeName;
         root = console ? Path.Combine(Paths.UserRoot, "helper-test", Environment.ProcessId.ToString()) : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "BebekonVPN");
-        Directory.CreateDirectory(root);
-        if ((File.GetAttributes(root) & FileAttributes.ReparsePoint) != 0 || Directory.EnumerateFileSystemEntries(root).Any(p => (File.GetAttributes(p) & FileAttributes.ReparsePoint) != 0)) throw new InvalidOperationException("Reparse points are forbidden in service runtime storage.");
         var security = new DirectorySecurity(); security.SetAccessRuleProtection(true, false);
         if (!console) security.SetOwner(new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null));
         foreach (var sid in new[] { new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null), new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null) }) security.AddAccessRule(new(sid, FileSystemRights.FullControl, InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
         if (console) security.AddAccessRule(new(owner, FileSystemRights.FullControl, InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
+        if (!console) ProtectedServiceStorage.Validate(root);
+        // Apply the protected DACL atomically to a newly created directory.
+        new DirectoryInfo(root).Create(security);
+        if (!console) ProtectedServiceStorage.Validate(root);
+        else if ((File.GetAttributes(root) & FileAttributes.ReparsePoint) != 0 || Directory.EnumerateFileSystemEntries(root).Any(p => (File.GetAttributes(p) & FileAttributes.ReparsePoint) != 0)) throw new InvalidOperationException("Reparse points are forbidden in service runtime storage.");
         new DirectoryInfo(root).SetAccessControl(security);
         foreach (var file in Directory.EnumerateFiles(root))
         {

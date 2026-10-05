@@ -28,7 +28,7 @@ class VpnTileService : TileService() {
         if (VpnController.session.value.active) { VpnController.stop(this); return }
         unlockAndRun {
             if (VpnService.prepare(this) != null || repo.state.value.selectedNode == null) {
-                val intent = Intent(this, MainActivity::class.java).putExtra("tile_connect", true).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                val intent = Intent(this, TileConnectActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 if (Build.VERSION.SDK_INT >= 34) startActivityAndCollapse(PendingIntent.getActivity(this, 3, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)) else @Suppress("DEPRECATION") startActivityAndCollapse(intent)
             } else VpnController.start(this)
         }

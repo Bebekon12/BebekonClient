@@ -3,7 +3,6 @@ package com.bebekon.vpn
 import org.json.JSONArray
 import org.json.JSONObject
 import org.snakeyaml.engine.v2.api.Load
-import org.snakeyaml.engine.v2.api.LoadSettings
 import java.net.IDN
 import java.net.URI
 import java.net.URLDecoder
@@ -23,7 +22,9 @@ object SubscriptionParser {
         val nodes = when {
             text.startsWith('{') || text.startsWith('[') -> parseJson(text)
             Regex("(?m)^\\s*proxies\\s*:").containsMatchIn(text) -> {
-                val root = Load(LoadSettings.builder().setMaxAliasesForCollections(25).setCodePointLimit(4 * 1024 * 1024).build()).loadFromString(text) as? Map<*, *> ?: error("Повреждённая YAML подписка")
+                ImportSafety.yamlText(text)
+                val root = Load(ImportSafety.yamlSettings).loadFromString(text) as? Map<*, *> ?: error("Повреждённая YAML подписка")
+                ImportSafety.yamlTree(root)
                 (root["proxies"] as? List<*>)?.map { clash(JSONObject(it as Map<*, *>)) } ?: error("Нет серверов в подписке")
             }
             else -> text.lines().filter { it.isNotBlank() && !it.trim().startsWith('#') }.mapIndexed { index, s -> try { link(s.trim()) } catch (_: Exception) { error("Строка ${index + 1}: повреждённая VPN ссылка") } }
@@ -32,6 +33,7 @@ object SubscriptionParser {
         return nodes.distinctBy { it.id }
     }
     private fun parseJson(text: String): List<Node> {
+        ImportSafety.jsonText(text)
         if (text.startsWith('[')) return JSONArray(text).objects().flatMap { config(it) }
         return config(JSONObject(text))
     }
@@ -52,7 +54,7 @@ object SubscriptionParser {
     fun link(input: String): Node {
         val scheme = input.substringBefore("://").lowercase()
         if (scheme == "vmess" && !input.substringAfter("://").contains('@')) {
-            val o = JSONObject(decode(input.substringAfter("://")))
+            val o = JSONObject(ImportSafety.jsonText(decode(input.substringAfter("://"))))
             val c = json("type" to "vmess", "server" to o.getString("add"), "server_port" to o.getString("port").toInt(), "uuid" to o.getString("id"), "security" to o.optString("scy", "auto"), "alter_id" to o.optString("aid", "0").toInt())
             if (o.optString("tls") in listOf("tls", "true", "1")) c.put("tls", tls(o.optString("sni", o.optString("host")), o.optString("fp"), o.optString("alpn")))
             transport(c, o.optString("net", "tcp"), o.optString("path", "/"), o.optString("host"), o.optString("path"))
@@ -158,9 +160,10 @@ object SubscriptionParser {
         if (type in listOf("vless", "vmess")) UUID.fromString(c.getString("uuid"))
         val t = c.optJSONObject("transport")?.optString("type") ?: "tcp"
         val unsupported = when { host in listOf("0.0.0.0", "::") -> "Провайдер вернул информационную запись. Проверьте лимит устройств и HWID"; type == "trusttunnel" -> "TrustTunnel пока доступен в Windows версии"; type == "wireguard" -> "WireGuard пока не поддерживается на Android"; t == "xhttp" -> "XHTTP пока доступен в Windows версии"; type !in types -> "Протокол $type пока не поддерживается"; t !in listOf("tcp", "ws", "grpc", "http", "httpupgrade") -> "Транспорт $t не поддерживается"; else -> "" }
+        val securityProblem = ConnectionSafety.reason(c)
         val title = name.takeIf(String::isNotBlank) ?: host
         val identity = canonical(c)
-        return Node(digest(identity).take(24), title.take(160), c.toString(), country(title), unsupported)
+        return Node(digest(identity).take(24), title.take(160), c.toString(), country(title), securityProblem.ifEmpty { unsupported })
     }
     private fun canonical(value: Any?): String = when (value) {
         is JSONObject -> value.keys().asSequence().sorted().joinToString(prefix = "{", postfix = "}") { JSONObject.quote(it) + ":" + canonical(value.get(it)) }

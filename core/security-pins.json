@@ -1,0 +1,16 @@
+{
+  "goVersion": "1.26.8",
+  "singBoxCommit": "af6e64c3b69e6132ebaee0e1a3d24e93903f6709",
+  "xrayCommit": "d2758a023cd7f4174a5a5fa4ff66e487d4342ba0",
+  "singBoxTags": "with_gvisor,with_quic,with_utls,with_clash_api,badlinkname,tfogo_checklinkname0",
+  "modules": [
+    "google.golang.org/grpc@v1.83.2",
+    "golang.org/x/crypto@v0.57.0",
+    "golang.org/x/net@v0.59.0",
+    "golang.org/x/mod@v0.41.0",
+    "github.com/go-chi/chi/v5@v5.3.0",
+    "github.com/go-jose/go-jose/v4@v4.1.4",
+    "github.com/klauspost/compress@v1.19.1",
+    "github.com/insomniacslk/dhcp@v0.0.0-20260719225207-c76316d4aa82"
+  ]
+}

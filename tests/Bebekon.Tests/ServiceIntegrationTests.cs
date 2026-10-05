@@ -23,6 +23,9 @@ public class ServiceIntegrationTests
             var node=VlessParser.Parse($"vless://{CoreTests.Id}@127.0.0.1:9?security=none&type=tcp#Fixture");
             var spec=new ConnectSpec(node,new(),new(){TunnelMode=TunnelMode.Proxy},LatencyService.FreePort(),new string('c',48));
             Assert.True((await Send(new("ValidateConfig",spec),timeout.Token)).Ok);
+            node.TlsInsecure = true;
+            Assert.False((await Send(new("ValidateConfig",spec),timeout.Token)).Ok);
+            node.TlsInsecure = false;
             var reply=await Send(new("StartCore",spec),timeout.Token);Assert.True(reply.Ok,reply.Message);Assert.Equal(ConnectionState.Connected,reply.Status.State);
             ServiceResponse sampled;
             do { await Task.Delay(100, timeout.Token); sampled = await Send(new("GetStatus"), timeout.Token); } while (sampled.Status.Traffic is null);

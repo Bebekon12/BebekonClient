@@ -55,7 +55,7 @@ class Repository(private val context: Context) {
         val stream = file.startWrite()
         try { stream.write(cipher.iv); stream.write(cipher.doFinal(next.toJson().toString().toByteArray())); file.finishWrite(stream); mutable.value = next } catch (e: Exception) { file.failWrite(stream); throw e }
     }
-    @Synchronized fun log(message: String) { logs.value = (logs.value + "${java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.ROOT).format(java.util.Date())}  $message").takeLast(100) }
+    @Synchronized fun log(message: String) { logs.value = (logs.value + "${java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.ROOT).format(java.util.Date())}  ${redactRoutingLog(message, mutable.value)}").takeLast(100) }
     fun geo(name: String): JSONObject = try { JSONObject(context.assets.open("geo/$name.json").bufferedReader().use { it.readText() }) } catch (_: Exception) { error("Набор $name не включён в приложение") }
     fun presets(): List<Pair<String, List<Rule>>> {
         fun rules(o: JSONObject): List<Rule> = o.optJSONArray("rules")?.objects()?.mapNotNull { r ->
@@ -73,6 +73,7 @@ class Repository(private val context: Context) {
             val u = URI(text); require(u.scheme == "https" || u.host in listOf("localhost", "127.0.0.1", "::1")) { "Для ссылки подписки нужен HTTPS" }
             require(u.rawUserInfo == null) { "Ссылки с логином в адресе пока не поддерживаются" }
             val connection = directConnection(context, u.toURL())
+            val budget = NetworkBudget(20_000)
             try {
                 connection.connectTimeout = 10_000; connection.readTimeout = 10_000; connection.instanceFollowRedirects = false
                 connection.setRequestProperty("User-Agent", "clash.meta BebekonAndroid/${BuildConfig.VERSION_NAME}")
@@ -80,7 +81,8 @@ class Repository(private val context: Context) {
                 connection.setRequestProperty("x-hwid", digest("bebekon-android:" + Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)))
                 connection.setRequestProperty("x-device-os", "Android"); connection.setRequestProperty("x-ver-os", android.os.Build.VERSION.RELEASE)
                 require(connection.responseCode in 200..299) { "Провайдер вернул HTTP ${connection.responseCode}. Проверьте подписку и лимит устройств" }
-                val data = connection.inputStream.use { it.readLimited(4 * 1024 * 1024) }; content = data.toString(Charsets.UTF_8)
+                budget.check()
+                val data = connection.inputStream.use { it.readLimited(4 * 1024 * 1024, budget) }; content = data.toString(Charsets.UTF_8)
                 if (title.isEmpty()) { val h = connection.getHeaderField("profile-title") ?: ""; title = if (h.startsWith("base64:")) runCatching { SubscriptionParser.decode(h.substringAfter(':')) }.getOrDefault("") else h }
                 info = connection.getHeaderField("subscription-userinfo") ?: ""
             } finally { connection.disconnect() }
@@ -111,8 +113,8 @@ fun directConnection(context: Context, url: java.net.URL): HttpURLConnection {
     return (network?.openConnection(url) ?: url.openConnection(java.net.Proxy.NO_PROXY)) as HttpURLConnection
 }
 /** InputStream.readNBytes is not available on all supported Android 10 devices. */
-fun java.io.InputStream.readLimited(limit: Int): ByteArray {
+internal fun java.io.InputStream.readLimited(limit: Int, budget: NetworkBudget = NetworkBudget(20_000)): ByteArray {
     val output = java.io.ByteArrayOutputStream(); val buffer = ByteArray(8192)
-    while (true) { val count = read(buffer); if (count < 0) break; require(output.size() + count <= limit) { "Файл или подписка слишком большие" }; output.write(buffer, 0, count) }
+    while (true) { budget.check(); val count = read(buffer); budget.check(); if (count < 0) break; require(output.size() + count <= limit) { "Файл или подписка слишком большие" }; output.write(buffer, 0, count) }
     return output.toByteArray()
 }

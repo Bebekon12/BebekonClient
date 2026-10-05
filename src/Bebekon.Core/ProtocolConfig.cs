@@ -23,6 +23,7 @@ internal static class ProtocolConfig
         if (s.Type == "shadowsocks")
         {
             if (!Ciphers.Contains(s.Cipher) || s.Password.Length == 0 && s.Cipher != "none" || s.Plugin is not ("" or "obfs-local" or "v2ray-plugin") || s.Security != "none" || s.Transport != "tcp") throw Invalid();
+            ValidatePlugin(s);
             if (s.Cipher.StartsWith("2022-", StringComparison.Ordinal))
             { try { foreach (var key in s.Password.Split(':')) if (Convert.FromBase64String(key).Length != (s.Cipher == "2022-blake3-aes-128-gcm" ? 16 : 32)) throw Invalid(); } catch (FormatException) { throw Invalid(); } }
         }
@@ -40,6 +41,21 @@ internal static class ProtocolConfig
         if (s.Transport == "xhttp") { if (s.Type != "vless" || s.TlsInsecure || !Safe(s.VerifyCertificateName, 253) || s.CertificatePin.Length > 0 && (s.Security != "tls" || s.CertificatePin.Length != 64 || s.CertificatePin.Any(c => !Uri.IsHexDigit(c)))) throw Invalid(); XhttpConfig.Options(s); }
     }
     private static bool Safe(string text, int max) => text.Length <= max && !text.Any(char.IsControl);
+    private static void ValidatePlugin(Server s)
+    {
+        if (s.Plugin.Length == 0) { if (s.PluginOptions.Length > 0) throw Invalid(); return; }
+        if (s.PluginOptions.Contains('\\')) throw Invalid();
+        var keys = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var option in s.PluginOptions.Split(';', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var pair = option.Split('=', 2); var key = pair[0]; var value = pair.Length == 2 ? pair[1] : "";
+            var allowed = s.Plugin == "obfs-local" ? new[] { "obfs", "obfs-host" } : new[] { "tls", "host", "path", "mode", "mux" };
+            // Native v2ray-plugin accepts cert=<path>; a subscription may never read service files.
+            if (!allowed.Contains(key) || !keys.Add(key) || key == "mux" && (!int.TryParse(value, out var mux) || mux is < 0 or > 16)
+                || key == "mode" && value is not ("websocket" or "quic") || key == "obfs" && value is not ("http" or "tls"))
+                throw new UserError("Небезопасные или неподдерживаемые параметры Shadowsocks-плагина. Чтение файлов сертификатов из подписки запрещено.");
+        }
+    }
     private static UserError Invalid() => new("Некорректные или неподдерживаемые параметры VPN-сервера.");
     internal static JsonObject Outbound(Server s, string tag)
     {

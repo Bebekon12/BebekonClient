@@ -112,6 +112,7 @@ public static class SubscriptionLoader
         if (!source.StartsWith("http://", StringComparison.OrdinalIgnoreCase) && !source.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
             return VlessParser.ParseSubscription(source);
         if (!Uri.TryCreate(source, UriKind.Absolute, out var uri)) throw new UserError("Укажите URL подписки HTTP/HTTPS.");
+        if (uri.Scheme != "https" && !uri.IsLoopback) throw new UserError("Для подписки требуется HTTPS: HTTP раскрывает секретную ссылку и позволяет подменить VPN-серверы.");
         string? authorization = null;
         if (uri.UserInfo.Length > 0)
         {

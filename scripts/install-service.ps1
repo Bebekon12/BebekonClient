@@ -2,9 +2,10 @@ param([string]$OwnerAccount, [string]$OwnerSid, [switch]$EnableStartup)
 $ErrorActionPreference = 'Stop'
 $principal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'Run this script once as administrator to register the service.' }
+. (Join-Path $PSScriptRoot 'helper-path-security.ps1')
 function Set-ProtectedHelperAcl([IO.FileSystemInfo]$Item) {
     $admins = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')
-    if ($Item.PSIsContainer) {
+    if ($Item -is [IO.DirectoryInfo]) {
         $acl = [Security.AccessControl.DirectorySecurity]::new()
         $inherit = [Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
     } else {
@@ -24,12 +25,18 @@ $installRoot = Split-Path -Parent $PSScriptRoot
 $exe = Join-Path $installRoot 'Bebekon.Service.exe'
 if (-not (Test-Path -LiteralPath $exe)) { throw 'Service executable is missing.' }
 $programFilesRoot = [IO.Path]::GetFullPath($env:ProgramFiles).TrimEnd('\') + '\'
+Assert-NoHelperReparsePath $installRoot
+if (Get-ChildItem -LiteralPath $installRoot -Recurse -Force | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint }) { throw 'Reparse package files are forbidden.' }
 if (-not [IO.Path]::GetFullPath($installRoot).StartsWith($programFilesRoot,[StringComparison]::OrdinalIgnoreCase)) {
     # A LocalSystem executable cannot remain in a user-writable portable directory.
     $protectedRoot = Join-Path $env:ProgramFiles 'Bebekon VPN Portable Helper'
     if (-not [IO.Path]::GetFullPath($protectedRoot).StartsWith($programFilesRoot,[StringComparison]::OrdinalIgnoreCase)) { throw 'Invalid helper destination.' }
     New-Item -ItemType Directory -Path $protectedRoot -Force | Out-Null
     if ((Get-Item -LiteralPath $protectedRoot).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Reparse helper directory is forbidden.' }
+    Assert-NoHelperReparsePath $protectedRoot
+    Assert-TrustedHelperParents $protectedRoot $env:ProgramFiles
+    Assert-TrustedHelperAcl $protectedRoot
+    Get-ChildItem -LiteralPath $protectedRoot -Recurse -Force | ForEach-Object { Assert-TrustedHelperAcl $_.FullName }
     foreach ($root in @($installRoot, $protectedRoot)) {
         if ((Get-Item -LiteralPath $root).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Reparse package directory is forbidden.' }
         if (Get-ChildItem -LiteralPath $root -Recurse -Force | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint }) { throw 'Reparse package files are forbidden.' }
@@ -44,6 +51,15 @@ if (-not [IO.Path]::GetFullPath($installRoot).StartsWith($programFilesRoot,[Stri
     Get-ChildItem -LiteralPath $installRoot | Copy-Item -Destination $protectedRoot -Recurse -Force
     Get-ChildItem -LiteralPath $protectedRoot -Recurse -Force | ForEach-Object { Set-ProtectedHelperAcl $_ }
     $exe = Join-Path $protectedRoot 'Bebekon.Service.exe'
+}
+else {
+    # Program Files is not sufficient by name: reject writable ancestor folders
+    # and protect an existing/custom install just as strictly as a portable copy.
+    Assert-TrustedHelperParents $installRoot $env:ProgramFiles
+    Assert-TrustedHelperAcl $installRoot
+    Get-ChildItem -LiteralPath $installRoot -Recurse -Force | ForEach-Object { Assert-TrustedHelperAcl $_.FullName }
+    Set-ProtectedHelperAcl (Get-Item -LiteralPath $installRoot)
+    Get-ChildItem -LiteralPath $installRoot -Recurse -Force | ForEach-Object { Set-ProtectedHelperAcl $_ }
 }
 if (-not $OwnerSid) {
     if ($OwnerAccount) { $OwnerSid = ([Security.Principal.NTAccount]::new($OwnerAccount)).Translate([Security.Principal.SecurityIdentifier]).Value }
