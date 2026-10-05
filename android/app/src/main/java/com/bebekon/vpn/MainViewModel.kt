@@ -6,6 +6,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 
@@ -30,6 +31,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val pingJobs = mutableMapOf<String, Job>()
     init {
         viewModelScope.launch { saved.collect { origin.enabled(it.preferences.mapLocation) } }
+        viewModelScope.launch { combine(saved, session) { state, current -> state to current }.collect { (state, current) ->
+            val node = state.selectedNode
+            val ip = if (current.phase == Phase.ON && node?.country.isNullOrBlank() && current.server == node?.name) current.publicIp else ""
+            origin.serverIp("${node?.id}/$ip", ip)
+        } }
+        viewModelScope.launch { while (isActive) { delay(30_000); origin.refresh() } }
         // Older Xray imports lost profile remarks. Refresh them once per launch; identity stays unchanged.
         saved.value.subscriptions.filter { sub -> sub.source.startsWith("https://") && sub.nodes.any { it.country.isBlank() && it.name.lowercase() in setOf("proxy", "vpn", "out", "outbound") } }.forEach(::refresh)
     }
@@ -109,7 +116,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 val result = withContext(Dispatchers.IO) { runCatching {
                     if (method == PingMethod.TCP) {
                         NativeCore.setup(getApplication()); val platform = AndroidPlatform(getApplication()); try { io.nekohasekai.libbox.Libbox.bebekonTCPProbe(node.host, node.port, platform) } finally { platform.close() }
-                    } else NativeCore.probe(getApplication(), SavedState(subscriptions = listOf(Subscription(name = "probe", source = "", nodes = listOf(node))), selected = node.id, preferences = preferences), if (method == PingMethod.HTTPS_HEAD) "HEAD" else "GET").millis
+                    } else NativeCore.probe(getApplication(), SavedState(subscriptions = listOf(Subscription(name = "probe", source = "", nodes = listOf(node))), selected = node.id, preferences = preferences), if (method == PingMethod.HTTPS_HEAD) "HEAD" else "GET").also { check(it.statusCode == 204) { "HTTPS-проверка не вернула ожидаемый ответ 204" } }.millis
                 } }
                 repo.pings.value = repo.pings.value + (node.id to result.fold({ PingResult(millis = it.coerceAtLeast(1), method = method, target = target) }, { PingResult(failed = true, method = method, target = target) }))
             }

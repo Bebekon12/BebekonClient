@@ -57,6 +57,20 @@ class AndroidSmokeTest {
         compose.onNodeWithTag("settings-list").performScrollToNode(hasText("Тема")); compose.onNodeWithText("Светлая").performClick(); compose.onNodeWithText("Тёмная").performClick(); compose.waitUntil(5000) { context.repo.state.value.preferences.theme == ThemeChoice.DARK }
         compose.onNodeWithText("Главная").performClick(); compose.onNodeWithContentDescription("Подключить VPN").assertIsDisplayed()
     }
+    @Test fun backReturnsEveryPageToHomeThenBackgroundsTheTask() {
+        for ((tab, title) in listOf("Серверы" to "Выбор сервера", "Правила" to "Ваши правила", "Подписки" to "Добавить подписку")) {
+            compose.onNodeWithText(tab).performClick(); compose.onNodeWithText(title).assertIsDisplayed()
+            compose.runOnUiThread { compose.activity.onBackPressedDispatcher.onBackPressed() }
+            compose.onNodeWithContentDescription("Подключить VPN").assertIsDisplayed()
+        }
+        compose.onNodeWithText("Подписки").performClick()
+        compose.onNodeWithContentDescription("Настройки").performClick()
+        compose.runOnUiThread { compose.activity.onBackPressedDispatcher.onBackPressed() }
+        compose.onNodeWithContentDescription("Подключить VPN").assertIsDisplayed()
+        compose.runOnUiThread { compose.activity.onBackPressedDispatcher.onBackPressed() }
+        compose.waitUntil(5000) { !compose.activity.hasWindowFocus() }
+        assertFalse("Back must keep the root activity alive", compose.activity.isFinishing)
+    }
     @Test fun homeMapVisualFixture() {
         org.junit.Assume.assumeTrue(InstrumentationRegistry.getArguments().getString("map_visual") == "true")
         seed("vless://$uuid@127.0.0.1:9#Sweden")
@@ -64,22 +78,25 @@ class AndroidSmokeTest {
         compose.waitForIdle()
         val model = androidx.lifecycle.ViewModelProvider(compose.activity)[MainViewModel::class.java]
         try {
-            for (country in listOf("SE", "US")) {
-                context.repo.update { state -> state.copy(subscriptions = state.subscriptions.map { sub -> sub.copy(nodes = sub.nodes.map { node -> node.copy(country = country, name = if (country == "SE") "Швеция" else "США") }) }) }
+            for (country in listOf("SE", "US", "")) {
+                val captionText = if (country == "US") "США" else "Швеция"
+                context.repo.update { state -> state.copy(subscriptions = state.subscriptions.map { sub -> sub.copy(nodes = sub.nodes.map { node -> node.copy(country = country, name = if (country.isBlank()) "testvpn" else captionText) }) }) }
                 compose.waitForIdle()
                 android.os.SystemClock.sleep(1000)
                 model.origin.point.value = OriginPoint(37.6f, 55.7f, "RU")
                 VpnController.publish(context) { Session(phase = Phase.ON, started = System.currentTimeMillis(), publicIp = "203.0.113.42") }
+                compose.waitForIdle()
+                if (country.isBlank()) model.origin.destination.value = OriginPoint(18.1f, 59.3f, "SE")
                 compose.waitForIdle()
                 compose.onNodeWithTag("world-map").assertIsDisplayed()
                 compose.onNodeWithContentDescription("Отключить VPN").assertIsDisplayed()
                 compose.onNodeWithText("Подключено").assertIsDisplayed()
                 android.os.SystemClock.sleep(1200)
                 compose.onRoot().captureToImage().asAndroidBitmap().let { bitmap ->
-                    java.io.File(context.getExternalFilesDir(null), "home-map-$country.png").outputStream().use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+                    java.io.File(context.getExternalFilesDir(null), "home-map-${country.ifBlank { "generic" }}.png").outputStream().use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
                     bitmap.recycle()
                 }
-                val caption = compose.onNode(hasText(if (country == "SE") "Швеция" else "США") and hasAnyAncestor(hasTestTag("map-server-label"))).assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+                val caption = compose.onNode(hasText(captionText) and hasAnyAncestor(hasTestTag("map-server-label"))).assertIsDisplayed().fetchSemanticsNode().boundsInRoot
                 val status = compose.onNodeWithTag("connection-status").fetchSemanticsNode().boundsInRoot
                 assertTrue("Server caption stays below status: $caption / $status", caption.top >= status.bottom)
             }

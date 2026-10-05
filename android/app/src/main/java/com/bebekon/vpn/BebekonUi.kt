@@ -48,16 +48,16 @@ private val Light = lightColorScheme(primary = Color(0xFF086AFF), onPrimary = Co
     var tab by rememberSaveable { mutableIntStateOf(0) }; var settings by rememberSaveable { mutableStateOf(false) }; var addSubscription by remember { mutableStateOf(false) }; var editRule by remember { mutableStateOf<Rule?>(null) }; var newRule by remember { mutableStateOf(false) }; var presets by remember { mutableStateOf(false) }; var routing by remember { mutableStateOf(false) }
     var applications by remember { mutableStateOf(false) }
     var trustTunnel by remember { mutableStateOf(false) }; var editTrustTunnel by remember { mutableStateOf<Node?>(null) }
-    androidx.activity.compose.BackHandler(settings) { settings = false }
-    val snackbar = remember { SnackbarHostState() }
     val activity = androidx.activity.compose.LocalActivity.current
+    androidx.activity.compose.BackHandler { if (settings || tab != 0) { settings = false; tab = 0 } else activity?.moveTaskToBack(true) }
+    val snackbar = remember { SnackbarHostState() }
     SideEffect { activity?.let { androidx.core.view.WindowCompat.getInsetsController(it.window, it.window.decorView).apply { isAppearanceLightStatusBars = !isDark; isAppearanceLightNavigationBars = !isDark } } }
     LaunchedEffect(message) { if (message.isNotEmpty()) { snackbar.showSnackbar(message); model.message.value = "" } }
     LaunchedEffect(imported) { if (imported.isNotEmpty()) { tab = 3; addSubscription = true } }
     MaterialTheme(colorScheme = if (isDark) Dark else Light) {
         Scaffold(containerColor = MaterialTheme.colorScheme.background, snackbarHost = { SnackbarHost(snackbar) }, topBar = {
             Row(Modifier.statusBarsPadding().fillMaxWidth().padding(horizontal = 20.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (settings) IconButton({ settings = false }) { Icon(Icons.Outlined.ArrowBack, "Назад") } else Image(painterResource(R.drawable.snowman), "Снеговик Bebekon в шляпе", Modifier.size(58.dp))
+                if (settings) IconButton({ settings = false; tab = 0 }) { Icon(Icons.Outlined.ArrowBack, "Назад") } else Image(painterResource(R.drawable.snowman), "Снеговик Bebekon в шляпе", Modifier.size(58.dp))
                 Column(Modifier.weight(1f).padding(start = 10.dp)) { Text(if (settings) "Настройки" else "Bebekon VPN", fontSize = 23.sp, fontWeight = FontWeight.Bold); if (settings) Text("Сделайте приложение своим", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                 if (!settings) IconButton({ settings = true }, Modifier.clip(CircleShape).background(MaterialTheme.colorScheme.secondary.copy(alpha = .10f))) { Icon(Icons.Outlined.Settings, "Настройки", tint = MaterialTheme.colorScheme.onSurface) }
             }
@@ -121,6 +121,7 @@ private fun cleanName(s: String) = s.replace(Regex("[\\x{1F1E6}-\\x{1F1FF}]"), "
         item { OutlinedTextField(search, { search = it }, Modifier.fillMaxWidth(), placeholder = { Text("Страна или название") }, leadingIcon = { Icon(Icons.Outlined.Search, null) }, singleLine = true, shape = RoundedCornerShape(16.dp)) }
         item { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) { FilterChip(favorites, { favorites = !favorites }, { Text("Избранное", fontSize = 11.sp) }); FilterChip(sortPing, { sortPing = !sortPing }, { Text("По пингу", fontSize = 11.sp) }); Spacer(Modifier.weight(1f)); IconButton({ sortPing = true; model.pingAll() }) { Icon(Icons.Outlined.Speed, "Проверить пинг всех серверов") } } }
         item { Box { TextButton({ methods = true }) { Icon(Icons.Outlined.NetworkCheck, null, Modifier.size(18.dp)); Text(saved.preferences.ping.label, fontSize = 12.sp, modifier = Modifier.padding(start = 6.dp)); Icon(Icons.Outlined.ExpandMore, null) }; DropdownMenu(methods, { methods = false }) { PingMethod.entries.forEach { m -> DropdownMenuItem(text = { Text(m.label) }, onClick = { model.preferences(saved.preferences.copy(ping = m)); methods = false }) } } } }
+        item { Text(if (saved.preferences.ping == PingMethod.TCP) "TCP — подключение к порту сервера напрямую. Это не проверка VPN." else "HTTPS — полный запрос через VPN, включая DNS и TLS. Запуск ядра и время очереди не учитываются; таймаут 5 с.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         if (saved.preferences.ping != PingMethod.TCP) item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("Сайт для теста", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))

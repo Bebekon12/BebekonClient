@@ -26,6 +26,12 @@ public sealed class LatencyMethodsTests
         using var stop = new CancellationTokenSource(50);
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => LatencyService.MeasureHttpAsync(pending, HttpMethod.Head, stop.Token));
     }
+    [Theory] [InlineData(HttpStatusCode.OK)] [InlineData(HttpStatusCode.Found)]
+    public async Task PortalPagesAndRedirectsAreNotSuccessfulProbeResponses(HttpStatusCode status)
+    {
+        using var http = new HttpClient(new Handler((_, _) => Task.FromResult(new HttpResponseMessage(status))));
+        await Assert.ThrowsAsync<HttpRequestException>(() => LatencyService.MeasureHttpAsync(http, HttpMethod.Get, default));
+    }
     [Fact] public async Task TcpCacheDoesNotLeakAcrossMethodsOrChangedEndpoints()
     {
         using var listener = new TcpListener(IPAddress.Loopback, 0); listener.Start();

@@ -4,6 +4,15 @@ using Xunit;
 namespace Bebekon.Tests;
 public sealed class MapLocationTests
 {
+    [Fact] public void GenericServerUsesValidatedEgressCoordinatesAndCountry()
+    {
+        Assert.Null(CountryInfo.Resolve("testvpn"));
+        var result = MapLocation.ParseEndpoint("{\"success\":true,\"longitude\":18.1,\"latitude\":59.3,\"country_code\":\"SE\"}");
+        Assert.Equal(new GeoPoint(18.1, 59.3), result.Point); Assert.Equal("SE", result.Country);
+        Assert.Equal("Швеция", CountryInfo.CountryName(result.Country));
+        Assert.Equal("", MapLocation.ParseEndpoint("{\"success\":true,\"longitude\":18.1,\"latitude\":59.3,\"country_code\":\"ZZ\"}").Country);
+        Assert.Throws<FormatException>(() => MapLocation.ParseEndpoint("{\"success\":false,\"longitude\":18.1,\"latitude\":59.3}"));
+    }
     [Fact] public async Task OfficialCoreAcceptsAndRestrictsTheOriginChannel()
     {
         var root = Path.Combine(Path.GetTempPath(), "BebekonTests", Guid.NewGuid().ToString("N")); Directory.CreateDirectory(root);

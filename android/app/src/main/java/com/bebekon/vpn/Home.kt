@@ -35,6 +35,7 @@ private val SignalRed = Color(0xFFFF687A)
 
 @Composable fun HomeScreen(saved: SavedState, session: Session, model: MainViewModel, toggle: () -> Unit, servers: () -> Unit, routing: () -> Unit, subscriptions: () -> Unit) {
     val origin by model.origin.point.collectAsState()
+    val destination by model.origin.destination.collectAsState()
     val history by VpnController.trafficHistory.collectAsState()
     val pings by model.repo.pings.collectAsState()
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
@@ -102,10 +103,11 @@ private val SignalRed = Color(0xFFFF687A)
                 }
             }) { contentPadding ->
             Box(Modifier.fillMaxSize().padding(contentPadding).clip(RoundedCornerShape(0.dp))) {
-                WorldMap(node?.country.orEmpty(), saved.preferences.animations, session.active, origin, markerContent = {
+                val country = node?.country?.ifBlank { destination?.country.orEmpty() }.orEmpty()
+                WorldMap(country, saved.preferences.animations, session.active, origin, destination, markerContent = {
                     if (node != null) Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.background.copy(alpha = .94f), border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = .7f))) {
                         Row(Modifier.padding(horizontal = 10.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text(displayName(node.name), fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false).padding(end = 6.dp))
+                            Text(if (node.country.isBlank() && country.isNotBlank()) Locale("", country).getDisplayCountry(Locale("ru")) else displayName(node.name), fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false).padding(end = 6.dp))
                             PingText(pings[node.id] ?: PingResult(), { model.ping(node) })
                         }
                     }

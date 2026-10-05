@@ -59,4 +59,5 @@ public static class CountryInfo
             text = text[prefix.Length..].TrimStart(' ', '·', '|', '-', ':');
         return string.IsNullOrWhiteSpace(text) ? label : text;
     }
+    public static string CountryName(string code, bool english = false) => Names.TryGetValue(code, out var names) ? names[english || names.Length < 2 ? 0 : 1] : code;
 }

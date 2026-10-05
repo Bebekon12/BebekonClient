@@ -3,6 +3,7 @@ using System.Text.Json;
 namespace Bebekon.Core;
 
 public sealed record GeoPoint(double Longitude, double Latitude);
+public sealed record GeoEndpoint(GeoPoint Point, string Country);
 public static class MapLocation
 {
     public static readonly IReadOnlyList<string> LookupHosts = Array.AsReadOnly(new[] { "ipwho.is", "ipapi.co" });
@@ -32,4 +33,11 @@ public static class MapLocation
         return new(lon, lat);
     }
     public static double LongitudeDelta(double delta) => (delta + 540) % 360 - 180;
+    public static GeoEndpoint ParseEndpoint(string text, bool fallback = false)
+    {
+        var point = fallback ? ParseFallback(text) : Parse(text);
+        using var doc = JsonDocument.Parse(text);
+        var code = doc.RootElement.TryGetProperty("country_code", out var country) && country.ValueKind == JsonValueKind.String ? country.GetString()! : "";
+        return new(point, code.Length == 2 && CountryInfo.Resolve(code) == code ? code : "");
+    }
 }

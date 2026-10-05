@@ -12,6 +12,8 @@ public sealed class ConnectionMap : FrameworkElement
     private static readonly Country[] Countries = Load();
     public static readonly DependencyProperty ServerNameProperty = DependencyProperty.Register(nameof(ServerName), typeof(string), typeof(ConnectionMap), new FrameworkPropertyMetadata("", Changed));
     public static readonly DependencyProperty OriginProperty = DependencyProperty.Register(nameof(Origin), typeof(GeoPoint), typeof(ConnectionMap), new FrameworkPropertyMetadata(null, Changed));
+    public static readonly DependencyProperty DestinationProperty = DependencyProperty.Register(nameof(Destination), typeof(GeoPoint), typeof(ConnectionMap), new FrameworkPropertyMetadata(null, Changed));
+    public static readonly DependencyProperty CountryCodeProperty = DependencyProperty.Register(nameof(CountryCode), typeof(string), typeof(ConnectionMap), new FrameworkPropertyMetadata("", Changed));
     public static readonly DependencyProperty ActiveProperty = DependencyProperty.Register(nameof(Active), typeof(bool), typeof(ConnectionMap), new FrameworkPropertyMetadata(false, MotionChanged));
     public static readonly DependencyProperty AnimationEnabledProperty = DependencyProperty.Register(nameof(AnimationEnabled), typeof(bool), typeof(ConnectionMap), new FrameworkPropertyMetadata(true, MotionChanged));
     public static readonly DependencyProperty LatencyProperty = DependencyProperty.Register(nameof(Latency), typeof(string), typeof(ConnectionMap), new FrameworkPropertyMetadata("", FrameworkPropertyMetadataOptions.AffectsRender));
@@ -19,6 +21,8 @@ public sealed class ConnectionMap : FrameworkElement
     private static readonly DependencyProperty FlightProperty = DependencyProperty.Register("Flight", typeof(double), typeof(ConnectionMap), new FrameworkPropertyMetadata(0d, FrameworkPropertyMetadataOptions.AffectsRender));
     public string ServerName { get => (string)GetValue(ServerNameProperty); set => SetValue(ServerNameProperty, value); }
     public GeoPoint? Origin { get => (GeoPoint?)GetValue(OriginProperty); set => SetValue(OriginProperty, value); }
+    public GeoPoint? Destination { get => (GeoPoint?)GetValue(DestinationProperty); set => SetValue(DestinationProperty, value); }
+    public string CountryCode { get => (string)GetValue(CountryCodeProperty); set => SetValue(CountryCodeProperty, value); }
     public bool Active { get => (bool)GetValue(ActiveProperty); set => SetValue(ActiveProperty, value); }
     public bool AnimationEnabled { get => (bool)GetValue(AnimationEnabledProperty); set => SetValue(AnimationEnabledProperty, value); }
     public string Latency { get => (string)GetValue(LatencyProperty); set => SetValue(LatencyProperty, value); }
@@ -57,9 +61,10 @@ public sealed class ConnectionMap : FrameworkElement
     }
     private void Project()
     {
-        var code = CountryInfo.Resolve(ServerName);
+        var code = string.IsNullOrEmpty(CountryCode) ? CountryInfo.Resolve(ServerName) : CountryCode;
         var selected = string.IsNullOrEmpty(code) ? null : Countries.FirstOrDefault(c => c.Code == code);
-        var route = MapLocation.Viewport(selected is null ? null : new GeoPoint(selected.Center.X, selected.Center.Y), Origin);
+        var target = Destination ?? (selected is null ? null : new GeoPoint(selected.Center.X, selected.Center.Y));
+        var route = MapLocation.Viewport(target, Origin);
         var scale = Math.Min(ActualWidth * .84 / route.LongitudeSpan, ActualHeight * .80 / route.LatitudeSpan);
         Point At(Point p) => new(MapLocation.LongitudeDelta(p.X - route.Longitude) * scale + ActualWidth * .5, (route.Latitude - p.Y) * scale + ActualHeight * .52);
         projected = Countries.Select(c => {
@@ -69,7 +74,7 @@ public sealed class ConnectionMap : FrameworkElement
             }
             shape.Freeze(); return (c.Code, shape);
         }).ToArray();
-        destination = selected is null ? null : At(selected.Center);
+        destination = target is null ? null : At(new(target.Longitude, target.Latitude));
         departure = Origin is null ? null : At(new(Origin.Longitude, Origin.Latitude));
         beam = null;
         if (destination is { } end && departure is { } start) {
@@ -83,7 +88,7 @@ public sealed class ConnectionMap : FrameworkElement
     {
         if (ActualWidth < 2 || ActualHeight < 2) return;
         if (projected is null) Project();
-        var code = CountryInfo.Resolve(ServerName);
+        var code = string.IsNullOrEmpty(CountryCode) ? CountryInfo.Resolve(ServerName) : CountryCode;
         var land = Brush(170, 13, 58, 104); var outline = new Pen(Brush(160, 26, 81, 130), .65);
         foreach (var c in projected!) dc.DrawGeometry(!string.IsNullOrEmpty(code) && c.Code == code ? Brush(180, 18, 101, 202) : land, outline, c.Shape);
         if (departure is { } origin) {
@@ -99,7 +104,7 @@ public sealed class ConnectionMap : FrameworkElement
             if (AnimationEnabled) { var t = (double)GetValue(FlightProperty); var point = BeamPoint(t); dc.DrawEllipse(Brush(50), null, point, 12, 12); dc.DrawEllipse(Brushes.White, null, point, 3, 3); }
         }
         dc.DrawEllipse(Brush(50), null, end, 13, 13); dc.DrawEllipse(Brush(240), new Pen(Brushes.White, 1.5), end, 4, 4);
-        var name = CountryInfo.DisplayName(ServerName);
+        var name = CountryInfo.Resolve(ServerName) is null && !string.IsNullOrEmpty(CountryCode) ? CountryInfo.CountryName(CountryCode, I18n.English) : CountryInfo.DisplayName(ServerName);
         var caption = name + (LatencyMs is null ? "" : " · " + Latency);
         var label = new FormattedText(caption, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight, new Typeface("Segoe UI"), 11, Brushes.White, VisualTreeHelper.GetDpi(this).PixelsPerDip) { MaxTextWidth = 180, MaxLineCount = 1, Trimming = TextTrimming.CharacterEllipsis };
         if (LatencyMs is not null) label.SetForegroundBrush((Brush)Application.Current.Resources[LatencyDisplay.Quality(LatencyMs, Mode) switch { LatencyQuality.Good => "PingGood", LatencyQuality.Moderate => "PingModerate", _ => "PingPoor" }], name.Length, caption.Length - name.Length);

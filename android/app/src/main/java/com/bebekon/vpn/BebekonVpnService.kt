@@ -54,7 +54,8 @@ object NativeCore {
             val remaining = 5000 - (android.os.SystemClock.elapsedRealtime() - started)
             check(remaining > 0) { "Таймаут" }
             val result = Libbox.bebekonProbeWithTimeout(CoreConfig.build(state, context.repo::geo, tunnel = false, vpnOverride = override), platform, "vpn", url, method, remaining.toInt())
-            result.millis = (android.os.SystemClock.elapsedRealtime() - started).toInt()
+            // The five-second budget includes setup, but displayed latency comes
+            // from the native HTTP timer, excluding core/TrustTunnel startup.
             return result
         } finally { platform.close(); trustTunnel?.close() }
     }
@@ -150,7 +151,7 @@ class BebekonVpnService : VpnService(), CommandServerHandler {
             if (BuildConfig.DEBUG && node.host == "10.0.2.2" && probe.isFailure) android.util.Log.w("BebekonDebug", "Fixture HTTPS check failed", probe.exceptionOrNull())
             if (!desired || generation.get() != version) return
             require(probe.isSuccess) { "Сервер не ответил при проверке подключения. Попробуйте другой сервер" }
-            VpnController.publish(this) { it.copy(phase = Phase.ON, server = node.name, message = "", started = if (reload && it.started != 0L) it.started else System.currentTimeMillis()) }
+            VpnController.publish(this) { it.copy(phase = Phase.ON, publicIp = if (it.server == node.name) it.publicIp else "", server = node.name, message = "", started = if (reload && it.started != 0L) it.started else System.currentTimeMillis()) }
             foreground(node.name)
             repo.log(if (reload) "Настройки маршрутизации применены" else "VPN подключён")
             val ip = runCatching { NativeCore.probe(this, saved, "GET", "https://api.ipify.org").body.trim() }.getOrDefault("")

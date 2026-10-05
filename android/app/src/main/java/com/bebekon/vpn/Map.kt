@@ -39,15 +39,16 @@ fun parseWorldMap(text: String): List<MapCountry> = JSONArray(text.removePrefix(
     MapCountry(code, Offset(o.getDouble("x").toFloat(), o.getDouble("y").toFloat()), rings)
 }
 
-@Composable fun WorldMap(country: String, animations: Boolean, active: Boolean, origin: OriginPoint? = null, markerContent: (@Composable () -> Unit)? = null) {
+@Composable fun WorldMap(country: String, animations: Boolean, active: Boolean, origin: OriginPoint? = null, destination: OriginPoint? = null, markerContent: (@Composable () -> Unit)? = null) {
     val context = LocalContext.current
     val countries by produceState<List<MapCountry>>(emptyList()) {
         value = withContext(Dispatchers.IO) { parseWorldMap(context.assets.open("world.json").bufferedReader().use { it.readText() }) }
     }
-    val selected = if (country.isBlank()) null else countries.firstOrNull { it.code == country }
+    val selectedCountry = if (country.isBlank()) null else countries.firstOrNull { it.code == country }
+    val selected = destination?.let { (selectedCountry ?: MapCountry(country, Offset(it.longitude, it.latitude), emptyList())).copy(center = Offset(it.longitude, it.latitude)) } ?: selectedCountry
     val span by animateFloatAsState(mapSpan(selected?.center?.x, origin), tween(if (animations) 650 else 0), label = "map-span")
-    val longitude by animateFloatAsState(selected?.let { shortestLongitude(it.center.x + (origin?.let { p -> shortestLongitude(p.longitude - it.center.x) / 2 } ?: 0f)) } ?: 10f, tween(if (animations) 650 else 0), label = "map-longitude")
-    val latitude by animateFloatAsState(selected?.let { (origin?.let { p -> (it.center.y + p.latitude) / 2 } ?: it.center.y).coerceIn(-70f, 80f) } ?: 20f, tween(if (animations) 650 else 0), label = "map-latitude")
+    val longitude by animateFloatAsState(selected?.let { shortestLongitude(it.center.x + (origin?.let { p -> shortestLongitude(p.longitude - it.center.x) / 2 } ?: 0f)) } ?: origin?.longitude ?: 10f, tween(if (animations) 650 else 0), label = "map-longitude")
+    val latitude by animateFloatAsState(selected?.let { (origin?.let { p -> (it.center.y + p.latitude) / 2 } ?: it.center.y).coerceIn(-70f, 80f) } ?: origin?.latitude ?: 20f, tween(if (animations) 650 else 0), label = "map-latitude")
     var pan by remember(country) { mutableStateOf(Offset.Zero) }
     var zoom by remember(country) { mutableFloatStateOf(1f) }
     val flight = if (animations && active && selected != null) key(country) {

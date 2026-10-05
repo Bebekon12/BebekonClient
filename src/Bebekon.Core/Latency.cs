@@ -34,9 +34,7 @@ public sealed class LatencyService(string executable)
             {
                 if (mode == LatencyMode.Tcp)
                 {
-                    var times = new List<long>();
-                    for (var i = 0; i < 3; i++) { using var tcp = new TcpClient(); var sw = Stopwatch.StartNew(); await tcp.ConnectAsync(server.Host, server.Port, probeToken); times.Add(sw.ElapsedMilliseconds); }
-                    times.Sort(); ms = times[1];
+                    ms = await TcpLatency.MeasureAsync(server.Host, server.Port, probeToken);
                 }
                 else if (mode == LatencyMode.Icmp)
                 {
@@ -97,7 +95,8 @@ public sealed class LatencyService(string executable)
         var sw = Stopwatch.StartNew();
         using var request = new HttpRequestMessage(method, "https://www.gstatic.com/generate_204");
         using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
-        response.EnsureSuccessStatusCode(); return sw.ElapsedMilliseconds;
+        if (response.StatusCode != HttpStatusCode.NoContent) throw new HttpRequestException("HTTPS-проверка не вернула ожидаемый ответ 204.");
+        return sw.ElapsedMilliseconds;
     }
     public static HttpClient ProbeClient(ConnectSpec spec) => new(new SocketsHttpHandler { Proxy = new WebProxy("socks5://127.0.0.1:" + spec.ProbePort) { Credentials = new NetworkCredential("bebekon", spec.ProbePassword) }, UseProxy = true, AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(4) };
     public static async Task<string> VpnIpAsync(ConnectSpec spec, CancellationToken ct)

@@ -4,6 +4,8 @@ Windows 10/11 x64, .NET 10, WPF, native UI. Default routing is **selected rules 
 
 ## Android
 
+Windows 0.1.22 / Android 0.1.9 correct latency measurement: Windows TCP probes bind to the physical uplink so an active TUN cannot produce a false 1–2 ms result; Android HTTPS results exclude native/TrustTunnel startup. HTTPS measures a cold request through the chosen VPN, including DNS/TLS and the test site's response, so it is normally higher than TCP. The test must return the expected HTTP 204. Generic server names, including manual TrustTunnel profiles, can now obtain approximate map coordinates and a country from the VPN's public exit IP. Android Back returns other pages to Home, then backgrounds the task from Home.
+
 Windows 0.1.21 / Android 0.1.8 add an eye button on Subscriptions to hide server rows without deleting nodes or changing the active connection. Windows adds manual TrustTunnel entry (address, certificate hostname, SNI, username/password and HTTP/2/HTTP/3/Auto). HTTPS ping colors now consistently use 300/600 ms thresholds, while TCP/ICMP use 100/250 ms. Desktop origin lookup retries with a fallback through a restricted authenticated direct channel; Android zooms the map out slightly and keeps the origin clear of the unchanged power button.
 
 The Android 10+ client is in [`android/`](android/README.md): native Compose interface, dark/light map design, subscriptions, application/domain rules, live traffic and a Quick Settings tile to toggle VPN from the notification shade. Android and Windows downloads share the [main GitHub release](https://github.com/Bebekon12/BebekonClient/releases/latest). Android has its own version and APK signing key. See the Android README for supported protocols, build steps and validation.
