@@ -32,7 +32,7 @@ public sealed class LatencyBrushConverter : IValueConverter
 {
     public object Convert(object value, Type type, object parameter, CultureInfo culture)
     {
-        var quality = LatencyDisplay.Quality(value is long ms ? ms : null);
+        var quality = value is LatencyQuality q ? q : LatencyDisplay.Quality(value is long ms ? ms : null);
         return Application.Current.Resources[quality switch { LatencyQuality.Good => "PingGood", LatencyQuality.Moderate => "PingModerate", LatencyQuality.Poor => "PingPoor", _ => "Muted" }];
     }
     public object ConvertBack(object value, Type type, object parameter, CultureInfo culture) => throw new NotSupportedException();

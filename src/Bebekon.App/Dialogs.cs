@@ -90,6 +90,35 @@ public static class Dialogs
     internal static string SuggestSubscriptionName(string source) => Uri.TryCreate(source, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https"
         ? uri.IdnHost : source.StartsWith("tt://", StringComparison.OrdinalIgnoreCase) ? "TrustTunnel" : ProtocolParser.IsLink(source) ? source.Split(':')[0].ToUpperInvariant() : I18n.T("Подписка", "Subscription");
 
+    public static Subscription? ManualTrustTunnel()
+    {
+        var window = Shell("TrustTunnel · " + I18n.T("Добавить сервер", "Add server"), out var body);
+        var name = Field(body, I18n.T("Название сервера", "Server name"), "");
+        var address = Field(body, I18n.T("Адрес сервера (порт по умолчанию 443)", "Server address (default port 443)"), "");
+        var hostname = Field(body, I18n.T("Домен сертификата", "Certificate hostname"), "");
+        var sni = Field(body, "Custom SNI · " + I18n.T("необязательно", "optional"), "");
+        var username = Field(body, I18n.T("Логин", "Username"), "");
+        body.Children.Add(new TextBlock { Text = I18n.T("Пароль", "Password"), Margin = new(0, 10, 0, 6), Foreground = (Brush)Application.Current.Resources["Muted"] });
+        var password = new PasswordBox { MinHeight = 42, VerticalContentAlignment = VerticalAlignment.Center, MaxLength = 4096 }; body.Children.Add(password);
+        body.Children.Add(new TextBlock { Text = I18n.T("Протокол", "Protocol"), Margin = new(0, 10, 0, 6) });
+        var protocol = new ComboBox { ItemsSource = new[] { "HTTP/2", "HTTP/3", "Auto" }, SelectedIndex = 0, MinHeight = 42 }; body.Children.Add(protocol);
+        body.Children.Add(new TextBlock { Text = I18n.T("Сертификат проверяется обязательно. Ваши правила маршрутизации сохраняются.", "Certificate verification is required. Your routing rules are preserved."), TextWrapping = TextWrapping.Wrap, Margin = new(0, 10, 0, 0), Foreground = (Brush)Application.Current.Resources["Muted"] });
+        var error = new TextBlock { Foreground = (Brush)Application.Current.Resources["Warning"], TextWrapping = TextWrapping.Wrap }; body.Children.Add(error);
+        Subscription? result = null;
+        Submit(body, I18n.T("Добавить", "Add"), () => {
+            try {
+                var input = address.Text.Trim();
+                if (!Uri.TryCreate("tcp://" + input, UriKind.Absolute, out var endpoint) || endpoint.UserInfo.Length > 0 || endpoint.Query.Length > 0 || endpoint.Fragment.Length > 0 || endpoint.AbsolutePath is not ("" or "/")) throw new UserError(I18n.T("Проверьте адрес сервера.", "Check server address."));
+                var port = endpoint.Port < 0 ? 443 : endpoint.Port;
+                var normalized = (endpoint.Host.Contains(':') ? "[" + endpoint.IdnHost.Trim('[', ']') + "]" : endpoint.IdnHost) + ":" + port;
+                var source = System.Text.Json.JsonSerializer.Serialize(new { name = name.Text.Trim().Length > 0 ? name.Text.Trim() : endpoint.IdnHost, addresses = new[] { normalized }, hostname = hostname.Text.Trim(), custom_sni = sni.Text.Trim(), username = username.Text.Trim(), password = password.Password, upstream_protocol = protocol.SelectedIndex switch { 1 => "http3", 2 => "auto", _ => "http2" } });
+                var node = VlessParser.ParseSubscription(source).Single();
+                result = new() { Name = node.Name, Source = source }; window.DialogResult = true;
+            } catch (UserError e) { error.Text = e.Message; }
+        });
+        try { return window.ShowDialog() == true ? result : null; } finally { password.Clear(); }
+    }
+
     public static string? TrustTunnelTransport(string current)
     {
         var w = Shell("TrustTunnel · " + I18n.T("Протокол соединения", "Connection protocol"), out var body);

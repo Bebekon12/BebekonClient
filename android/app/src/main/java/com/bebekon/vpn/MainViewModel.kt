@@ -71,6 +71,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         repo.update { s -> val remaining = s.subscriptions.filterNot { it.id == id }; s.copy(subscriptions = remaining, selected = s.selected?.takeIf { key -> remaining.any { sub -> sub.nodes.any { it.id == key } } }) }
         if (saved.value.selectedNode == null && session.value.active) VpnController.stop(getApplication())
     }
+    fun toggleSubscriptionVisibility(id: String) = task {
+        repo.update { state -> state.copy(subscriptions = state.subscriptions.map { if (it.id == id) it.copy(hidden = !it.hidden) else it }) }
+    }
     fun select(node: Node) { if (node.unsupported.isNotEmpty()) { message.value = node.unsupported; return }; task { repo.update { it.copy(selected = node.id) }; VpnController.reload(getApplication()) } }
     fun favorite(node: Node) = task { repo.update { it.copy(favorites = if (node.id in it.favorites) it.favorites - node.id else it.favorites + node.id) } }
     fun preferences(value: Preferences) = task {
@@ -112,6 +115,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
     }
-    fun pingAll() { saved.value.nodes.forEach(::ping) }
+    fun pingAll() { saved.value.visibleNodes.forEach(::ping) }
     fun receive(intent: Intent?) { val text = when (intent?.action) { Intent.ACTION_SEND -> intent.getStringExtra(Intent.EXTRA_TEXT); Intent.ACTION_VIEW -> intent.dataString; else -> null }; if (!text.isNullOrBlank()) importText.value = text }
 }

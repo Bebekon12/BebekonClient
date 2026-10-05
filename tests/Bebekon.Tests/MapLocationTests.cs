@@ -4,6 +4,46 @@ using Xunit;
 namespace Bebekon.Tests;
 public sealed class MapLocationTests
 {
+    [Fact] public async Task OfficialCoreAcceptsAndRestrictsTheOriginChannel()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "BebekonTests", Guid.NewGuid().ToString("N")); Directory.CreateDirectory(root);
+        var executable = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "core", "sing-box.exe"));
+        using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        try {
+            var probePort = LatencyService.FreePort(); int originPort;
+            do { originPort = LatencyService.FreePort(); } while (originPort == probePort || originPort == 17890);
+            var spec = CoreTests.Spec(settings: new() { TunnelMode = TunnelMode.Proxy }) with { ProbePort = probePort, OriginProbePort = originPort };
+            var config = System.Text.Json.Nodes.JsonNode.Parse(ConfigGenerator.Generate(spec))!;
+            var inbounds = config["inbounds"]!.AsArray();
+            inbounds.Remove(inbounds.Single(i => (string?)i?["tag"] == "proxy-in"));
+            var file = Path.Combine(root, "origin.json"); await File.WriteAllTextAsync(file, config.ToJsonString());
+            using var core = new CoreProcess(executable, new(root, "core")); await core.ValidateAsync(file, limit.Token); await core.StartAsync(file, limit.Token);
+            using var http = LatencyService.ProbeClient(spec with { ProbePort = originPort });
+            await Assert.ThrowsAsync<HttpRequestException>(() => http.GetStringAsync("https://example.com/", limit.Token));
+            await Assert.ThrowsAsync<HttpRequestException>(() => http.GetStringAsync("http://ipwho.is/", limit.Token));
+        } finally { Directory.Delete(root, true); }
+    }
+    [Fact] public void FallbackValidatesCoordinatesAndServiceErrors()
+    {
+        Assert.Equal(new GeoPoint(37.6, 55.7), MapLocation.ParseFallback("{\"ip\":\"203.0.113.1\",\"longitude\":37.6,\"latitude\":55.7}"));
+        Assert.Throws<FormatException>(() => MapLocation.ParseFallback("{\"error\":true}"));
+        Assert.Throws<FormatException>(() => MapLocation.ParseFallback("{\"ip\":\"203.0.113.1\",\"longitude\":181,\"latitude\":55.7}"));
+    }
+    [Fact] public void OnlyTheClientsLocationRequestsBypassWholePcRouting()
+    {
+        var spec = CoreTests.Spec(new() { DefaultRoute = RouteTarget.Vpn }) with { OriginProbePort = 18001 };
+        var config = System.Text.Json.Nodes.JsonNode.Parse(ConfigGenerator.Generate(spec))!;
+        var rule = config["route"]!["rules"]!.AsArray().Single(r => r?["domain"]?.ToJsonString().Contains("ipwho.is") == true)!;
+        Assert.Equal("origin-probe", (string?)rule["inbound"]![0]); Assert.Equal(443, (int?)rule["port"]); Assert.Equal("direct", (string?)rule["outbound"]);
+        var inlet = config["inbounds"]!.AsArray().Single(r => (string?)r?["tag"] == "origin-probe")!;
+        Assert.Equal("127.0.0.1", (string?)inlet["listen"]); Assert.Equal(spec.ProbePassword, (string?)inlet["users"]![0]!["password"]);
+        Assert.Contains(config["route"]!["rules"]!.AsArray(), r => (string?)r?["action"] == "reject" && (string?)r?["inbound"]?[0] == "origin-probe");
+        Assert.Equal("vpn", (string?)config["route"]!["final"]);
+        spec.Settings.MapLocation = false;
+        Assert.DoesNotContain("ipwho.is", ConfigGenerator.Generate(spec));
+        spec.Settings.MapLocation = true;
+        Assert.DoesNotContain("ipwho.is", ConfigGenerator.Generate(spec, probeOnly: true));
+    }
     [Fact] public void ParsesOnlyValidGeographicCoordinates()
     {
         Assert.Equal(new GeoPoint(37.6, 55.7), MapLocation.Parse("{\"success\":true,\"longitude\":37.6,\"latitude\":55.7}"));

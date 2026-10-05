@@ -18,7 +18,12 @@ public enum RuleKind { Site, Contains, Application, Network, GeoSite, GeoIp }
 public enum LatencyQuality { Unknown, Good, Moderate, Poor }
 public static class LatencyDisplay
 {
-    public static LatencyQuality Quality(long? milliseconds) => milliseconds switch { null => LatencyQuality.Unknown, < 0 => LatencyQuality.Poor, <= 100 => LatencyQuality.Good, <= 200 => LatencyQuality.Moderate, _ => LatencyQuality.Poor };
+    public static LatencyQuality Quality(long? milliseconds, LatencyMode mode = LatencyMode.Tcp) => milliseconds switch {
+        null => LatencyQuality.Unknown, < 0 => LatencyQuality.Poor,
+        _ when milliseconds <= (mode is LatencyMode.HttpsGet or LatencyMode.HttpsHead ? 300 : 100) => LatencyQuality.Good,
+        _ when milliseconds <= (mode is LatencyMode.HttpsGet or LatencyMode.HttpsHead ? 600 : 250) => LatencyQuality.Moderate,
+        _ => LatencyQuality.Poor
+    };
 }
 public enum TunnelMode { Tun, Proxy }
 public enum ConnectionState { Disconnected, Connecting, Connected, Disconnecting, Error }
@@ -82,7 +87,10 @@ public sealed class Server : Observable
     private string latency = "—";
     [JsonIgnore] public string Latency { get => latency; set => Set(ref latency, value); }
     private long? latencyMs;
-    [JsonIgnore] public long? LatencyMs { get => latencyMs; set => Set(ref latencyMs, value); }
+    [JsonIgnore] public long? LatencyMs { get => latencyMs; set { if (Set(ref latencyMs, value)) Notify(nameof(LatencyQuality)); } }
+    private LatencyMode measuredMode;
+    [JsonIgnore] public LatencyMode MeasuredMode { get => measuredMode; set { if (Set(ref measuredMode, value)) Notify(nameof(LatencyQuality)); } }
+    [JsonIgnore] public LatencyQuality LatencyQuality => LatencyDisplay.Quality(LatencyMs, MeasuredMode);
     [JsonIgnore] public string Mark => Name.Length > 0 ? Name[..Math.Min(2, Name.Length)].ToUpperInvariant() : "↗";
 }
 public sealed class RoutingRule : Observable
@@ -109,8 +117,11 @@ public sealed class Profile : Observable
     public RouteTarget DefaultRoute { get => defaultRoute; set => Set(ref defaultRoute, value); }
     public ObservableCollection<RoutingRule> Rules { get; set; } = [];
 }
-public sealed class Subscription
+public sealed class Subscription : Observable
 {
+    private bool hidden;
+    public bool Hidden { get => hidden; set { if (Set(ref hidden, value)) Notify(nameof(VisibilityIcon)); } }
+    [JsonIgnore] public string VisibilityIcon => Hidden ? "EyeOff" : "Eye";
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public string Name { get; set; } = "Подписка";
     public string Source { get; set; } = "";

@@ -110,9 +110,9 @@ public sealed partial class MainViewModel : Observable, IDisposable
     private int scanGeneration;
     public bool Scanning { get => scanning; private set { if (Set(ref scanning, value)) CommandManager.InvalidateRequerySuggested(); } }
     public string CoreVersion => ConfigGenerator.CoreVersion;
-    public string ServerCount => Data.Servers.Count.ToString();
+    public string ServerCount => DisplayServers.Count().ToString();
     public string RuleCount => ActiveProfile.Rules.Count.ToString();
-    public Visibility NoServers => Data.Servers.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility NoServers => !DisplayServers.Any() ? Visibility.Visible : Visibility.Collapsed;
     public Visibility NoRules => ActiveProfile.Rules.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
     public Visibility NoSubscriptions => Data.Subscriptions.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
     public ICommand Navigate { get; }
@@ -127,6 +127,8 @@ public sealed partial class MainViewModel : Observable, IDisposable
     public ICommand CancelPing { get; }
     public ICommand RefreshSubscriptions { get; }
     public ICommand AddSubscription { get; }
+    public ICommand AddTrustTunnel { get; }
+    public ICommand ToggleSubscriptionVisibility { get; }
     public ICommand ImportQuickSubscription { get; }
     private string quickSource = "";
     public string QuickSource { get => quickSource; set { if (Set(ref quickSource, value)) CommandManager.InvalidateRequerySuggested(); } }
@@ -184,6 +186,8 @@ public sealed partial class MainViewModel : Observable, IDisposable
         ChangeRoutingMode = new Command(_ => { var mode = Dialogs.RoutingMode(IsWholePc); if (mode is { } all) IsWholePc = all; });
         CancelPing = new Command(_ => { scanGeneration++; scan?.Cancel(); });
         RefreshSubscriptions = Async(async _ => { foreach (var sub in Data.Subscriptions.ToArray()) await RefreshSubAsync(sub); });
+        AddTrustTunnel = new Command(_ => { var sub = Dialogs.ManualTrustTunnel(); if (sub is null) return; var nodes = VlessParser.ParseSubscription(sub.Source); Data.Subscriptions.Add(sub); ReplaceServers(sub, nodes); Save(); Go("Servers"); });
+        ToggleSubscriptionVisibility = new Command(p => { if (p is not Subscription sub) return; sub.Hidden = !sub.Hidden; Save(); RefreshServers(); });
         AddSubscription = Async(async _ => { var sub = Dialogs.Subscription(null); if (sub is null) return; var servers = await SubscriptionLoader.LoadAsync(sub.Source, lifetime.Token); Data.Subscriptions.Add(sub); ReplaceServers(sub, servers); Save(); Go("Servers"); });
         ImportQuickSubscription = Async(async _ =>
         {
@@ -255,7 +259,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
     private async Task RunScanAsync(bool force)
     {
         if (Scanning) return; SortIndex = 0; Scanning = true; scan?.Dispose(); scan = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token); var token = scan.Token;
-        var nodes = Data.Servers.ToArray();
+        var nodes = DisplayServers.ToArray();
         foreach (var node in nodes) if (node.LatencyMs is null) node.Latency = T("В очереди", "Queued");
         try { await Task.WhenAll(nodes.Select(s => MeasureServerAsync(s, force, token))); RefreshServers(); }
         catch (OperationCanceledException) { }
@@ -276,6 +280,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
         node.Latency = !supported ? "—" : result.Milliseconds is { } ms
             ? ms + T(" мс", " ms")
             : result.TimedOut ? T("Таймаут", "Timeout") : T("Недоступен", "Unavailable");
+        node.MeasuredMode = result.Mode;
         node.LatencyMs = result.Milliseconds ?? (supported ? -1 : null);
         QueuePingSort();
     }
@@ -298,10 +303,11 @@ public sealed partial class MainViewModel : Observable, IDisposable
         SelectedServer = oldId is null ? Data.Servers.FirstOrDefault(s => s.Supported) : Data.Servers.FirstOrDefault(s => s.Id == oldId) ?? SelectedServer;
         RefreshServers(); Notify(nameof(NoSubscriptions)); Data.Subscriptions = new(Data.Subscriptions); Notify(nameof(Data));
     }
+    private IEnumerable<Server> DisplayServers => Data.Servers.Where(s => !Data.Subscriptions.Any(sub => sub.Id == s.SubscriptionId && sub.Hidden));
     public void RefreshServers()
     {
         foreach (var server in Data.Servers) server.SubscriptionLabel = Data.Subscriptions.FirstOrDefault(s => s.Id == server.SubscriptionId)?.Name ?? "";
-        IEnumerable<Server> servers = Data.Servers.Where(s => s.Name.Contains(ServerSearch, StringComparison.OrdinalIgnoreCase) || s.SubscriptionLabel.Contains(ServerSearch, StringComparison.OrdinalIgnoreCase));
+        IEnumerable<Server> servers = DisplayServers.Where(s => s.Name.Contains(ServerSearch, StringComparison.OrdinalIgnoreCase) || s.SubscriptionLabel.Contains(ServerSearch, StringComparison.OrdinalIgnoreCase));
         servers = SortIndex == 0 ? servers.OrderBy(s => s.LatencyMs is >= 0 ? s.LatencyMs : long.MaxValue).ThenBy(s => s.Name) : servers.OrderBy(s => s.Name);
         var array = servers.ToArray(); var rows = new List<ServerRow>();
         for (var i = 0; i < array.Length; i += ListMode ? 1 : 2) rows.Add(new(array[i], !ListMode && i + 1 < array.Length ? array[i + 1] : null));
@@ -373,6 +379,11 @@ public sealed partial class MainViewModel : Observable, IDisposable
             finally { locatingBeforeTunnel = false; }
             token.ThrowIfCancellationRequested();
             spec = new(SelectedServer, ActiveProfile, Settings, LatencyService.FreePort(), Convert.ToHexString(RandomNumberGenerator.GetBytes(24)), Data.Servers.Where(s => ActiveProfile.Rules.Any(r => r.UseVpn && r.ServerId == s.Id)).ToList());
+            if (MapLocationEnabled) {
+                int originPort;
+                do { originPort = LatencyService.FreePort(); } while (originPort == spec.ProbePort || originPort == 17890);
+                spec = spec with { OriginProbePort = originPort };
+            }
             spec = System.Text.Json.JsonSerializer.Deserialize<ConnectSpec>(System.Text.Json.JsonSerializer.Serialize(spec, Json.Options), Json.Options)!;
             var version = configurationVersion;
             store.SaveConnection(spec);
@@ -437,7 +448,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
     private async Task MonitorAsync()
     {
         var id = ++monitorId;
-        try { while (id == monitorId && Connected && !lifetime.IsCancellationRequested) { await Task.Delay(1000, lifetime.Token); if (id != monitorId || !Connected) break; var response = await service.SendAsync(new("GetStatus"), ct: lifetime.Token); if (id != monitorId) break; ApplyStatus(response.Status); if (started is { } time) Session = (DateTimeOffset.UtcNow - time).ToString(@"hh\:mm\:ss"); if (!Connected && testProbe is null) SystemProxy.Restore(); } }
+        try { while (id == monitorId && Connected && !lifetime.IsCancellationRequested) { await Task.Delay(1000, lifetime.Token); if (id != monitorId || !Connected) break; var response = await service.SendAsync(new("GetStatus"), ct: lifetime.Token); if (id != monitorId) break; ApplyStatus(response.Status); _ = RefreshMapOriginAsync(); if (started is { } time) Session = (DateTimeOffset.UtcNow - time).ToString(@"hh\:mm\:ss"); if (!Connected && testProbe is null) SystemProxy.Restore(); } }
         catch (OperationCanceledException) { } catch (Exception e) { if (id == monitorId) { if (testProbe is null) SystemProxy.Restore(); State = ConnectionState.Error; SetTraffic(null); Report(e); } }
     }
     private void ApplyStatus(ServiceStatus s) { State = s.State; started = s.ConnectedAt; SetTraffic(s.State == ConnectionState.Connected ? s.Traffic : null); if (s.Error is not null) Banner = s.Error; }
@@ -464,7 +475,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
     {
         localAddresses = NetworkAddresses.Read(); Notify(nameof(LocalIp)); Notify(nameof(LocalIpLabel)); Notify(nameof(LocalIpDetail));
         var currentUplink = UplinkSignature(); var changed = currentUplink != uplinkSignature; uplinkSignature = currentUplink;
-        if (changed) { originChecked = default; MapOrigin = null; _ = RefreshMapOriginAsync(); }
+        if (changed) { originChecked = default; originAttempted = default; MapOrigin = null; _ = RefreshMapOriginAsync(); }
         if ((!force && !changed) || !desiredConnected || !Connected || recovering) return;
         networkDelay?.Cancel(); networkDelay?.Dispose(); networkDelay = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token); var token = networkDelay.Token;
         var generation = monitorId;

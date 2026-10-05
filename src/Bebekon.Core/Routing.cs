@@ -58,7 +58,7 @@ public static class ProfileCodec
         catch (Exception e) when (e is JsonException or NotSupportedException or NullReferenceException) { throw new UserError("Повреждённый файл профиля Bebekon."); }
     }
 }
-public sealed record ConnectSpec(Server Server, Profile Profile, Settings Settings, int ProbePort, string ProbePassword, List<Server>? RuleServers = null);
+public sealed record ConnectSpec(Server Server, Profile Profile, Settings Settings, int ProbePort, string ProbePassword, List<Server>? RuleServers = null, int OriginProbePort = 0);
 public static class ConfigGenerator
 {
     public const string CoreVersion = "1.14.2";
@@ -69,6 +69,7 @@ public static class ConfigGenerator
     {
         var s = spec.Server;
         if (spec.ProbePort is < 1024 or > 65535 || spec.ProbePassword.Length < 24 || spec.Settings.Mtu is < 1280 or > 9000 || !Enum.IsDefined(spec.Settings.TunnelMode)) throw new UserError("Некорректные параметры подключения.");
+        if (spec.OriginProbePort != 0 && (spec.OriginProbePort is < 1024 or > 65535 || spec.OriginProbePort == spec.ProbePort || spec.OriginProbePort == 17890)) throw new UserError("Некорректный порт определения местоположения.");
         RuleValidation.Validate(spec.Profile);
         var vpn = Vpn(s, "vpn", runtime, trustTunnel);
         var outbounds = new JsonArray { vpn, new JsonObject { ["type"] = "direct", ["tag"] = "direct", ["domain_resolver"] = "direct-dns" } };
@@ -101,6 +102,14 @@ public static class ConfigGenerator
         if (runtime is not null) { inbounds.Add(new JsonObject { ["type"] = "mixed", ["tag"] = "xray-direct", ["listen"] = "127.0.0.1", ["listen_port"] = runtime.Direct.Port, ["users"] = new JsonArray { new JsonObject { ["username"] = "bebekon", ["password"] = runtime.Direct.Password } } }); routes.Insert(0, new JsonObject { ["inbound"] = Strings(["xray-direct"]), ["action"] = "route", ["outbound"] = "direct" }); }
         trustTunnel?.AddRelays(inbounds, routes);
         var dnsRules = new JsonArray(); var sets = new JsonArray(); var setTags = new HashSet<string>();
+        if (!probeOnly && spec.Settings.MapLocation && spec.OriginProbePort != 0) {
+            // A private authenticated channel only for our opt-in HTTPS location lookup.
+            // No domain/process exceptions are inserted into the user's traffic policy.
+            inbounds.Add(new JsonObject { ["type"] = "mixed", ["tag"] = "origin-probe", ["listen"] = "127.0.0.1", ["listen_port"] = spec.OriginProbePort,
+                ["users"] = new JsonArray { new JsonObject { ["username"] = "bebekon", ["password"] = spec.ProbePassword } } });
+            routes.Insert(0, new JsonObject { ["inbound"] = Strings(["origin-probe"]), ["domain"] = Strings(MapLocation.LookupHosts), ["port"] = 443, ["action"] = "route", ["outbound"] = "direct" });
+            routes.Insert(1, new JsonObject { ["inbound"] = Strings(["origin-probe"]), ["action"] = "reject" });
+        }
         foreach (var rule in probeOnly ? [] : spec.Profile.Rules)
         {
             if (rule.Kind is RuleKind.GeoSite or RuleKind.GeoIp)

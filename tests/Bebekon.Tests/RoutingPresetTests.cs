@@ -38,12 +38,18 @@ public sealed class RoutingPresetTests
         a.Rules[0].Values[0] = "changed"; a.Rules[0].UseVpn = true;
         Assert.NotEqual(a.Rules[0].Id, b.Rules[0].Id); Assert.NotEqual("changed", b.Rules[0].Values[0]); Assert.False(b.Rules[0].UseVpn);
     }
-    [Theory] [InlineData(null, LatencyQuality.Unknown)] [InlineData(-1L, LatencyQuality.Poor)] [InlineData(0L, LatencyQuality.Good)] [InlineData(100L, LatencyQuality.Good)] [InlineData(101L, LatencyQuality.Moderate)] [InlineData(200L, LatencyQuality.Moderate)] [InlineData(201L, LatencyQuality.Poor)]
+    [Theory] [InlineData(null, LatencyQuality.Unknown)] [InlineData(-1L, LatencyQuality.Poor)] [InlineData(0L, LatencyQuality.Good)] [InlineData(100L, LatencyQuality.Good)] [InlineData(101L, LatencyQuality.Moderate)] [InlineData(250L, LatencyQuality.Moderate)] [InlineData(251L, LatencyQuality.Poor)]
     public void LatencyColorBoundaries(long? ms, LatencyQuality quality) => Assert.Equal(quality, LatencyDisplay.Quality(ms));
     [Fact] public void LatencyUpdateNotifiesBinding()
     {
         var s = new Server(); var changes = new List<string?>(); s.PropertyChanged += (_, e) => changes.Add(e.PropertyName); s.LatencyMs = 75; s.LatencyMs = 201;
-        Assert.Equal(new[] { "LatencyMs", "LatencyMs" }, changes);
+        Assert.Equal(new[] { "LatencyMs", "LatencyQuality", "LatencyMs", "LatencyQuality" }, changes);
+    }
+    [Theory] [InlineData(271L, LatencyQuality.Good)] [InlineData(300L, LatencyQuality.Good)] [InlineData(301L, LatencyQuality.Moderate)] [InlineData(600L, LatencyQuality.Moderate)] [InlineData(601L, LatencyQuality.Poor)] [InlineData(-1L, LatencyQuality.Poor)]
+    public void HttpsLatencyUsesItsOwnBoundaries(long milliseconds, LatencyQuality quality)
+    {
+        Assert.Equal(quality, LatencyDisplay.Quality(milliseconds, LatencyMode.HttpsGet));
+        Assert.Equal(quality, LatencyDisplay.Quality(milliseconds, LatencyMode.HttpsHead));
     }
     [Theory] [InlineData(RuleKind.GeoSite, "../../data")] [InlineData(RuleKind.GeoIp, "unknown")]
     public void UnknownOrPathGeoValuesRejected(RuleKind kind, string value) => Assert.Throws<UserError>(() => RuleValidation.Validate(new RoutingRule { Name = "Bad", Kind = kind, Values = [value] }));

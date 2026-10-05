@@ -4,6 +4,8 @@ Windows 10/11 x64, .NET 10, WPF, native UI. Default routing is **selected rules 
 
 ## Android
 
+Windows 0.1.21 / Android 0.1.8 add an eye button on Subscriptions to hide server rows without deleting nodes or changing the active connection. Windows adds manual TrustTunnel entry (address, certificate hostname, SNI, username/password and HTTP/2/HTTP/3/Auto). HTTPS ping colors now consistently use 300/600 ms thresholds, while TCP/ICMP use 100/250 ms. Desktop origin lookup retries with a fallback through a restricted authenticated direct channel; Android zooms the map out slightly and keeps the origin clear of the unchanged power button.
+
 The Android 10+ client is in [`android/`](android/README.md): native Compose interface, dark/light map design, subscriptions, application/domain rules, live traffic and a Quick Settings tile to toggle VPN from the notification shade. Android and Windows downloads share the [main GitHub release](https://github.com/Bebekon12/BebekonClient/releases/latest). Android has its own version and APK signing key. See the Android README for supported protocols, build steps and validation.
 
 Download [Bebekon-Android.apk](https://github.com/Bebekon12/BebekonClient/releases/latest/download/Bebekon-Android.apk): one universal APK for all supported devices (arm64-v8a, armeabi-v7a and x86_64), with no architecture selection needed. In the app, Settings → «Кнопка в шторке» adds the VPN toggle to Quick Settings.

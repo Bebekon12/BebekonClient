@@ -98,7 +98,7 @@ private val SignalRed = Color(0xFFFF687A)
                     }
                     item { Row(Modifier.fillMaxWidth().padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) { Text("Все серверы", fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)); TextButton({ model.pingAll() }) { Icon(Icons.Outlined.Speed, null, Modifier.size(17.dp)); Text("Пинг", Modifier.padding(start = 5.dp)) } } }
                     if (saved.nodes.isEmpty()) item { Button(subscriptions, Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) { Text("Добавить подписку") } }
-                    items(nodesByPing(saved.nodes, pings), key = { "home-" + it.id }) { server -> ServerRow(server, server.id == saved.selected, server.id in saved.favorites, pings[server.id] ?: PingResult(), { model.select(server) }, { model.favorite(server) }, { model.ping(server) }) }
+                    items(nodesByPing(saved.visibleNodes, pings), key = { "home-" + it.id }) { server -> ServerRow(server, server.id == saved.selected, server.id in saved.favorites, pings[server.id] ?: PingResult(), { model.select(server) }, { model.favorite(server) }, { model.ping(server) }) }
                 }
             }) { contentPadding ->
             Box(Modifier.fillMaxSize().padding(contentPadding).clip(RoundedCornerShape(0.dp))) {

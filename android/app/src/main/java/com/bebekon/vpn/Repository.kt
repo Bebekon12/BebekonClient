@@ -102,7 +102,7 @@ class Repository(private val context: Context) {
     }
     fun add(subscription: Subscription) { update { s ->
         val old = s.subscriptions.firstOrNull { it.source == subscription.source }
-        val sub = subscription.copy(id = old?.id ?: subscription.id)
+        val sub = subscription.copy(id = old?.id ?: subscription.id, hidden = old?.hidden ?: subscription.hidden)
         val subs = s.subscriptions.filterNot { it.id == sub.id } + sub
         val all = subs.flatMap { it.nodes }
         val previous = s.selectedNode

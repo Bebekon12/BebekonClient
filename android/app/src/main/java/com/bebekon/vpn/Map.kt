@@ -27,6 +27,7 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
+import kotlin.math.sqrt
 
 data class MapCountry(val code: String, val center: Offset, val rings: List<List<Offset>>)
 fun parseWorldMap(text: String): List<MapCountry> = JSONArray(text.removePrefix("\uFEFF")).objects().map { o ->
@@ -62,12 +63,18 @@ fun parseWorldMap(text: String): List<MapCountry> = JSONArray(text.removePrefix(
     val density = LocalDensity.current.density
     BoxWithConstraints(Modifier.fillMaxSize()) {
     val latSpan = if (selected == null) 110f else (abs((origin?.latitude ?: selected.center.y) - selected.center.y) + 24f).coerceAtLeast(24f)
-    val factor = min(constraints.maxWidth * .84f / span, constraints.maxHeight * .42f / latSpan) * zoom
+    val factor = min(constraints.maxWidth * .84f / span, constraints.maxHeight * .42f / latSpan) * .80f * zoom
     val endpointLatitudes = listOfNotNull(selected?.center?.y, origin?.latitude)
     val upperEndpoint = endpointLatitudes.minOfOrNull { (latitude - it) * factor } ?: 0f
-    // Leave room for the status and the caption above the northernmost endpoint.
-    val centerY = max(constraints.maxHeight * .42f, 130f * density - upperEndpoint)
-    fun project(p: Offset) = Offset(shortestLongitude(p.x - longitude) * factor + constraints.maxWidth * .5f, (latitude - p.y) * factor + centerY) + pan
+    val centerY = max(constraints.maxHeight * .40f, 130f * density - upperEndpoint)
+    // Keep the real origin outside the circular button without shrinking the whole map
+    // into a miniature. Reserve its 84 dp radius, the 9 dp marker and a small gap.
+    val originDx = origin?.let { shortestLongitude(it.longitude - longitude) * factor } ?: 0f
+    val originDy = origin?.let { (latitude - it.latitude) * factor + centerY - (constraints.maxHeight - 91f * density) } ?: Float.MAX_VALUE
+    val clearance = 99f * density
+    val freeX = if (abs(originDy) < clearance) sqrt(clearance * clearance - originDy * originDy) else 0f
+    val shiftX = if (origin != null && abs(originDx) < freeX) (if (originDx < 0) -freeX else freeX) - originDx else 0f
+    fun project(p: Offset) = Offset(shortestLongitude(p.x - longitude) * factor + constraints.maxWidth * .5f + shiftX, (latitude - p.y) * factor + centerY) + pan
     Box(Modifier.fillMaxSize().testTag("world-map")
         .semantics { contentDescription = "Карта мира" + if (selected != null) ". Страна сервера: $country" else "" }
         .pointerInput(country) { detectTransformGestures { _, move, scale, _ -> pan += move; zoom = (zoom * scale).coerceIn(.6f, 3.5f) } }

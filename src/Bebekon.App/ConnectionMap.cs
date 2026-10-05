@@ -23,6 +23,8 @@ public sealed class ConnectionMap : FrameworkElement
     public bool AnimationEnabled { get => (bool)GetValue(AnimationEnabledProperty); set => SetValue(AnimationEnabledProperty, value); }
     public string Latency { get => (string)GetValue(LatencyProperty); set => SetValue(LatencyProperty, value); }
     public long? LatencyMs { get => (long?)GetValue(LatencyMsProperty); set => SetValue(LatencyMsProperty, value); }
+    public static readonly DependencyProperty ModeProperty = DependencyProperty.Register(nameof(Mode), typeof(LatencyMode), typeof(ConnectionMap), new FrameworkPropertyMetadata(LatencyMode.Tcp, FrameworkPropertyMetadataOptions.AffectsRender));
+    public LatencyMode Mode { get => (LatencyMode)GetValue(ModeProperty); set => SetValue(ModeProperty, value); }
     private (string Code, StreamGeometry Shape)[]? projected;
     private Point? destination, departure;
     private Point bend;
@@ -100,7 +102,7 @@ public sealed class ConnectionMap : FrameworkElement
         var name = CountryInfo.DisplayName(ServerName);
         var caption = name + (LatencyMs is null ? "" : " · " + Latency);
         var label = new FormattedText(caption, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight, new Typeface("Segoe UI"), 11, Brushes.White, VisualTreeHelper.GetDpi(this).PixelsPerDip) { MaxTextWidth = 180, MaxLineCount = 1, Trimming = TextTrimming.CharacterEllipsis };
-        if (LatencyMs is not null) label.SetForegroundBrush((Brush)Application.Current.Resources[LatencyDisplay.Quality(LatencyMs) switch { LatencyQuality.Good => "PingGood", LatencyQuality.Moderate => "PingModerate", _ => "PingPoor" }], name.Length, caption.Length - name.Length);
+        if (LatencyMs is not null) label.SetForegroundBrush((Brush)Application.Current.Resources[LatencyDisplay.Quality(LatencyMs, Mode) switch { LatencyQuality.Good => "PingGood", LatencyQuality.Moderate => "PingModerate", _ => "PingPoor" }], name.Length, caption.Length - name.Length);
         var rect = new Rect(Math.Clamp(end.X - (label.Width + 18) / 2, 10, Math.Max(10, ActualWidth - label.Width - 25)), Math.Clamp(end.Y - 43, 9, Math.Max(9, ActualHeight - 40)), label.Width + 18, 27);
         dc.DrawRoundedRectangle(Brush(240, 7, 27, 51), new Pen(Brush(220), .8), rect, 10, 10); dc.DrawText(label, new(rect.X + 9, rect.Y + 5));
     }

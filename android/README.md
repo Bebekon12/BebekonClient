@@ -150,3 +150,7 @@ The actual signed 0.1.2 APK reproduced the WebAPK-only scope defect (unchecked c
 ## Release 0.1.7 verification
 
 Native TrustTunnel HTTP/2 and HTTP/3 were tested against the official endpoint, including authenticated UDP, certificate-host rejection, Android TUN from a separate UID, disconnect and manual profile editing. The original app/site routing suite and 63 JVM tests pass. The compact map keeps existing Home/button dimensions, distinguishes departure/destination size and attaches the country caption to the server. Native dependency license notices are bundled in assets/licenses/trusttunnel; security limitations and device coverage are recorded in docs/VALIDATION.md and docs/SECURITY-AUDIT.md.
+
+## Release 0.1.8 verification
+
+Subscription eye buttons hide nodes from Home, Servers and batch ping while retaining the active connection and authored route destinations. The hidden state persists and survives subscription refresh. All 64 JVM tests pass. The actual Compose Home fixture passed for Moscow→Sweden/USA routes after a 20% map zoom reduction and origin clearance around the unchanged power button. The signed universal R8 APK retains the published certificate and 16 KiB ZIP alignment. Release Lint has zero errors and 19 advisory warnings; no physical phone was attached. Detailed validation is in docs/VALIDATION.md.

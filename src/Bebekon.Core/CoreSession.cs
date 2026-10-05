@@ -20,7 +20,7 @@ public sealed class XhttpRuntime
         }
         if (nodes.Count > 65) throw new UserError("Слишком много дополнительных серверов.");
         var xhttp = nodes.Where(s => s.Transport == "xhttp").ToArray(); if (xhttp.Length == 0) return null;
-        var used = new HashSet<int> { spec.ProbePort, 17890 };
+        var used = new HashSet<int> { spec.ProbePort, spec.OriginProbePort, 17890 };
         LoopbackBridge NewBridge() { int port; do { port = LatencyService.FreePort(); } while (!used.Add(port)); return new(port, Convert.ToHexString(RandomNumberGenerator.GetBytes(24))); }
         return new(NewBridge(), xhttp.ToDictionary(s => s.Id, _ => NewBridge()));
     }

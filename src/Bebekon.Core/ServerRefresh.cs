@@ -29,7 +29,7 @@ public static class ServerRefresh
                 available.Remove(old); node.Id = old.Id; node.Favorite = old.Favorite;
                 if (old.Type == "trusttunnel" && node.Type == "trusttunnel" && old.PreferredTrustTunnelTransport is "auto" or "http2" or "http3")
                 { node.Transport = old.PreferredTrustTunnelTransport; node.PreferredTrustTunnelTransport = old.PreferredTrustTunnelTransport; }
-                if (ConnectionKey(old) == ConnectionKey(node)) { node.Latency = old.Latency; node.LatencyMs = old.LatencyMs; }
+                if (ConnectionKey(old) == ConnectionKey(node)) { node.Latency = old.Latency; node.MeasuredMode = old.MeasuredMode; node.LatencyMs = old.LatencyMs; }
             }
             else node.Id = subscriptionId + ":" + node.Id;
             result.Add(node);

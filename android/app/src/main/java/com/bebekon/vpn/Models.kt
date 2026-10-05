@@ -21,9 +21,9 @@ data class Node(val id: String, val name: String, val outbound: String, val coun
     fun toJson() = json("id" to id, "name" to name, "outbound" to config, "country" to country, "unsupported" to unsupported)
     companion object { fun fromJson(o: JSONObject) = Node(o.getString("id"), o.getString("name"), o.getJSONObject("outbound").toString(), o.optString("country"), o.optString("unsupported")) }
 }
-data class Subscription(val id: String = UUID.randomUUID().toString(), val name: String, val source: String, val nodes: List<Node>, val updated: Long = System.currentTimeMillis(), val info: String = "") {
-    fun toJson() = json("id" to id, "name" to name, "source" to source, "nodes" to array(nodes.map(Node::toJson)), "updated" to updated, "info" to info)
-    companion object { fun fromJson(o: JSONObject) = Subscription(o.getString("id"), o.getString("name"), o.getString("source"), o.getJSONArray("nodes").objects().map(Node::fromJson), o.optLong("updated"), o.optString("info")) }
+data class Subscription(val id: String = UUID.randomUUID().toString(), val name: String, val source: String, val nodes: List<Node>, val updated: Long = System.currentTimeMillis(), val info: String = "", val hidden: Boolean = false) {
+    fun toJson() = json("id" to id, "name" to name, "source" to source, "nodes" to array(nodes.map(Node::toJson)), "updated" to updated, "info" to info, "hidden" to hidden)
+    companion object { fun fromJson(o: JSONObject) = Subscription(o.getString("id"), o.getString("name"), o.getString("source"), o.getJSONArray("nodes").objects().map(Node::fromJson), o.optLong("updated"), o.optString("info"), o.optBoolean("hidden")) }
 }
 enum class RuleKind(val label: String, val field: String) {
     DOMAIN("Сайт и поддомены", "domain_suffix"), KEYWORD("Слово в домене", "domain_keyword"), APP("Приложение", "package_name"), CIDR("IP / подсеть", "ip_cidr"), GEOSITE("GeoSite", "rule_set"), GEOIP("GeoIP", "rule_set")
@@ -76,6 +76,7 @@ fun appTunnelPolicy(state: SavedState): AppTunnelPolicy {
 }
 data class SavedState(val subscriptions: List<Subscription> = emptyList(), val selected: String? = null, val favorites: Set<String> = emptySet(), val rules: List<Rule> = emptyList(), val preferences: Preferences = Preferences()) {
     val nodes get() = subscriptions.flatMap { it.nodes }.distinctBy { it.id }
+    val visibleNodes get() = subscriptions.filterNot { it.hidden }.flatMap { it.nodes }.distinctBy { it.id }
     val selectedNode get() = nodes.firstOrNull { it.id == selected }
     fun toJson() = json("version" to 1, "subscriptions" to array(subscriptions.map(Subscription::toJson)), "selected" to selected, "favorites" to array(favorites), "rules" to array(rules.map(Rule::toJson)), "preferences" to preferences.toJson())
     companion object { fun fromJson(o: JSONObject): SavedState { require(o.optInt("version") == 1) { "Неизвестная версия настроек" }; return SavedState(o.getJSONArray("subscriptions").objects().map(Subscription::fromJson), if (o.isNull("selected")) null else o.optString("selected").takeIf { it.isNotEmpty() }, o.getJSONArray("favorites").strings().toSet(), o.getJSONArray("rules").objects().map(Rule::fromJson), Preferences.fromJson(o.getJSONObject("preferences"))) } }

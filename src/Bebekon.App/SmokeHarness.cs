@@ -58,6 +58,29 @@ internal static class SmokeHarness
         await ConnectionChecks.RunAsync(Path.Combine(Root, "connection-regression"));
         await CheckStaleLatencyAsync(report);
         await CheckLiveLatencySortingAsync(report);
+        var hiddenSub = vm.Data.Subscriptions[0]; var selectedBeforeHide = vm.SelectedServer;
+        vm.ToggleSubscriptionVisibility.Execute(hiddenSub);
+        if (vm.ServerRows.Count != 0 || vm.SelectedServer != selectedBeforeHide || vm.Data.Servers.Count == 0) throw new InvalidOperationException("Hiding a subscription must only affect its visible servers.");
+        vm.ToggleSubscriptionVisibility.Execute(hiddenSub);
+        if (vm.ServerRows.Count == 0) throw new InvalidOperationException("Showing a subscription must restore its server rows.");
+        var previousIds = vm.Data.Subscriptions.Select(s => s.Id).ToHashSet();
+        Dialogs.RenderObserver = dialog => dialog.Dispatcher.BeginInvoke(new Action(() => {
+            var fields = Descendants(dialog).OfType<TextBox>().ToArray();
+            if (fields.Length != 5) throw new InvalidOperationException("TrustTunnel manual form must expose its five text fields.");
+            fields[0].Text = "Manual TrustTunnel fixture"; fields[1].Text = "127.0.0.1:9"; fields[2].Text = "vpn.example.org"; fields[3].Text = ""; fields[4].Text = "fixture";
+            Descendants(dialog).OfType<PasswordBox>().Single().Password = "fixture-secret";
+            dialog.UpdateLayout(); Capture(dialog, "TrustTunnel-Manual");
+            Descendants(dialog).OfType<Button>().Single(b => b.IsDefault).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        }));
+        try { vm.AddTrustTunnel.Execute(null); } finally { Dialogs.RenderObserver = null; }
+        await vm.StopScansAsync();
+        var manualSub = vm.Data.Subscriptions.Single(s => !previousIds.Contains(s.Id));
+        var manualNode = vm.Data.Servers.Single(s => s.SubscriptionId == manualSub.Id);
+        if (!manualNode.IsTrustTunnel || manualNode.Sni != "vpn.example.org" || manualNode.TrustTunnel?.Username != "fixture" || vm.SelectedServer != selectedBeforeHide) throw new InvalidOperationException("Manual TrustTunnel must keep TLS fields and existing selection.");
+        vm.Data.Servers.Remove(manualNode); vm.Data.Subscriptions.Remove(manualSub); vm.RefreshServers();
+        selectedBeforeHide!.MeasuredMode = LatencyMode.HttpsGet; selectedBeforeHide.LatencyMs = 271;
+        if (selectedBeforeHide.LatencyQuality != LatencyQuality.Good) throw new InvalidOperationException("271 ms HTTPS GET must be green.");
+        report.Add("Manual TrustTunnel form/import and password masking; subscription visibility preserves selection; HTTPS 271 ms stays green.");
         report.Add("Connection regressions: stable refreshed selection; coalesced rule edits; stable beyond 5 seconds; stale recovery ignored; manual off/cancel wins; edits during startup applied; traffic directions and units; XHTTP reaches helper.");
         vm.Go("Servers"); vm.LatencyIndex = 0; vm.LatencyIndex = 1; vm.LatencyIndex = 2; vm.LatencyIndex = 3; vm.LatencyIndex = 0; vm.CancelPing.Execute(null); vm.Go("Home");
         await Task.Delay(400);
@@ -468,7 +491,7 @@ internal static class SmokeHarness
             if (values.Length != 8) { Capture(window, "Servers-Geometry-Failure"); throw new InvalidOperationException($"Latency fixtures must actually be rendered: {values.Length} values."); }
             foreach (var value in values)
             {
-                var server = (Server)value.DataContext; var key = LatencyDisplay.Quality(server.LatencyMs) switch { LatencyQuality.Good => "PingGood", LatencyQuality.Moderate => "PingModerate", _ => "PingPoor" };
+                var server = (Server)value.DataContext; var key = server.LatencyQuality switch { LatencyQuality.Good => "PingGood", LatencyQuality.Moderate => "PingModerate", _ => "PingPoor" };
                 if (value.Foreground != Application.Current.Resources[key]) throw new InvalidOperationException("Measured latency must use its quality color.");
                 var parent = VisualTreeHelper.GetParent(value);
                 while (parent is not null && parent is not Button) parent = VisualTreeHelper.GetParent(parent);

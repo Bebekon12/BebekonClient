@@ -5,6 +5,7 @@ namespace Bebekon.Core;
 public sealed record GeoPoint(double Longitude, double Latitude);
 public static class MapLocation
 {
+    public static readonly IReadOnlyList<string> LookupHosts = Array.AsReadOnly(new[] { "ipwho.is", "ipapi.co" });
     public sealed record MapViewport(double Longitude, double Latitude, double LongitudeSpan, double LatitudeSpan);
     public static MapViewport Viewport(GeoPoint? destination, GeoPoint? origin)
     {
@@ -19,6 +20,15 @@ public static class MapLocation
         var root = doc.RootElement;
         var lon = root.GetProperty("longitude").GetDouble(); var lat = root.GetProperty("latitude").GetDouble();
         if (!root.GetProperty("success").GetBoolean() || !double.IsFinite(lon) || !double.IsFinite(lat) || lon is < -180 or > 180 || lat is < -90 or > 90) throw new FormatException("Location unavailable");
+        return new(lon, lat);
+    }
+    public static GeoPoint ParseFallback(string text)
+    {
+        using var doc = JsonDocument.Parse(text);
+        var root = doc.RootElement;
+        if (root.TryGetProperty("error", out var error) && error.GetBoolean() || !System.Net.IPAddress.TryParse(root.GetProperty("ip").GetString(), out _)) throw new FormatException("Location unavailable");
+        var lon = root.GetProperty("longitude").GetDouble(); var lat = root.GetProperty("latitude").GetDouble();
+        if (!double.IsFinite(lon) || !double.IsFinite(lat) || lon is < -180 or > 180 || lat is < -90 or > 90) throw new FormatException("Location unavailable");
         return new(lon, lat);
     }
     public static double LongitudeDelta(double delta) => (delta + 540) % 360 - 180;
