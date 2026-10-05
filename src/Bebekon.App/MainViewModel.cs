@@ -366,6 +366,12 @@ public sealed partial class MainViewModel : Observable, IDisposable
             if (SelectedServer is null) { desiredConnected = false; Go("Subscriptions"); Banner = T("Добавьте подписку и выберите сервер.", "Add a subscription and choose a server."); return; }
             if (!SelectedServer.Supported) throw new UserError(SelectedServer.UnsupportedReason!);
             State = ConnectionState.Connecting; Banner = null; VpnIp = "—"; SetTraffic(null);
+            // Finish a direct-IP location lookup before installing TUN routes. Otherwise a quick
+            // connect discards the origin, or a late lookup could mistake VPN egress for the user.
+            locatingBeforeTunnel = true;
+            try { await RefreshMapOriginAsync().WaitAsync(token); }
+            finally { locatingBeforeTunnel = false; }
+            token.ThrowIfCancellationRequested();
             spec = new(SelectedServer, ActiveProfile, Settings, LatencyService.FreePort(), Convert.ToHexString(RandomNumberGenerator.GetBytes(24)), Data.Servers.Where(s => ActiveProfile.Rules.Any(r => r.UseVpn && r.ServerId == s.Id)).ToList());
             spec = System.Text.Json.JsonSerializer.Deserialize<ConnectSpec>(System.Text.Json.JsonSerializer.Serialize(spec, Json.Options), Json.Options)!;
             var version = configurationVersion;

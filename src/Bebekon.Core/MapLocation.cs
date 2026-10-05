@@ -5,6 +5,14 @@ namespace Bebekon.Core;
 public sealed record GeoPoint(double Longitude, double Latitude);
 public static class MapLocation
 {
+    public sealed record MapViewport(double Longitude, double Latitude, double LongitudeSpan, double LatitudeSpan);
+    public static MapViewport Viewport(GeoPoint? destination, GeoPoint? origin)
+    {
+        if (destination is null) return new(origin?.Longitude ?? 10, origin?.Latitude ?? 35, 240, 110);
+        if (origin is null) return new(destination.Longitude, Math.Clamp(destination.Latitude + 3, -65, 75), 50, 32);
+        var delta = LongitudeDelta(origin.Longitude - destination.Longitude);
+        return new(LongitudeDelta(destination.Longitude + delta / 2), Math.Clamp((origin.Latitude + destination.Latitude) / 2 + 3, -70, 80), Math.Max(36, Math.Abs(delta) + 24), Math.Max(24, Math.Abs(origin.Latitude - destination.Latitude) + 24));
+    }
     public static GeoPoint Parse(string text)
     {
         using var doc = JsonDocument.Parse(text);

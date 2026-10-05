@@ -38,6 +38,27 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         try { withContext(Dispatchers.IO) { action() } } catch (e: Exception) { message.value = e.message?.takeIf { !it.contains("://") && it.length < 180 && !it.contains("Failed requirement") } ?: "Не удалось выполнить действие. Проверьте параметры" } finally { busy.value = false }
     }
     fun import(source: String, name: String) = task { val subscription = repo.load(source, name); repo.add(subscription); importText.value = ""; message.value = "Добавлено серверов: ${subscription.nodes.size}" }
+    fun saveTrustTunnel(node: Node, previous: Node?) = task {
+        TrustTunnelProfile.validate(node)
+        repo.update { state ->
+            val present = previous != null && state.nodes.any { it.id == previous.id }
+            val subscriptions = if (present) state.subscriptions.map { sub ->
+                val replacing = sub.nodes.any { it.id == previous!!.id }
+                sub.copy(nodes = sub.nodes.map { if (it.id == previous!!.id) node else it },
+                    name = if (replacing && sub.source.startsWith("manual:")) node.name else sub.name,
+                    source = if (remoteSubscription(sub.source) || sub.source.startsWith("manual:")) sub.source else if (sub.nodes.size == 1 && replacing) node.config.toString() else sub.source)
+            }
+            else state.subscriptions + Subscription(name = node.name, source = "manual:" + java.util.UUID.randomUUID(), nodes = listOf(node))
+            state.copy(subscriptions = subscriptions, selected = if (state.selected == previous?.id || state.selected == null) node.id else state.selected,
+                favorites = if (previous?.id in state.favorites) state.favorites - previous!!.id + node.id else state.favorites)
+        }
+        if (saved.value.selected == node.id) VpnController.reload(getApplication())
+        message.value = "Сервер TrustTunnel сохранён"
+    }
+    fun removeNode(node: Node) = task {
+        repo.update { state -> state.copy(subscriptions = state.subscriptions.map { it.copy(nodes = it.nodes.filterNot { n -> n.id == node.id }) }.filter { it.nodes.isNotEmpty() }, selected = state.selected?.takeIf { it != node.id }, favorites = state.favorites - node.id) }
+        if (saved.value.selectedNode == null && session.value.active) VpnController.stop(getApplication())
+    }
     fun refresh(sub: Subscription) = task {
         val before = saved.value.selectedNode
         val new = repo.load(sub.source, sub.name).copy(id = sub.id); repo.add(new)
@@ -58,7 +79,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (old.ping != value.ping || old.pingTarget != value.pingTarget) withContext(Dispatchers.Main) { pingJobs.values.forEach { it.cancel() }; pingJobs.clear(); repo.pings.value = emptyMap() }
         if (old.routing != value.routing || old.sitesInAllApps != value.sitesInAllApps || old.allowLan != value.allowLan || old.dnsResolver != value.dnsResolver || old.mtu != value.mtu || old.routingDiagnostics != value.routingDiagnostics || old.ipv6 != value.ipv6) VpnController.reload(getApplication())
     }
-    fun refreshAll() { saved.value.subscriptions.filter { it.source.startsWith("https://") }.forEach(::refresh) }
+    private fun remoteSubscription(source: String): Boolean = source.startsWith("https://") ||
+        (source.startsWith("tt://", true) && runCatching { TrustTunnelProfile.link(source).second != null }.getOrDefault(false))
+    fun refreshAll() { saved.value.subscriptions.filter { remoteSubscription(it.source) }.forEach(::refresh) }
     override fun onCleared() { origin.close(); super.onCleared() }
     fun saveAppRules(apps: List<InstalledApp>, actions: Map<String, Boolean>) = task {
         require(actions.size <= 256)

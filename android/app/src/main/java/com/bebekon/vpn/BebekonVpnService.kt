@@ -45,9 +45,18 @@ object NativeCore {
         ready = true
     }
     fun probe(context: Context, state: SavedState, method: String, url: String = state.preferences.pingTarget.url): BebekonProbeResult {
+        val started = android.os.SystemClock.elapsedRealtime()
         setup(context)
         val platform = AndroidPlatform(context)
-        try { return Libbox.bebekonProbe(CoreConfig.build(state, context.repo::geo, tunnel = false), platform, "vpn", url, method) } finally { platform.close() }
+        var trustTunnel: TrustTunnelNative? = null
+        try {
+            val override = if (state.selectedNode?.config?.optString("type") == "trusttunnel") TrustTunnelNative(context).also { trustTunnel = it }.start(state.selectedNode!!) else null
+            val remaining = 5000 - (android.os.SystemClock.elapsedRealtime() - started)
+            check(remaining > 0) { "Таймаут" }
+            val result = Libbox.bebekonProbeWithTimeout(CoreConfig.build(state, context.repo::geo, tunnel = false, vpnOverride = override), platform, "vpn", url, method, remaining.toInt())
+            result.millis = (android.os.SystemClock.elapsedRealtime() - started).toInt()
+            return result
+        } finally { platform.close(); trustTunnel?.close() }
     }
 }
 class BebekonVpnService : VpnService(), CommandServerHandler {
@@ -57,6 +66,7 @@ class BebekonVpnService : VpnService(), CommandServerHandler {
     private var server: CommandServer? = null
     private var client: CommandClient? = null
     private var platform: AndroidPlatform? = null
+    private var trustTunnel: TrustTunnelNative? = null
     private var reloadJob: Job? = null
     private var retryJob: Job? = null
     private var downTotal = TrafficTotals()
@@ -97,7 +107,9 @@ class BebekonVpnService : VpnService(), CommandServerHandler {
             val saved = resolveWebAppRules(original, identify); val node = saved.selectedNode ?: error("Добавьте подписку и выберите сервер")
             check(!isLockdownEnabled || !policy.appOnly && policy.excluded.isEmpty()) { "Android блокирует приложения вне VPN. Отключите «Блокировать соединения без VPN» в системных настройках или выберите «Весь трафик»" }
             NativeCore.setup(this)
-            val config = CoreConfig.build(saved, repo::geo, policy = policy); Libbox.checkConfig(config)
+            if (node.config.optString("type") == "trusttunnel" || trustTunnel != null) closeCore()
+            val override = if (node.config.optString("type") == "trusttunnel") TrustTunnelNative(this, this).also { trustTunnel = it }.start(node) else null
+            val config = CoreConfig.build(saved, repo::geo, policy = policy, vpnOverride = override); Libbox.checkConfig(config)
             validConfig = true
             VpnController.publish(this) { if (reload) it.copy(phase = Phase.RECONNECTING, message = "Применение правил…") else it.copy(phase = Phase.STARTING, server = node.name) }
             if (server == null) { platform = AndroidPlatform(this, this); server = CommandServer(this, platform).also { it.start() } }
@@ -164,7 +176,7 @@ class BebekonVpnService : VpnService(), CommandServerHandler {
             }
         }
     }
-    private fun closeCore() { runCatching { client?.disconnect() }; client = null; runCatching { server?.closeService() }; runCatching { server?.close() }; server = null; runCatching { platform?.close() }; platform = null; File(noBackupFilesDir, "core/configuration.json").delete() }
+    private fun closeCore() { runCatching { client?.disconnect() }; client = null; runCatching { server?.closeService() }; runCatching { server?.close() }; server = null; runCatching { platform?.close() }; platform = null; runCatching { trustTunnel?.close() }; trustTunnel = null; File(noBackupFilesDir, "core/configuration.json").delete() }
     private fun foreground(text: String) {
         val open = PendingIntent.getActivity(this, 1, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val stop = PendingIntent.getService(this, 2, Intent(this, BebekonVpnService::class.java).setAction("STOP"), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)

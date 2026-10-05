@@ -24,6 +24,7 @@ android/**/build/
 android/local.properties
 android/app/libs/*.aar
 android/app/libs/*-sources.jar
+android/app/src/main/jniLibs/
 *.jks
 *.keystore
 hs_err_pid*.log

@@ -1,0 +1,18 @@
+{
+  "version": 4,
+  "configurePresets": [{
+    "name": "android",
+    "generator": "Ninja",
+    "binaryDir": "${sourceDir}/build/$env{TT_ABI}",
+    "cacheVariables": {
+      "TT_SOURCE": "$env{TT_SOURCE}",
+      "CMAKE_TOOLCHAIN_FILE": "$env{ANDROID_NDK_HOME}/build/cmake/android.toolchain.cmake",
+      "CMAKE_BUILD_TYPE": "Release",
+      "ANDROID_ABI": "$env{TT_ABI}",
+      "ANDROID_PLATFORM": "android-29",
+      "ANDROID_STL": "c++_static",
+      "TT_CLIENT_VERSION": "1.1.7-bebekon"
+    }
+  }],
+  "buildPresets": [{"name":"android", "configurePreset":"android", "targets":["bebekon_trusttunnel"], "jobs":2}]
+}

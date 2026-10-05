@@ -69,15 +69,23 @@ class Repository(private val context: Context) {
     }
     fun load(source: String, name: String): Subscription {
         val text = source.trim(); var content = text; var title = name.trim(); var info = ""
-        if (text.startsWith("https://") || text.startsWith("http://")) {
-            val u = URI(text); require(u.scheme == "https" || u.host in listOf("localhost", "127.0.0.1", "::1")) { "Для ссылки подписки нужен HTTPS" }
-            require(u.rawUserInfo == null) { "Ссылки с логином в адресе пока не поддерживаются" }
+        val remote = if (text.startsWith("tt://", true)) TrustTunnelProfile.link(text).second ?: text else text
+        if (remote.startsWith("https://") || remote.startsWith("http://")) {
+            val original = URI(remote); require(original.scheme == "https" || original.host in listOf("localhost", "127.0.0.1", "[::1]")) { "Для ссылки подписки нужен HTTPS" }
+            require(original.host != null && original.rawFragment == null) { "Повреждённый адрес подписки" }
+            val auth = original.userInfo?.let {
+                val username = it.substringBefore(':'); val password = it.substringAfter(':', "")
+                require(username.isNotBlank() && username.length <= 1024 && password.length <= 4096 && it.none(Char::isISOControl)) { "Повреждённая авторизация подписки" }
+                "Basic " + java.util.Base64.getEncoder().encodeToString("$username:$password".toByteArray(Charsets.UTF_8))
+            }
+            val u = URI(original.scheme + "://" + original.rawAuthority.substringAfterLast('@') + (original.rawPath ?: "") + (original.rawQuery?.let { "?$it" } ?: ""))
             val connection = directConnection(context, u.toURL())
             val budget = NetworkBudget(20_000)
             try {
                 connection.connectTimeout = 10_000; connection.readTimeout = 10_000; connection.instanceFollowRedirects = false
                 connection.setRequestProperty("User-Agent", "clash.meta BebekonAndroid/${BuildConfig.VERSION_NAME}")
                 connection.setRequestProperty("Accept", "text/yaml, application/json, text/plain, */*")
+                if (auth != null) connection.setRequestProperty("Authorization", auth)
                 connection.setRequestProperty("x-hwid", digest("bebekon-android:" + Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)))
                 connection.setRequestProperty("x-device-os", "Android"); connection.setRequestProperty("x-ver-os", android.os.Build.VERSION.RELEASE)
                 require(connection.responseCode in 200..299) { "Провайдер вернул HTTP ${connection.responseCode}. Проверьте подписку и лимит устройств" }

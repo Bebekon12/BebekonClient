@@ -17,7 +17,7 @@ data class Node(val id: String, val name: String, val outbound: String, val coun
     val host get() = config.optString("server")
     val port get() = config.optInt("server_port", 443)
     val protocol get() = config.optString("type").replace("shadowsocks", "SS").uppercase()
-    val transport get() = config.optJSONObject("transport")?.optString("type")?.uppercase() ?: "TCP"
+    val transport get() = config.optJSONObject("trusttunnel")?.optString("upstream_protocol")?.uppercase()?.replace("HTTP", "HTTP/") ?: config.optJSONObject("transport")?.optString("type")?.uppercase() ?: "TCP"
     fun toJson() = json("id" to id, "name" to name, "outbound" to config, "country" to country, "unsupported" to unsupported)
     companion object { fun fromJson(o: JSONObject) = Node(o.getString("id"), o.getString("name"), o.getJSONObject("outbound").toString(), o.optString("country"), o.optString("unsupported")) }
 }

@@ -6,6 +6,7 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.test.platform.app.InstrumentationRegistry
 import io.nekohasekai.libbox.Libbox
 import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.activity.compose.setContent
 import org.junit.Assert.*
 import org.junit.Rule
@@ -56,6 +57,37 @@ class AndroidSmokeTest {
         compose.onNodeWithTag("settings-list").performScrollToNode(hasText("Тема")); compose.onNodeWithText("Светлая").performClick(); compose.onNodeWithText("Тёмная").performClick(); compose.waitUntil(5000) { context.repo.state.value.preferences.theme == ThemeChoice.DARK }
         compose.onNodeWithText("Главная").performClick(); compose.onNodeWithContentDescription("Подключить VPN").assertIsDisplayed()
     }
+    @Test fun homeMapVisualFixture() {
+        org.junit.Assume.assumeTrue(InstrumentationRegistry.getArguments().getString("map_visual") == "true")
+        seed("vless://$uuid@127.0.0.1:9#Sweden")
+        context.repo.update { it.copy(preferences = it.preferences.copy(mapLocation = false, animations = false, theme = ThemeChoice.DARK)) }
+        compose.waitForIdle()
+        val model = androidx.lifecycle.ViewModelProvider(compose.activity)[MainViewModel::class.java]
+        try {
+            for (country in listOf("SE", "US")) {
+                context.repo.update { state -> state.copy(subscriptions = state.subscriptions.map { sub -> sub.copy(nodes = sub.nodes.map { node -> node.copy(country = country, name = if (country == "SE") "Швеция" else "США") }) }) }
+                compose.waitForIdle()
+                android.os.SystemClock.sleep(1000)
+                model.origin.point.value = OriginPoint(37.6f, 55.7f, "RU")
+                VpnController.publish(context) { Session(phase = Phase.ON, started = System.currentTimeMillis(), publicIp = "203.0.113.42") }
+                compose.waitForIdle()
+                compose.onNodeWithTag("world-map").assertIsDisplayed()
+                compose.onNodeWithContentDescription("Отключить VPN").assertIsDisplayed()
+                compose.onNodeWithText("Подключено").assertIsDisplayed()
+                android.os.SystemClock.sleep(1200)
+                compose.onRoot().captureToImage().asAndroidBitmap().let { bitmap ->
+                    java.io.File(context.getExternalFilesDir(null), "home-map-$country.png").outputStream().use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+                    bitmap.recycle()
+                }
+                val caption = compose.onNode(hasText(if (country == "SE") "Швеция" else "США") and hasAnyAncestor(hasTestTag("map-server-label"))).assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+                val status = compose.onNodeWithTag("connection-status").fetchSemanticsNode().boundsInRoot
+                assertTrue("Server caption stays below status: $caption / $status", caption.top >= status.bottom)
+            }
+        } finally {
+            VpnController.publish(context) { Session() }
+            model.origin.point.value = null
+        }
+    }
     @Test fun retriesCanBeCancelledWithoutRestarting() {
         seed("vless://$uuid@127.0.0.1:9#Unavailable")
         VpnController.start(context)
@@ -64,6 +96,77 @@ class AndroidSmokeTest {
         VpnController.stop(context); compose.waitUntil(10_000) { VpnController.session.value.phase == Phase.OFF }
         android.os.SystemClock.sleep(6500)
         assertEquals(Phase.OFF, VpnController.session.value.phase)
+    }
+    @Test fun officialTrustTunnelHttpsTcpUdpAndCertificateVerification() {
+        val path = InstrumentationRegistry.getArguments().getString("trusttunnel_fixture")
+        org.junit.Assume.assumeNotNull(path)
+        val fixture = org.json.JSONObject(java.io.File(path!!).readText())
+        val node = SubscriptionParser.link(fixture.getString("link"))
+        assertEquals("trusttunnel", node.config.getString("type"))
+        for (protocol in listOf("http2", "http3")) {
+            val selected = TrustTunnelProfile.endpoint(node.config.getJSONObject("trusttunnel").apply { put("upstream_protocol", protocol) })
+            val saved = SavedState(subscriptions = listOf(Subscription(name = "Official TT", source = "", nodes = listOf(selected))), selected = selected.id)
+            val response = NativeCore.probe(context, saved, "GET", PingTarget.GOOGLE.url)
+            assertEquals("Verified HTTPS through official TrustTunnel $protocol", 204, response.statusCode)
+        }
+        // UDP DNS through the SOCKS bridge exercises the UDP tunnel, independently from HTTPS.
+        TrustTunnelNative(context).use { native ->
+            val socks = native.start(node)
+            val socket = java.net.Socket(socks.getString("server"), socks.getInt("server_port")).apply { soTimeout = 5000 }
+            socket.use {
+                val input = it.getInputStream(); val output = it.getOutputStream()
+                fun exact(count: Int): ByteArray = ByteArray(count).also { data -> var offset = 0; while (offset < count) { val n = input.read(data, offset, count - offset); check(n > 0); offset += n } }
+                output.write(byteArrayOf(5, 1, 2)); assertArrayEquals(byteArrayOf(5, 2), exact(2))
+                val user = socks.getString("username").toByteArray(); val pass = socks.getString("password").toByteArray()
+                output.write(byteArrayOf(1, user.size.toByte()) + user + byteArrayOf(pass.size.toByte()) + pass); assertArrayEquals(byteArrayOf(1, 0), exact(2))
+                output.write(byteArrayOf(5, 3, 0, 1, 0, 0, 0, 0, 0, 0))
+                val head = exact(4); assertEquals(0, head[1].toInt()); assertEquals(1, head[3].toInt())
+                val address = exact(4); val port = exact(2).let { p -> ((p[0].toInt() and 255) shl 8) or (p[1].toInt() and 255) }
+                java.net.DatagramSocket().use { udp ->
+                    udp.soTimeout = 5000
+                    val host = java.net.InetAddress.getByName(fixture.getString("address")).address
+                    val targetPort = fixture.getInt("udpPort")
+                    val payload = byteArrayOf(0, 0, 0, 1) + host + byteArrayOf((targetPort shr 8).toByte(), targetPort.toByte()) + "udp-fixture".toByteArray()
+                    udp.send(java.net.DatagramPacket(payload, payload.size, java.net.InetAddress.getByAddress(address), port))
+                    val reply = java.net.DatagramPacket(ByteArray(1024), 1024); udp.receive(reply)
+                    assertTrue(reply.data.copyOfRange(10, reply.length).toString(Charsets.UTF_8).startsWith("udp-fixture|"))
+                }
+            }
+        }
+        val invalid = TrustTunnelProfile.endpoint(node.config.getJSONObject("trusttunnel").apply { put("hostname", "wrong.fixture.invalid") })
+        assertTrue("Certificate hostname mismatch must fail closed", runCatching { NativeCore.probe(context, SavedState(subscriptions = listOf(Subscription(name = "Invalid TT", source = "", nodes = listOf(invalid))), selected = invalid.id), "GET", PingTarget.GOOGLE.url) }.isFailure)
+        context.repo.update { SavedState(subscriptions = listOf(Subscription(name = "TT TUN", source = "", nodes = listOf(node))), selected = node.id) }
+        assertNull(android.net.VpnService.prepare(context)); VpnController.start(context)
+        compose.waitUntil(25_000) { VpnController.session.value.phase in listOf(Phase.ON, Phase.ERROR) }
+        assertEquals(VpnController.session.value.message, Phase.ON, VpnController.session.value.phase)
+        verifyOtherAppTraffic()
+        VpnController.stop(context); compose.waitUntil(15_000) { VpnController.session.value.phase == Phase.OFF }
+    }
+    @Test fun manualTrustTunnelProfileCanBeSavedAndEdited() {
+        context.repo.update { SavedState() }
+        compose.onNodeWithText("Подписки").performClick()
+        compose.onNodeWithText("TrustTunnel без ссылки").performClick()
+        fun enter(label: String, value: String) { compose.onNodeWithText(label).performScrollTo().performTextInput(value) }
+        enter("Название — необязательно", "Sweden manual")
+        enter("Адрес сервера", "192.0.2.1")
+        enter("Домен из сертификата", "vpn.example.com")
+        enter("Свой SNI — необязательно", "sni.example.com")
+        enter("Логин", "fixture")
+        enter("Пароль", "fixture-password")
+        compose.onNodeWithContentDescription("Показать пароль").assertExists()
+        shell("input keyevent 111")
+        compose.onNodeWithText("Сохранить").performClick()
+        compose.waitUntil(5000) { context.repo.state.value.nodes.size == 1 }
+        val original = context.repo.state.value.selectedNode!!
+        assertEquals(443, original.port); assertEquals("HTTP/2", original.transport)
+        compose.onNodeWithText("Изменить сервер").performClick()
+        compose.onNodeWithText("Название — необязательно").performScrollTo().performTextClearance()
+        compose.onNodeWithText("Название — необязательно").performTextInput("Sweden renamed")
+        shell("input keyevent 111")
+        compose.onNodeWithText("Сохранить").performClick()
+        compose.waitUntil(5000) { context.repo.state.value.nodes.single().name == "Sweden renamed" }
+        assertEquals("Sweden renamed", context.repo.state.value.subscriptions.single().name)
+        assertEquals("fixture-password", context.repo.state.value.selectedNode!!.config.getJSONObject("trusttunnel").getString("password"))
     }
     @Test fun mapShowsLandAndSelectedCountry() {
         val geometry = parseWorldMap(context.assets.open("world.json").bufferedReader().use { it.readText() })

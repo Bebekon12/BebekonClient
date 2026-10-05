@@ -1,0 +1,5 @@
+TrustTunnel Client v1.1.7, commit 170609c24ca865819fed68437b01c013049bc3fa
+https://github.com/TrustTunnel/TrustTunnelClient
+AdGuard NativeLibsCommon v8.1.52 and DnsLibs v2.10.2
+nghttp2 override: v1.68.1. Other dependency versions are pinned by the upstream Conan recipes.
+License texts retain their authors' notices. Source/build instructions are in the repository android/trusttunnel and the release core-source archive.

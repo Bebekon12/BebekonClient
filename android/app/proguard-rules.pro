@@ -2,4 +2,5 @@
 -keep class go.** { *; }
 -keep class io.nekohasekai.libbox.** { *; }
 -keep class org.snakeyaml.engine.v2.** { *; }
+-keep class com.bebekon.vpn.TrustTunnelNative { *; }
 -keepattributes Signature,InnerClasses,EnclosingMethod,RuntimeVisibleAnnotations,AnnotationDefault

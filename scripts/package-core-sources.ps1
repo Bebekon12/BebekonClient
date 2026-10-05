@@ -39,6 +39,11 @@ try {
             }
         }
         [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($output, (Join-Path $projectRoot 'core/security-pins.json'), 'security-pins.json') | Out-Null
+        $adapterRoot = [IO.Path]::GetFullPath((Join-Path $projectRoot 'android/trusttunnel'))
+        foreach ($file in Get-ChildItem -LiteralPath $adapterRoot -Recurse -File) {
+            $relative = $file.FullName.Substring($adapterRoot.Length + 1).Replace('\','/')
+            [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($output, $file.FullName, ('android-trusttunnel/' + $relative)) | Out-Null
+        }
     } finally { $output.Dispose() }
 } finally {
     $resolvedTemporary = [IO.Path]::GetFullPath($temporary)

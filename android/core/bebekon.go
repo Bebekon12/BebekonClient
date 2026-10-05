@@ -27,7 +27,13 @@ type BebekonProbeResult struct { Millis int32; Body string; StatusCode int32 }
 // A separate outbound instance probes the selected VPN, without changing the active VPN or routing.
 // One context bounds DNS, proxy handshake, TLS and response body to five seconds.
 func BebekonProbe(config string, platform PlatformInterface, tag, target, method string) (*BebekonProbeResult, error) {
- ctx, cancel := context.WithTimeout(baseContext(platform), 5*time.Second)
+ return BebekonProbeWithTimeout(config, platform, tag, target, method, 5000)
+}
+
+// Remaining budget includes startup of external TrustTunnel transports on Android.
+func BebekonProbeWithTimeout(config string, platform PlatformInterface, tag, target, method string, timeoutMillis int32) (*BebekonProbeResult, error) {
+ if timeoutMillis < 1 || timeoutMillis > 5000 { return nil, os.ErrInvalid }
+ ctx, cancel := context.WithTimeout(baseContext(platform), time.Duration(timeoutMillis)*time.Millisecond)
  defer cancel()
  wrapper := &platformInterfaceWrapper{iif: platform, useProcFS: false}
  ctx = service.ContextWith[adapter.PlatformInterface](ctx, wrapper)

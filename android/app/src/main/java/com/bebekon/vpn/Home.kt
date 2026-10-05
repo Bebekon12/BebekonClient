@@ -2,6 +2,7 @@
 package com.bebekon.vpn
 
 import androidx.compose.animation.core.*
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -41,7 +42,6 @@ private val SignalRed = Color(0xFFFF687A)
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val rowHeight = (maxHeight * .103f).coerceIn(64.dp, 74.dp)
         val peek = rowHeight * 4 + 44.dp
-        val markerLabelTop = ((maxHeight - peek) * .5f - maxWidth * (22f / 165f) - 20.dp).coerceAtLeast(68.dp)
         val node = saved.selectedNode
         BottomSheetScaffold(sheetPeekHeight = peek, sheetContainerColor = MaterialTheme.colorScheme.surface,
             sheetTonalElevation = 0.dp, sheetShadowElevation = 4.dp,
@@ -102,8 +102,15 @@ private val SignalRed = Color(0xFFFF687A)
                 }
             }) { contentPadding ->
             Box(Modifier.fillMaxSize().padding(contentPadding).clip(RoundedCornerShape(0.dp))) {
-                WorldMap(node?.country.orEmpty(), saved.preferences.animations, session.active, origin)
-                Column(Modifier.align(Alignment.TopCenter).padding(top = 8.dp, start = 16.dp, end = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                WorldMap(node?.country.orEmpty(), saved.preferences.animations, session.active, origin, markerContent = {
+                    if (node != null) Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.background.copy(alpha = .94f), border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = .7f))) {
+                        Row(Modifier.padding(horizontal = 10.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text(displayName(node.name), fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false).padding(end = 6.dp))
+                            PingText(pings[node.id] ?: PingResult(), { model.ping(node) })
+                        }
+                    }
+                })
+                Column(Modifier.testTag("connection-status").align(Alignment.TopCenter).padding(top = 8.dp, start = 16.dp, end = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Surface(shape = RoundedCornerShape(22.dp), color = MaterialTheme.colorScheme.background.copy(alpha = .88f), border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = .28f))) {
                         Column(Modifier.padding(horizontal = 18.dp, vertical = 9.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -115,12 +122,6 @@ private val SignalRed = Color(0xFFFF687A)
                         }
                     }
                 }
-                if (node != null && node.country.isNotEmpty()) Surface(Modifier.align(Alignment.TopEnd).padding(top = markerLabelTop, end = 14.dp).widthIn(max = 180.dp), shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.background.copy(alpha = .94f), border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = .7f))) {
-                    Row(Modifier.padding(horizontal = 10.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(displayName(node.name), fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false).padding(end = 6.dp))
-                        PingText(pings[node.id] ?: PingResult(), { model.ping(node) })
-                    }
-                }
                 ConnectButton(session, saved.preferences.animations, toggle, Modifier.align(Alignment.BottomCenter).padding(bottom = 7.dp))
             }
         }
@@ -128,18 +129,28 @@ private val SignalRed = Color(0xFFFF687A)
 }
 
 @Composable private fun ConnectButton(session: Session, animations: Boolean, onClick: () -> Unit, modifier: Modifier) {
-    val transition = rememberInfiniteTransition(label = "connection-halo")
-    val animated by transition.animateFloat(.92f, 1.05f, infiniteRepeatable(tween(1800), RepeatMode.Reverse), label = "halo")
-    val pulse = if (animations && session.active) animated else 1f
+    val connected = session.phase == Phase.ON
+    var pulse = 1f
+    var turn = -90f
+    if (animations && connected) {
+        val transition = rememberInfiniteTransition(label = "connection-halo")
+        val animated by transition.animateFloat(.92f, 1.05f, infiniteRepeatable(tween(1800), RepeatMode.Reverse), label = "halo")
+        val rotation by transition.animateFloat(0f, 360f, infiniteRepeatable(tween(6500, easing = LinearEasing)), label = "active-rim")
+        pulse = animated
+        turn = rotation
+    }
+    val top by animateColorAsState(if (connected) Color(0xFF3BBFFF) else Color(0xFF24496D), tween(if (animations) 450 else 0), label = "power-top")
+    val bottom by animateColorAsState(if (connected) Color(0xFF1255CB) else Color(0xFF102D4C), tween(if (animations) 450 else 0), label = "power-bottom")
+    val rim by animateColorAsState(if (connected) Color(0xFF72C7F5) else Color(0xFF6296BE), tween(if (animations) 450 else 0), label = "power-rim")
     Box(modifier.size(168.dp), contentAlignment = Alignment.Center) {
         Canvas(Modifier.fillMaxSize()) {
             val center = Offset(size.width / 2, size.height / 2)
-            drawCircle(Brush.radialGradient(listOf(Color(0xFF169AFF).copy(alpha = .36f), Color.Transparent), center = center, radius = size.minDimension / 2), size.minDimension / 2 * pulse)
-            drawCircle(Color(0xFF3CBCFF).copy(alpha = .65f), size.minDimension * .438f, style = Stroke(1.5.dp.toPx()))
-            drawCircle(Color(0xFF95E3FF).copy(alpha = .45f), size.minDimension * .405f, style = Stroke(1.dp.toPx()))
+            drawCircle(Brush.radialGradient(listOf(rim.copy(alpha = if (connected) .4f else .12f), Color.Transparent), center = center, radius = size.minDimension / 2), size.minDimension / 2 * pulse)
+            drawCircle(rim.copy(alpha = .24f), size.minDimension * .438f, style = Stroke(1.dp.toPx()))
+            if (connected) drawArc(rim.copy(alpha = .7f), if (animations) turn else -90f, 80f, false, topLeft = Offset(size.width * .062f, size.height * .062f), size = androidx.compose.ui.geometry.Size(size.width * .876f, size.height * .876f), style = Stroke(1.5.dp.toPx(), cap = StrokeCap.Round))
         }
-        Box(Modifier.size(134.dp).clip(CircleShape).background(Brush.verticalGradient(listOf(Color(0xFF138FFF), Color(0xFF0054ED))))
-            .border(1.5.dp, Color(0xFF67CAFF), CircleShape)
+        Box(Modifier.size(134.dp).clip(CircleShape).background(Brush.radialGradient(listOf(top, bottom), center = Offset(40f * androidx.compose.ui.platform.LocalDensity.current.density, 24f * androidx.compose.ui.platform.LocalDensity.current.density), radius = 140f * androidx.compose.ui.platform.LocalDensity.current.density))
+            .border(1.dp, rim, CircleShape)
             .clickable(enabled = session.phase != Phase.STOPPING, role = Role.Button, onClick = onClick)
             .semantics { contentDescription = if (session.active) "Отключить VPN" else "Подключить VPN" }, contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {

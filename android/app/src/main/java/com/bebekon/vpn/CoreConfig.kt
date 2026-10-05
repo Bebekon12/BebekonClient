@@ -3,12 +3,13 @@ package com.bebekon.vpn
 import org.json.JSONObject
 
 object CoreConfig {
-    fun build(state: SavedState, geo: (String) -> JSONObject, tunnel: Boolean = true, policy: AppTunnelPolicy = appTunnelPolicy(state)): String {
+    fun build(state: SavedState, geo: (String) -> JSONObject, tunnel: Boolean = true, policy: AppTunnelPolicy = appTunnelPolicy(state), vpnOverride: JSONObject? = null): String {
         val node = state.selectedNode ?: error("Выберите сервер")
         require(node.unsupported.isEmpty()) { node.unsupported }
         // The outer connection may still need IPv6 (e.g. an IPv6-only mobile network).
         // It is independent from which address families apps see inside the tunnel.
-        val vpn = node.config.also { config -> val reason = ConnectionSafety.reason(config); require(reason.isEmpty()) { reason }; config.put("tag", "vpn"); config.put("domain_resolver", json("server" to "direct-dns", "strategy" to "prefer_ipv4")); config.put("connect_timeout", "4s") }
+        if (node.config.optString("type") == "trusttunnel") { TrustTunnelProfile.validate(node); require(vpnOverride != null) { "Запустите модуль TrustTunnel" } }
+        val vpn = (vpnOverride ?: node.config).also { config -> val reason = ConnectionSafety.reason(config); require(reason.isEmpty()) { reason }; config.put("tag", "vpn"); config.put("domain_resolver", json("server" to "direct-dns", "strategy" to "prefer_ipv4")); config.put("connect_timeout", "4s") }
         val rules = mutableListOf<JSONObject>()
         rules += json("action" to "sniff", "timeout" to "300ms")
         rules += json("protocol" to "dns", "action" to "hijack-dns")

@@ -1,3 +1,5 @@
-<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
-    <path android:fillColor="#FFFFFF" android:pathData="M12,2L3,6v6c0,5.55 3.84,10.74 9,12 5.16,-1.26 9,-6.45 9,-12V6L12,2zM11,6h2v7h-2zM12,20a5,5 0,0 1,-3.54 -8.54l1.42,1.42A3,3 0,1 0,14.12 12.88l1.42,-1.42A5,5 0,0 1,12 20z" />
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="24dp" android:height="24dp" android:viewportWidth="32" android:viewportHeight="32">
+    <!-- Monochrome notification silhouette: hat, sunglasses, scarf and running snowman. -->
+    <path android:fillColor="#FFFFFF" android:fillType="evenOdd" android:pathData="M16,7L17,2Q18,0.8 20,2L25,3L26,8L28,9Q28.5,10.5 26,10L14,8.5Q12,7.5 14,6.8Z M20,9.5A5.3,5.3 0,1 1,19.99,20.1A5.3,5.3 0,1 1,20,9.5Z M16,11.5L19.5,12L19,14.2Q16,15 16,11.5Z M20,12L24,12.3Q23.8,15.8 21,14.8Z M18,18A6.2,6.2 0,1 1,17.99,30.4A6.2,6.2 0,1 1,18,18Z M19,21A1.1,1.1 0,1 1,18.99,23.2A1.1,1.1 0,1 1,19,21Z M18,25A1.1,1.1 0,1 1,17.99,27.2A1.1,1.1 0,1 1,18,25Z"/>
+    <path android:fillColor="#FFFFFF" android:pathData="M16,17Q10,12 3,15L10,16L4,18Q11,20 16,19Z M13,22Q7,21 5,25Q4,28 7,28Q10,28 13,25Z M23,20Q28,16 30,20Q31,23 28,24L23,23Z M21,27Q26,26 28,28Q30,30 27,31Q24,32 20,30Z M12,28L8,29L5,28L2,30L10,31L14,30Z"/>
 </vector>

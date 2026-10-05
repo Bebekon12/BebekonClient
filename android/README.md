@@ -64,6 +64,22 @@ This addresses the demonstrated IPv6 failure mechanism. The user's exact phone/b
 
 ## Build
 
+### TrustTunnel (Android 0.1.7)
+
+TrustTunnel is a native transport alongside sing-box: a private, authenticated loopback SOCKS bridge carries TCP/UDP through the official TrustTunnel client, while sing-box owns Android's TUN, DNS and existing app/site rules. HTTP/2, HTTP/3 (QUIC) and automatic selection are supported. Both the endpoint certificate hostname and trust chain are verified; custom SNI does not disable hostname verification. Imported pinned certificates remain available when editing a profile. Provider routing/listeners are never applied.
+
+Add or edit an endpoint from Servers → **TrustTunnel · ввести вручную** or Subscriptions → **TrustTunnel без ссылки**. Fields include address (default 443), certificate domain, optional SNI, username, password and protocol. `tt://` v0–v2 links, endpoint TOML/JSON and HTTPS subscriptions (including Basic authorization) use the same validated profile. Credentials stay in encrypted local storage. Initial TLS/authentication must complete before sending traffic; HTTPS probes share one five-second budget with native startup.
+
+Build the additional native libraries before Gradle, using Docker Desktop's Linux engine:
+
+```powershell
+./android/trusttunnel/build.ps1
+```
+
+The script builds all three APK architectures, API 29+, with NDK r30 and 16 KiB ELF alignment. TrustTunnel Client v1.1.7 is pinned to `170609c24ca865819fed68437b01c013049bc3fa`. Its nghttp2 dependency is replaced by upstream **1.68.1**, checksum checked; the included patch only exports two existing function declarations needed by TrustTunnel. Build sources and this adapter are included in the release core-source archive. Generated libraries and the reusable Docker build cache are excluded from Git.
+
+The notification and Quick Settings tile use a monochrome snowman. Android's own VPN/key indicator beside the clock is controlled by the OS and cannot be replaced by the app. The connected button has a bright blue/cyan rim; the disconnected button is muted blue. Its continuous animation runs only while connected and animations are enabled.
+
 Required: JDK 17, Go 1.26.8, Android SDK platform 36, NDK 28.2.13676358. Set `JAVA_HOME`, `ANDROID_HOME` and `ANDROID_NDK_HOME`, and add Go to PATH. Gradle 8.13 is pinned by the wrapper and SHA-256.
 
 ```powershell
@@ -130,3 +146,7 @@ The actual signed 0.1.2 APK reproduced the WebAPK-only scope defect (unchecked c
 ## Release 0.1.5 verification
 
 52 JVM tests passed; debug/release Lint reported zero errors and 18 advisory warnings. The final real-service suite passed OK (9 tests), 159.942 seconds, with two optional external-input methods returning early. Fresh native logs distinguish the shared-mode Direct HTTPS request from the matched VPN site. From a separate captured UID, A DNS returns addresses, AAAA returns none, and a literal IPv6 connection fails immediately. Android's actual release VPN link has an IPv4 address/DNS and an unreachable IPv6 default route, with bypass disabled. Signed R8 0.1.5 installed over published 0.1.4, preserved the encrypted fixture subscription/selected node/light theme and carried a companion HTTPS request with HTTP 200. The default-off IPv6 setting was visually inspected. Physical phone confirmation and real dual-stack IPv6 forwarding remain outside this validation.
+
+## Release 0.1.7 verification
+
+Native TrustTunnel HTTP/2 and HTTP/3 were tested against the official endpoint, including authenticated UDP, certificate-host rejection, Android TUN from a separate UID, disconnect and manual profile editing. The original app/site routing suite and 63 JVM tests pass. The compact map keeps existing Home/button dimensions, distinguishes departure/destination size and attaches the country caption to the server. Native dependency license notices are bundled in assets/licenses/trusttunnel; security limitations and device coverage are recorded in docs/VALIDATION.md and docs/SECURITY-AUDIT.md.

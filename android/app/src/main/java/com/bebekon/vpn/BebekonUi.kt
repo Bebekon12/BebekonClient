@@ -47,6 +47,7 @@ private val Light = lightColorScheme(primary = Color(0xFF086AFF), onPrimary = Co
     val isDark = when (saved.preferences.theme) { ThemeChoice.DARK -> true; ThemeChoice.LIGHT -> false; ThemeChoice.SYSTEM -> isSystemInDarkTheme() }
     var tab by rememberSaveable { mutableIntStateOf(0) }; var settings by rememberSaveable { mutableStateOf(false) }; var addSubscription by remember { mutableStateOf(false) }; var editRule by remember { mutableStateOf<Rule?>(null) }; var newRule by remember { mutableStateOf(false) }; var presets by remember { mutableStateOf(false) }; var routing by remember { mutableStateOf(false) }
     var applications by remember { mutableStateOf(false) }
+    var trustTunnel by remember { mutableStateOf(false) }; var editTrustTunnel by remember { mutableStateOf<Node?>(null) }
     androidx.activity.compose.BackHandler(settings) { settings = false }
     val snackbar = remember { SnackbarHostState() }
     val activity = androidx.activity.compose.LocalActivity.current
@@ -74,14 +75,15 @@ private val Light = lightColorScheme(primary = Color(0xFF086AFF), onPrimary = Co
                 when {
                     settings -> FullSettingsScreen(saved.preferences, model, addTile, { routing = true }, { applications = true }, { presets = true }, { settings = false; tab = 3 })
                     tab == 0 -> HomeScreen(saved, session, model, toggle, { tab = 1 }, { routing = true }, { tab = 3 })
-                    tab == 1 -> ServersScreen(saved, model)
+                    tab == 1 -> ServersScreen(saved, model, { trustTunnel = true }, { editTrustTunnel = it; trustTunnel = true })
                     tab == 2 -> RulesScreen(saved, model, { newRule = true }, { editRule = it }, { presets = true }, { routing = true }, { applications = true })
-                    else -> SubscriptionsScreen(saved, model, { addSubscription = true }, scan, importFile)
+                    else -> SubscriptionsScreen(saved, model, { addSubscription = true }, scan, importFile, { trustTunnel = true }, { editTrustTunnel = it; trustTunnel = true })
                 }
                 if (busy) LinearProgressIndicator(Modifier.fillMaxWidth().align(Alignment.TopCenter), color = MaterialTheme.colorScheme.primary, trackColor = Color.Transparent)
             }
         }
         if (addSubscription) SubscriptionDialog(imported, { addSubscription = false; model.importText.value = "" }) { source, name -> model.import(source, name); addSubscription = false }
+        if (trustTunnel) TrustTunnelDialog(editTrustTunnel, { trustTunnel = false; editTrustTunnel = null }, { model.saveTrustTunnel(it, editTrustTunnel); trustTunnel = false; editTrustTunnel = null }, editTrustTunnel?.let { node -> { model.removeNode(node); trustTunnel = false; editTrustTunnel = null } })
         if (newRule || editRule != null) RuleDialog(editRule, { newRule = false; editRule = null }) { model.saveRule(it); newRule = false; editRule = null }
         if (presets) PresetsDialog(model, { presets = false })
         UpdateDialog(LocalContext.current.updater)
@@ -109,12 +111,13 @@ private fun cleanName(s: String) = s.replace(Regex("[\\x{1F1E6}-\\x{1F1FF}]"), "
         }
     }
 }
-@Composable private fun ServersScreen(saved: SavedState, model: MainViewModel) {
+@Composable private fun ServersScreen(saved: SavedState, model: MainViewModel, addTrustTunnel: () -> Unit, editTrustTunnel: (Node) -> Unit) {
     var search by rememberSaveable { mutableStateOf("") }; var favorites by rememberSaveable { mutableStateOf(false) }; var methods by remember { mutableStateOf(false) }; var sortPing by rememberSaveable { mutableStateOf(true) }
     val ping by model.repo.pings.collectAsState()
     val nodes = saved.nodes.filter { (!favorites || it.id in saved.favorites) && it.name.contains(search, true) }.let { if (sortPing) nodesByPing(it, ping) else it }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item { PageTitle("Выбор сервера", "${saved.nodes.size} серверов · ${saved.subscriptions.size} подписок") }
+        item { OutlinedButton(addTrustTunnel, Modifier.fillMaxWidth().height(48.dp), shape = RoundedCornerShape(14.dp)) { Icon(Icons.Outlined.Add, null); Text("TrustTunnel · ввести вручную", Modifier.padding(start = 8.dp)) } }
         item { OutlinedTextField(search, { search = it }, Modifier.fillMaxWidth(), placeholder = { Text("Страна или название") }, leadingIcon = { Icon(Icons.Outlined.Search, null) }, singleLine = true, shape = RoundedCornerShape(16.dp)) }
         item { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) { FilterChip(favorites, { favorites = !favorites }, { Text("Избранное", fontSize = 11.sp) }); FilterChip(sortPing, { sortPing = !sortPing }, { Text("По пингу", fontSize = 11.sp) }); Spacer(Modifier.weight(1f)); IconButton({ sortPing = true; model.pingAll() }) { Icon(Icons.Outlined.Speed, "Проверить пинг всех серверов") } } }
         item { Box { TextButton({ methods = true }) { Icon(Icons.Outlined.NetworkCheck, null, Modifier.size(18.dp)); Text(saved.preferences.ping.label, fontSize = 12.sp, modifier = Modifier.padding(start = 6.dp)); Icon(Icons.Outlined.ExpandMore, null) }; DropdownMenu(methods, { methods = false }) { PingMethod.entries.forEach { m -> DropdownMenuItem(text = { Text(m.label) }, onClick = { model.preferences(saved.preferences.copy(ping = m)); methods = false }) } } } }
@@ -125,7 +128,7 @@ private fun cleanName(s: String) = s.replace(Regex("[\\x{1F1E6}-\\x{1F1FF}]"), "
             }
         }
         if (nodes.isEmpty()) item { EmptyState(Icons.Outlined.Public, "Серверов пока нет", "Добавьте подписку или измените фильтр") }
-        items(nodes, key = { it.id }) { node -> ServerRow(node, node.id == saved.selected, node.id in saved.favorites, ping[node.id] ?: PingResult(), { model.select(node) }, { model.favorite(node) }, { model.ping(node) }) }
+        items(nodes, key = { it.id }) { node -> Column { ServerRow(node, node.id == saved.selected, node.id in saved.favorites, ping[node.id] ?: PingResult(), { model.select(node) }, { model.favorite(node) }, { model.ping(node) }); if (node.config.optString("type") == "trusttunnel") TextButton({ editTrustTunnel(node) }) { Icon(Icons.Outlined.Edit, null, Modifier.size(16.dp)); Text("Изменить TrustTunnel", Modifier.padding(start = 6.dp), fontSize = 12.sp) } } }
         item { Text(if (saved.preferences.ping == PingMethod.TCP) "TCP: соединение с адресом сервера. До 100 мс — зелёный, до 250 — оранжевый. Доступ через VPN этот тест не проверяет." else "HTTPS: DNS, VPN-соединение, TLS и ответ сайта. До 300 мс — зелёный, до 600 — оранжевый. Обычно выше TCP; это разные замеры.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         item { Text("Тестовый сайт: ${saved.preferences.pingTarget.label}. Таймаут каждой проверки — 5 секунд. На мобильной сети результат зависит также от сигнала, маршрута оператора и выбранного сайта.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
     }
@@ -144,15 +147,23 @@ private fun cleanName(s: String) = s.replace(Regex("[\\x{1F1E6}-\\x{1F1FF}]"), "
         }
     }
 }
-@Composable private fun SubscriptionsScreen(saved: SavedState, model: MainViewModel, add: () -> Unit, scan: () -> Unit, importFile: () -> Unit) {
+@Composable private fun SubscriptionsScreen(saved: SavedState, model: MainViewModel, add: () -> Unit, scan: () -> Unit, importFile: () -> Unit, addTrustTunnel: () -> Unit, editTrustTunnel: (Node) -> Unit) {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item { PageTitle("Подписки", "Все ваши VPN в одном месте") }
         item { Button(add, Modifier.fillMaxWidth().height(49.dp), shape = RoundedCornerShape(16.dp)) { Icon(Icons.Outlined.Add, null); Text("Добавить подписку", Modifier.padding(start = 8.dp)) } }
+        item { ActionCard(Icons.Outlined.VpnKey, "TrustTunnel без ссылки", "Адрес, сертификат, SNI, логин и пароль", addTrustTunnel) }
         item { Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) { OutlinedButton(scan, Modifier.weight(1f), shape = RoundedCornerShape(14.dp)) { Icon(Icons.Outlined.QrCodeScanner, null, Modifier.size(20.dp)); Text("QR-код", Modifier.padding(start = 6.dp)) }; OutlinedButton(importFile, Modifier.weight(1f), shape = RoundedCornerShape(14.dp)) { Icon(Icons.Outlined.UploadFile, null, Modifier.size(20.dp)); Text("Файл", Modifier.padding(start = 6.dp)) } } }
         if (saved.subscriptions.isEmpty()) item { EmptyState(Icons.Outlined.Link, "Ваша первая подписка", "Подойдёт ссылка провайдера, QR-код, список VPN ссылок, Base64, Clash или JSON конфигурация.") }
         items(saved.subscriptions, key = { it.id }) { sub ->
             Surface(shape = RoundedCornerShape(22.dp), color = MaterialTheme.colorScheme.surface, border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = .45f))) {
-                Column(Modifier.padding(18.dp)) { Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Outlined.Link, null, Modifier.size(28.dp), tint = MaterialTheme.colorScheme.secondary); Column(Modifier.weight(1f).padding(start = 12.dp)) { Text(sub.name, fontSize = 17.sp, fontWeight = FontWeight.SemiBold); Text("${sub.nodes.count { it.unsupported.isEmpty() }} доступных · ${sub.nodes.size} всего", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp)) }; IconButton({ model.removeSubscription(sub.id) }) { Icon(Icons.Outlined.DeleteOutline, "Удалить подписку") } }; Text("Обновлено ${java.text.SimpleDateFormat("dd.MM HH:mm", Locale.ROOT).format(java.util.Date(sub.updated))}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 16.dp)); TextButton({ model.refresh(sub) }) { Icon(Icons.Outlined.Refresh, null, Modifier.size(18.dp)); Text("Обновить серверы", Modifier.padding(start = 6.dp)) } }
+                Column(Modifier.padding(18.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Outlined.Link, null, Modifier.size(28.dp), tint = MaterialTheme.colorScheme.secondary); Column(Modifier.weight(1f).padding(start = 12.dp)) { Text(sub.name, fontSize = 17.sp, fontWeight = FontWeight.SemiBold); Text("${sub.nodes.count { it.unsupported.isEmpty() }} доступных · ${sub.nodes.size} всего", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp)) }; IconButton({ model.removeSubscription(sub.id) }) { Icon(Icons.Outlined.DeleteOutline, "Удалить подписку") } }
+                    Text(if (sub.source.startsWith("manual:")) "Профиль введён вручную" else "Обновлено ${java.text.SimpleDateFormat("dd.MM HH:mm", Locale.ROOT).format(java.util.Date(sub.updated))}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 16.dp))
+                    Row {
+                        if (!sub.source.startsWith("manual:")) TextButton({ model.refresh(sub) }) { Icon(Icons.Outlined.Refresh, null, Modifier.size(18.dp)); Text("Обновить", Modifier.padding(start = 6.dp)) }
+                        sub.nodes.singleOrNull()?.takeIf { it.config.optString("type") == "trusttunnel" }?.let { node -> TextButton({ editTrustTunnel(node) }) { Icon(Icons.Outlined.Edit, null, Modifier.size(18.dp)); Text("Изменить сервер", Modifier.padding(start = 6.dp)) } }
+                    }
+                }
             }
         }
         item { Text("Ссылки и ключи хранятся с шифрованием Android. Маршрутизация провайдера не заменяет ваши правила.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }

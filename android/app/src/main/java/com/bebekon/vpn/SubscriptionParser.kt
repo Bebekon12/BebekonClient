@@ -18,8 +18,9 @@ object SubscriptionParser {
         require(raw.length <= 4 * 1024 * 1024) { "Подписка слишком большая" }
         var text = raw.trim().removePrefix("\uFEFF").trim()
         require(!text.startsWith('<')) { "Провайдер вернул веб-страницу. Нужна ссылка на подписку" }
-        if (!text.contains("://") && !text.startsWith('{') && !text.startsWith('[') && !Regex("(?m)^\\s*proxies\\s*:").containsMatchIn(text)) text = try { decode(text).trim() } catch (_: Exception) { error("Неизвестный формат подписки") }
+        if (!text.contains("://") && !text.startsWith('{') && !text.startsWith('[') && !Regex("(?m)^\\s*proxies\\s*:").containsMatchIn(text) && !Regex("(?m)^\\s*\\[endpoint\\]\\s*$").containsMatchIn(text)) text = try { decode(text).trim() } catch (_: Exception) { error("Неизвестный формат подписки") }
         val nodes = when {
+            Regex("(?m)^\\s*\\[endpoint\\]\\s*$").containsMatchIn(text) -> listOf(TrustTunnelProfile.parseToml(text))
             text.startsWith('{') || text.startsWith('[') -> parseJson(text)
             Regex("(?m)^\\s*proxies\\s*:").containsMatchIn(text) -> {
                 ImportSafety.yamlText(text)
@@ -38,6 +39,7 @@ object SubscriptionParser {
         return config(JSONObject(text))
     }
     private fun config(root: JSONObject): List<Node> = when {
+        root.has("endpoint") || root.has("hostname") && (root.has("addresses") || root.has("address")) -> listOf(TrustTunnelProfile.endpoint(root))
         root.has("proxies") -> root.getJSONArray("proxies").objects().map(::clash)
         root.has("outbounds") -> {
             val profileName = listOf("remarks", "remark", "ps", "name").firstNotNullOfOrNull { root.optString(it).trim().takeIf(String::isNotEmpty) }.orEmpty()
@@ -53,6 +55,11 @@ object SubscriptionParser {
     }
     fun link(input: String): Node {
         val scheme = input.substringBefore("://").lowercase()
+        if (scheme == "tt") {
+            val (endpoint, _) = TrustTunnelProfile.link(input)
+            require(endpoint.has("addresses")) { "Ссылка TrustTunnel содержит подписку — добавьте её в «Подписках»" }
+            return TrustTunnelProfile.endpoint(endpoint)
+        }
         if (scheme == "vmess" && !input.substringAfter("://").contains('@')) {
             val o = JSONObject(ImportSafety.jsonText(decode(input.substringAfter("://"))))
             val c = json("type" to "vmess", "server" to o.getString("add"), "server_port" to o.getString("port").toInt(), "uuid" to o.getString("id"), "security" to o.optString("scy", "auto"), "alter_id" to o.optString("aid", "0").toInt())
@@ -151,6 +158,7 @@ object SubscriptionParser {
         return node(title, c)
     }
     private fun node(name: String, source: JSONObject): Node {
+        if (source.optString("type") == "trusttunnel") return TrustTunnelProfile.endpoint(source.getJSONObject("trusttunnel").apply { put("name", name) })
         val c = JSONObject(); source.keys().forEach { if (it in allowed) c.put(it, source.get(it)) }
         // Whitelist nested fields too: no file reads, client certificates, download URLs or provider headers.
         c.optJSONObject("tls")?.let { t -> val clean = JSONObject(); for (k in listOf("enabled", "server_name", "insecure", "alpn", "utls", "reality")) if (t.has(k)) clean.put(k, t.get(k)); for ((k, keys) in mapOf("utls" to listOf("enabled", "fingerprint"), "reality" to listOf("enabled", "public_key", "short_id"))) clean.optJSONObject(k)?.let { nested -> val n = JSONObject(); keys.forEach { key -> if (nested.has(key)) n.put(key, nested.get(key)) }; clean.put(k, n) }; c.put("tls", clean) }

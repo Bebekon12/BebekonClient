@@ -429,7 +429,7 @@ internal static class SmokeHarness
         var oldWidth = window.Width; var oldHeight = window.Height;
         window.Width = window.MinWidth; window.Height = window.MinHeight; window.UpdateLayout(); Capture(window, "Home-Connected-Minimum");
         var connect = (Button)home.FindName("ConnectPower");
-        if (connect.ActualWidth < 218 || connect.ActualHeight < 54) throw new InvalidOperationException("The primary action must keep its full area at minimum size.");
+        if (connect.ActualWidth < 148 || Math.Abs(connect.ActualWidth - connect.ActualHeight) > .1) throw new InvalidOperationException("The primary action must remain a large circle at minimum size.");
         I18n.Set("English"); window.UpdateLayout(); Capture(window, "Home-English-Minimum"); I18n.Set("Русский");
         window.Width = oldWidth; window.Height = oldHeight;
         vm.AnimationsEnabled = false;

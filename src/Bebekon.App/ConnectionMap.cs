@@ -57,24 +57,21 @@ public sealed class ConnectionMap : FrameworkElement
     {
         var code = CountryInfo.Resolve(ServerName);
         var selected = string.IsNullOrEmpty(code) ? null : Countries.FirstOrDefault(c => c.Code == code);
-        var lon = selected?.Center.X ?? 10;
-        var lat = Math.Clamp((selected?.Center.Y ?? 35) - 8, -65, 65);
-        var span = Origin is null || selected is null ? 165 : Math.Clamp(Math.Abs(MapLocation.LongitudeDelta(Origin.Longitude - lon)) * 2.5 + 60, 165, 460);
-        var verticalSpan = Origin is null || selected is null ? 100 : Math.Max(100, Math.Abs(Origin.Latitude - selected.Center.Y) * 2 + 48);
-        var scale = Math.Min(ActualWidth * .78 / span, ActualHeight / verticalSpan);
-        Point At(Point p) => new((p.X - lon) * scale + ActualWidth * .64, (lat - p.Y) * scale + ActualHeight * .56);
+        var route = MapLocation.Viewport(selected is null ? null : new GeoPoint(selected.Center.X, selected.Center.Y), Origin);
+        var scale = Math.Min(ActualWidth * .84 / route.LongitudeSpan, ActualHeight * .80 / route.LatitudeSpan);
+        Point At(Point p) => new(MapLocation.LongitudeDelta(p.X - route.Longitude) * scale + ActualWidth * .5, (route.Latitude - p.Y) * scale + ActualHeight * .52);
         projected = Countries.Select(c => {
             var shape = new StreamGeometry { FillRule = FillRule.EvenOdd };
             using (var path = shape.Open()) foreach (var ring in c.Rings) {
-                for (var i = 0; i < ring.Length; i++) { var point = At(ring[i]); if (i == 0 || Math.Abs(ring[i].X - ring[i - 1].X) > 180) path.BeginFigure(point, true, true); else path.LineTo(point, true, false); }
+                for (var i = 0; i < ring.Length; i++) { var point = At(ring[i]); if (i == 0 || Math.Abs(point.X - At(ring[i - 1]).X) > 180 * scale) path.BeginFigure(point, true, true); else path.LineTo(point, true, false); }
             }
             shape.Freeze(); return (c.Code, shape);
         }).ToArray();
         destination = selected is null ? null : At(selected.Center);
-        departure = Origin is null ? null : At(new(lon + MapLocation.LongitudeDelta(Origin.Longitude - lon), Origin.Latitude));
+        departure = Origin is null ? null : At(new(Origin.Longitude, Origin.Latitude));
         beam = null;
         if (destination is { } end && departure is { } start) {
-            bend = new((start.X + end.X) / 2, Math.Min(start.Y, end.Y) - Math.Clamp(Math.Abs(start.X - end.X) * .2, 44, 78));
+            bend = new((start.X + end.X) / 2, Math.Max(18, Math.Min(start.Y, end.Y) - Math.Clamp(Math.Abs(start.X - end.X) * .2, 44, 78)));
             beam = new StreamGeometry(); using (var p = beam.Open()) { p.BeginFigure(start, false, false); p.QuadraticBezierTo(bend, end, true, false); } beam.Freeze();
         }
     }
@@ -87,18 +84,24 @@ public sealed class ConnectionMap : FrameworkElement
         var code = CountryInfo.Resolve(ServerName);
         var land = Brush(170, 13, 58, 104); var outline = new Pen(Brush(160, 26, 81, 130), .65);
         foreach (var c in projected!) dc.DrawGeometry(!string.IsNullOrEmpty(code) && c.Code == code ? Brush(180, 18, 101, 202) : land, outline, c.Shape);
+        if (departure is { } origin) {
+            dc.DrawEllipse(Brush(55), null, origin, 22, 22);
+            dc.DrawEllipse(Brush(250), new Pen(Brushes.White, 2), origin, 9, 9);
+            dc.DrawEllipse(Brushes.White, null, origin, 3, 3);
+            var you = new FormattedText("Вы", CultureInfo.CurrentUICulture, FlowDirection.LeftToRight, new Typeface("Segoe UI"), 11, Brushes.White, VisualTreeHelper.GetDpi(this).PixelsPerDip);
+            dc.DrawText(you, new(origin.X - you.Width / 2, origin.Y + 14));
+        }
         if (destination is not { } end) return;
         if (Active && beam is not null && departure is { } start) {
             dc.DrawGeometry(null, new Pen(Brush(20), 13), beam); dc.DrawGeometry(null, new Pen(Brush(50), 6), beam); dc.DrawGeometry(null, new Pen(Brush(240, 43, 184, 255), 1.8), beam);
-            dc.DrawEllipse(Brush(75), null, start, 10, 10); dc.DrawEllipse(Brush(255), new Pen(Brushes.White, 1), start, 3, 3);
             if (AnimationEnabled) { var t = (double)GetValue(FlightProperty); var point = BeamPoint(t); dc.DrawEllipse(Brush(50), null, point, 12, 12); dc.DrawEllipse(Brushes.White, null, point, 3, 3); }
         }
-        dc.DrawEllipse(Brush(50), null, end, 19, 19); dc.DrawEllipse(Brush(240), new Pen(Brushes.White, 1.5), end, 7, 7);
+        dc.DrawEllipse(Brush(50), null, end, 13, 13); dc.DrawEllipse(Brush(240), new Pen(Brushes.White, 1.5), end, 4, 4);
         var name = CountryInfo.DisplayName(ServerName);
         var caption = name + (LatencyMs is null ? "" : " · " + Latency);
         var label = new FormattedText(caption, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight, new Typeface("Segoe UI"), 11, Brushes.White, VisualTreeHelper.GetDpi(this).PixelsPerDip) { MaxTextWidth = 180, MaxLineCount = 1, Trimming = TextTrimming.CharacterEllipsis };
         if (LatencyMs is not null) label.SetForegroundBrush((Brush)Application.Current.Resources[LatencyDisplay.Quality(LatencyMs) switch { LatencyQuality.Good => "PingGood", LatencyQuality.Moderate => "PingModerate", _ => "PingPoor" }], name.Length, caption.Length - name.Length);
-        var rect = new Rect(Math.Clamp(end.X + 14, 10, Math.Max(10, ActualWidth - label.Width - 25)), Math.Clamp(end.Y - 35, 9, Math.Max(9, ActualHeight - 40)), label.Width + 18, 27);
+        var rect = new Rect(Math.Clamp(end.X - (label.Width + 18) / 2, 10, Math.Max(10, ActualWidth - label.Width - 25)), Math.Clamp(end.Y - 43, 9, Math.Max(9, ActualHeight - 40)), label.Width + 18, 27);
         dc.DrawRoundedRectangle(Brush(240, 7, 27, 51), new Pen(Brush(220), .8), rect, 10, 10); dc.DrawText(label, new(rect.X + 9, rect.Y + 5));
     }
 }
