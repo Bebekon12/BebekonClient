@@ -6,7 +6,13 @@ Accepting shows percentage, approximate downloaded/total MB, verification and re
 
 Version 0.1.9+ defaults to `https://github.com/Bebekon12/BebekonClient/releases/latest/download/update.json`. Each release contains a signed manifest and a versioned installer; the manifest refers to the immutable version tag, so publishing a later release cannot redirect an in-progress download to the wrong installer. Version 0.1.8 used `E:\BebekonClient\dist\update.json`; that feed also offers the next release, after which an unset source follows the new bundled GitHub default. Explicit user-selected channels remain unchanged. The source can be changed in Settings → Updates.
 
-## Publishing
+## Publishing with GitHub Actions (0.1.24+)
+
+`.github/workflows/release.yml` builds Windows (windows-2025: secure cores, tests, Setup, portable ZIP, signed `update.json`, core sources) and Android (TrustTunnel native library in Docker, libbox, JVM tests, signed universal APK). Branch pushes only build and test. Pushing a tag `vX.Y.Z` that matches `Directory.Build.props` signs both and publishes the release titled `Bebekon VPN · Windows X.Y.Z и Android A.B.C`, with notes from `docs/releases/vX.Y.Z.md`.
+
+Signing material lives only in the repository secret `BEBEKON_RELEASE_SECRETS`: Base64 of a JSON object with `updateKeyXml` (RSA-3072 private key; its public part is `resources/updates/public-key.xml`), `androidKeystoreBase64` (PKCS#12, alias `bebekon`) and `androidPassword`. GitHub cannot show a secret again, so keep an offline backup; losing it means another one-time reinstall. Version 0.1.24 introduced these keys: earlier installations do not accept its feed or APK signature and need one manual installation.
+
+## Publishing (manual, earlier releases)
 
 1. Increment Directory.Build.props and installer/setup.iss together.
 2. Run `./build.ps1 -PublishFolder artifacts/release-updates`. It keeps versioned installers and atomically writes a signed dist/update.json only after the installer exists. Never replace an already published version with different content.

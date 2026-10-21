@@ -1,4 +1,4 @@
-param([string]$InnoCompiler, [switch]$SkipInstaller, [string]$TestSettings, [string]$PublishFolder = 'artifacts\release', [string]$UpdateFeedUrl = 'https://github.com/Bebekon12/BebekonClient/releases/latest/download/update.json', [string]$InstallerUrl, [string]$ReleaseNotes = 'Добавлена поддержка TrustTunnel: ссылки tt://, TOML/JSON и HTTPS-подписки, HTTP/2 и HTTP/3, импорт файла и выбор протокола сервера. Сохраняются текущие правила, TUN и выбранный сервер.')
+param([string]$InnoCompiler, [switch]$SkipInstaller, [string]$TestSettings, [string]$PublishFolder = 'artifacts\release', [string]$UpdateFeedUrl = 'https://github.com/Bebekon12/BebekonClient/releases/latest/download/update.json', [string]$InstallerUrl, [switch]$SkipUpdateSigning, [string]$ReleaseNotes = 'Добавлена поддержка TrustTunnel: ссылки tt://, TOML/JSON и HTTPS-подписки, HTTP/2 и HTTP/3, импорт файла и выбор протокола сервера. Сохраняются текущие правила, TUN и выбранный сервер.')
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $projectRoot = $PSScriptRoot
@@ -103,7 +103,7 @@ if (-not $SkipInstaller) {
     }
     $versionedInstaller = Join-Path $projectRoot ('dist\BebekonVPN-' + $releaseVersion + '-Setup-x64.exe')
     Copy-Item -LiteralPath 'dist\BebekonVPN-Setup-x64.exe' -Destination $versionedInstaller -Force
-    & (Join-Path $projectRoot 'scripts\publish-update.ps1') -Installer $versionedInstaller -Version $releaseVersion -Output (Join-Path $projectRoot 'dist\update.json') -InstallerUrl $InstallerUrl -Notes $ReleaseNotes
+    if (-not $SkipUpdateSigning) { & (Join-Path $projectRoot 'scripts\publish-update.ps1') -Installer $versionedInstaller -Version $releaseVersion -Output (Join-Path $projectRoot 'dist\update.json') -InstallerUrl $InstallerUrl -Notes $ReleaseNotes }
 }
 Compress-Archive -Path (Join-Path $appPublishRoot '*') -DestinationPath dist\BebekonVPN-Portable-x64.zip -CompressionLevel Optimal -Force
 Get-ChildItem -LiteralPath dist | Select-Object Name,Length

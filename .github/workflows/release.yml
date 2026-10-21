@@ -1,0 +1,151 @@
+# Builds Windows and Android on GitHub's servers. Branch pushes only build and test.
+# A pushed tag vX.Y.Z also signs both platforms with the BEBEKON_RELEASE_SECRETS repository
+# secret and publishes the GitHub release that the apps' updaters read.
+name: Build and release
+
+on:
+  push:
+    branches: [main, 'claude/**']
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+env:
+  RELEASE: ${{ startsWith(github.ref, 'refs/tags/v') }}
+
+jobs:
+  android:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    env:
+      ANDROID_NDK_VERSION: 28.2.13676358
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          check-latest: true
+          cache: false
+      - name: Android SDK packages
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-36" "build-tools;36.0.0" "ndk;$ANDROID_NDK_VERSION" > /dev/null
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION" >> "$GITHUB_ENV"
+      - name: TrustTunnel native library
+        shell: pwsh
+        run: ./android/trusttunnel/build.ps1
+      - name: sing-box library
+        shell: pwsh
+        run: ./android/build-core.ps1
+      - name: Signing key
+        if: env.RELEASE == 'true'
+        env:
+          SECRETS: ${{ secrets.BEBEKON_RELEASE_SECRETS }}
+        run: |
+          test -n "$SECRETS" || { echo "::error::Add the BEBEKON_RELEASE_SECRETS repository secret"; exit 1; }
+          keystore="$RUNNER_TEMP/bebekon.keystore"
+          echo "$SECRETS" | base64 -d | jq -r .androidKeystoreBase64 | base64 -d > "$keystore"
+          password=$(echo "$SECRETS" | base64 -d | jq -r .androidPassword)
+          echo "::add-mask::$password"
+          echo "BEBEKON_ANDROID_KEYSTORE=$keystore" >> "$GITHUB_ENV"
+          echo "BEBEKON_ANDROID_KEY_PASSWORD=$password" >> "$GITHUB_ENV"
+      - name: Test and build
+        run: ./android/gradlew -p android --no-daemon :app:testDebugUnitTest :app:assembleRelease
+      - name: Collect APK
+        run: |
+          mkdir -p out
+          if [ "$RELEASE" = true ]; then
+            cp android/app/build/outputs/apk/release/app-release.apk out/Bebekon-Android.apk
+            "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs out/Bebekon-Android.apk | grep -i "SHA-256"
+          else
+            cp android/app/build/outputs/apk/release/*.apk out/
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: out/
+          if-no-files-found: error
+
+  windows:
+    runs-on: windows-2025
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          check-latest: true
+          cache: false
+      - name: Update signing key
+        if: env.RELEASE == 'true'
+        shell: pwsh
+        env:
+          SECRETS: ${{ secrets.BEBEKON_RELEASE_SECRETS }}
+        run: |
+          if (-not $env:SECRETS) { throw 'Add the BEBEKON_RELEASE_SECRETS repository secret' }
+          $key = ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:SECRETS)) | ConvertFrom-Json).updateKeyXml
+          Write-Host "::add-mask::$key"
+          "BEBEKON_RELEASE_KEY_XML=$key" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Build, test and package
+        shell: pwsh
+        run: |
+          $notes = 'Стабильная работа на мобильном интернете и раздаче, точные пинги, страны серверов, запуск с Windows и правила сайтов в браузерах.'
+          if ($env:RELEASE -eq 'true') { ./build.ps1 -PublishFolder artifacts/release-updates -ReleaseNotes $notes }
+          else { ./build.ps1 -PublishFolder artifacts/release-updates -ReleaseNotes $notes -SkipUpdateSigning }
+      - name: Core sources
+        if: env.RELEASE == 'true'
+        shell: pwsh
+        run: |
+          $version = (Get-Content core/trusttunnel-version.json -Raw | ConvertFrom-Json).version
+          git clone --depth 1 --branch "v$version" https://github.com/TrustTunnel/TrustTunnelClient.git .tools/trusttunnel/source
+          ./scripts/package-core-sources.ps1 -SingBoxSource .tools/security/source-sing-box -XraySource .tools/security/source-xray -TrustTunnelSource .tools/trusttunnel/source
+      - name: Collect packages
+        shell: pwsh
+        run: |
+          $version = ([xml](Get-Content Directory.Build.props -Raw)).Project.PropertyGroup.Version
+          New-Item -ItemType Directory out | Out-Null
+          Copy-Item "dist/BebekonVPN-$version-Setup-x64.exe", dist/BebekonVPN-Portable-x64.zip out/
+          foreach ($optional in 'dist/update.json', 'dist/Bebekon-Core-Sources.zip') { if (Test-Path $optional) { Copy-Item $optional out/ } }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: out/
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [android, windows]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          windows=$(grep -oP '(?<=<Version>)[^<]+' Directory.Build.props)
+          android=$(grep -oP '(?<=versionName = ")[^"]+' android/app/build.gradle.kts)
+          test "$TAG" = "v$windows" || { echo "::error::Tag $TAG does not match Windows version $windows"; exit 1; }
+          cd assets
+          sha256sum "BebekonVPN-$windows-Setup-x64.exe" BebekonVPN-Portable-x64.zip update.json Bebekon-Core-Sources.zip > SHA256SUMS.txt
+          sha256sum Bebekon-Android.apk > ANDROID-SHA256SUMS.txt
+          notes="../docs/releases/$TAG.md"; test -f "$notes" || notes=/dev/null
+          gh release create "$TAG" ./* --repo "$GITHUB_REPOSITORY" --title "Bebekon VPN · Windows $windows и Android $android" --notes-file "$notes" --latest
