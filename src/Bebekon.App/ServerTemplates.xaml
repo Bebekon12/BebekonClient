@@ -3,7 +3,7 @@
   <DataTemplate x:Key="ServerCard">
    <Border x:Name="ServerSurface" BorderBrush="{DynamicResource Border}" BorderThickness="1" CornerRadius="11" MinHeight="62"><Border.Style><Style TargetType="Border"><Setter Property="Background" Value="{DynamicResource Card}"/><Style.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter Property="Background" Value="{DynamicResource CardHover}"/></Trigger></Style.Triggers></Style></Border.Style><Grid>
     <Button Command="{Binding DataContext.SelectServer, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" Style="{StaticResource DockButton}" Padding="16,11" Background="Transparent"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="30"/><ColumnDefinition/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="154"/></Grid.ColumnDefinitions>
-     <local:FlagView Country="{Binding Name}" Width="30" Height="22" VerticalAlignment="Center"/>
+     <local:FlagView Country="{Binding CountryCode}" Width="30" Height="22" VerticalAlignment="Center"/>
      <StackPanel Grid.Column="1" Margin="12,0,12,0" VerticalAlignment="Center"><TextBlock Text="{Binding DisplayName}" FontSize="14" TextTrimming="CharacterEllipsis" FontWeight="SemiBold"/><TextBlock x:Name="ProtocolLabel" Text="{Binding ConnectionLabel}" FontSize="11" Foreground="{DynamicResource Muted}" Margin="0,4,0,0" TextTrimming="CharacterEllipsis"/></StackPanel>
      <TextBlock Grid.Column="2" Text="{Binding Protocol}" FontSize="11" Foreground="{DynamicResource Muted}" Width="132" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Visibility="{Binding DataContext.ListMode, RelativeSource={RelativeSource AncestorType=UserControl}, Converter={StaticResource BoolVisibility}}"/>
     </Grid></Button>

@@ -55,7 +55,9 @@ class RoutingPolicyTest {
         assertEquals(p, Preferences.fromJson(p.toJson()))
         val c = JSONObject(CoreConfig.build(state(emptyList()).copy(preferences = p), { error("No geo") }))
         assertEquals(1280, c.getJSONArray("inbounds").getJSONObject(0).getInt("mtu"))
-        assertEquals("8.8.8.8", c.getJSONObject("dns").getJSONArray("servers").getJSONObject(0).getString("server"))
+        val servers = c.getJSONObject("dns").getJSONArray("servers").objects()
+        assertEquals("8.8.8.8", servers.first { it.getString("tag") == "vpn-dns" }.getString("server"))
+        assertEquals("Direct DNS follows the physical network", "local", servers.first { it.getString("tag") == "direct-dns" }.getString("type"))
         assertFalse(c.getJSONObject("log").getBoolean("disabled"))
     }
     @Test fun ipv4CompatibilityDefaultMigratesOldSettingsAndMatchesTunnelDns() {

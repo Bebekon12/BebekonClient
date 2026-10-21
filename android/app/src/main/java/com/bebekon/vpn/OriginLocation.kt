@@ -47,7 +47,7 @@ class OriginLocation(context: Context, private val scope: CoroutineScope) {
     fun enabled(value: Boolean) { enabled = value; if (!value) { job?.cancel(); destinationJob?.cancel(); network = null; checked = 0; attempted = 0; point.value = null; destination.value = null; countries.value = emptyMap(); destinationKey = "" } else refresh() }
     fun refresh() {
         if (!enabled) return
-        val physical = connectivity.allNetworks.firstOrNull { connectivity.getNetworkCapabilities(it)?.let { c -> c.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN) && c.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) && c.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) } == true }
+        val physical = PhysicalNetwork.current(connectivity)
         if (physical == null) { job?.cancel(); network = null; point.value = null; return }
         if (physical == network && (job?.isActive == true || System.currentTimeMillis() - checked < 30 * 60_000 || System.currentTimeMillis() - attempted < 30_000)) return
         job?.cancel(); if (network != physical) point.value = null
@@ -63,7 +63,7 @@ class OriginLocation(context: Context, private val scope: CoroutineScope) {
         val key = "$serverId/$ip"
         if (key == destinationKey && (destination.value != null || destinationJob?.isActive == true || System.currentTimeMillis() - destinationAttempted < 30_000)) return
         destinationJob?.cancel(); destination.value = null; destinationKey = key; destinationAttempted = System.currentTimeMillis()
-        val physical = connectivity.allNetworks.firstOrNull { connectivity.getNetworkCapabilities(it)?.let { c -> c.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN) && c.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) } == true } ?: return
+        val physical = PhysicalNetwork.current(connectivity) ?: return
         destinationJob = scope.launch {
             val result = withContext(Dispatchers.IO) { lookup(physical, ip, currentCoroutineContext()) }; ensureActive()
             if (enabled && destinationKey == key) {

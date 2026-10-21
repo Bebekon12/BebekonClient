@@ -272,6 +272,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
         var request = ++latencyRequest;
         latestLatencyRequests[node.Id] = request;
         var identity = ServerRefresh.ConnectionKey(node);
+        latency.DetectCountries = MapLocationEnabled;
         bool Current() => generation == latencyGeneration && latestLatencyRequests.GetValueOrDefault(node.Id) == request && (Data.Servers.Contains(node) || ReferenceEquals(SelectedServer, node)) && identity == ServerRefresh.ConnectionKey(node);
         var result = await (testLatency ?? latency.MeasureAsync)(node, mode, force, token, () => { if (Current() && node.LatencyMs is null) node.Latency = T("Проверка…", "Checking…"); });
         token.ThrowIfCancellationRequested();
@@ -282,6 +283,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
             : result.TimedOut ? T("Таймаут", "Timeout") : T("Недоступен", "Unavailable");
         node.MeasuredMode = result.Mode;
         node.LatencyMs = result.Milliseconds ?? (supported ? -1 : null);
+        if (result.Country is { } country && node.CountryCode.Length == 0) { node.DetectedCountry = country; Save(); if (ReferenceEquals(node, SelectedServer)) Notify(nameof(SelectedCountry)); }
         QueuePingSort();
     }
     private async void QueuePingSort()
@@ -411,8 +413,19 @@ public sealed partial class MainViewModel : Observable, IDisposable
     private async Task ProbeConnectionAsync(ConnectSpec current, CancellationToken token)
     {
         if (testProbe is not null) { await testProbe(current, token); return; }
-        using var http = LatencyService.ProbeClient(current);
-        using var response = await http.GetAsync("https://www.gstatic.com/generate_204", token); response.EnsureSuccessStatusCode();
+        // A cold first request over a phone hotspot or mobile link can need several round trips.
+        // One slow endpoint must not tear down a working tunnel, so allow time and a second target.
+        Exception? failure = null;
+        foreach (var target in new[] { "https://www.gstatic.com/generate_204", "https://cp.cloudflare.com/generate_204" })
+        {
+            try
+            {
+                using var http = LatencyService.ProbeClient(current); http.Timeout = TimeSpan.FromSeconds(10);
+                using var response = await http.GetAsync(target, token); response.EnsureSuccessStatusCode(); return;
+            }
+            catch (Exception e) when ((e is HttpRequestException or TaskCanceledException) && !token.IsCancellationRequested) { failure = e; }
+        }
+        throw failure!;
     }
     private async Task UpdateIpAsync(ConnectSpec current, int generation, CancellationToken token)
     {

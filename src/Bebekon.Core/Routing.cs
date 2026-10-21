@@ -73,7 +73,9 @@ public static class ConfigGenerator
         RuleValidation.Validate(spec.Profile);
         var vpn = Vpn(s, "vpn", runtime, trustTunnel);
         var outbounds = new JsonArray { vpn, new JsonObject { ["type"] = "direct", ["tag"] = "direct", ["domain_resolver"] = "direct-dns" } };
-        var dnsServers = new JsonArray { Dns("direct-dns", "direct"), Dns("vpn-dns", "vpn") };
+        // Direct DNS uses the uplink's own resolver (router / phone hotspot / ISP). Public DoH is
+        // throttled on many mobile networks and delayed even the VPN server's address lookup.
+        var dnsServers = new JsonArray { new JsonObject { ["type"] = "local", ["tag"] = "direct-dns" }, Dns("vpn-dns", "vpn") };
         var serverTags = new Dictionary<string, string> { [s.Id] = "vpn" };
         if (!probeOnly)
         {

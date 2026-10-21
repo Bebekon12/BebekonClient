@@ -8,6 +8,7 @@ import android.net.VpnService
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.service.quicksettings.TileService
 import io.nekohasekai.libbox.*
 import kotlinx.coroutines.*
@@ -15,7 +16,11 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.io.File
 import java.util.UUID
+import java.util.concurrent.Callable
+import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicLong
 
 object VpnController {
@@ -44,7 +49,17 @@ object NativeCore {
         Libbox.setup(SetupOptions().apply { basePath = dir.path; workingPath = dir.path; tempPath = temp.path; fixAndroidStack = true; commandServerSecret = UUID.randomUUID().toString(); logMaxLines = 50; appVersion = BuildConfig.VERSION_NAME; appMarketingVersion = BuildConfig.VERSION_NAME; oomKillerDisabled = true })
         ready = true
     }
-    fun probe(context: Context, state: SavedState, method: String, url: String = state.preferences.pingTarget.url): BebekonProbeResult {
+    private val watchdog = Executors.newCachedThreadPool { task -> Thread(task, "BebekonProbe").apply { isDaemon = true } }
+    /** Native checks cannot be interrupted; callers stop waiting, so a stuck check never freezes pings or connecting. */
+    fun <T> bounded(millis: Long, block: () -> T): T {
+        val task = watchdog.submit(Callable(block))
+        return try { task.get(millis, TimeUnit.MILLISECONDS) }
+        catch (e: ExecutionException) { throw e.cause ?: e }
+        catch (_: TimeoutException) { task.cancel(true); error("Таймаут") }
+    }
+    fun probe(context: Context, state: SavedState, method: String, url: String = state.preferences.pingTarget.url): BebekonProbeResult =
+        bounded(9000) { probeNow(context, state, method, url) }
+    private fun probeNow(context: Context, state: SavedState, method: String, url: String): BebekonProbeResult {
         val started = android.os.SystemClock.elapsedRealtime()
         setup(context)
         val platform = AndroidPlatform(context)
@@ -73,7 +88,19 @@ class BebekonVpnService : VpnService(), CommandServerHandler {
     private var downTotal = TrafficTotals()
     private var upTotal = TrafficTotals()
     @Volatile private var desired = false
-    override fun onCreate() { super.onCreate(); getSystemService(NotificationManager::class.java).createNotificationChannel(NotificationChannel("vpn", "Подключение VPN", NotificationManager.IMPORTANCE_LOW).apply { setShowBadge(false) }) }
+    // Same as sing-box's own resume handling on desktop: connections kept through Doze often have
+    // expired NAT or server state, so wake the core and reset them instead of letting apps hang.
+    private val idle = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            val sleeping = getSystemService(PowerManager::class.java).isDeviceIdleMode
+            scope.launch { server?.let { if (sleeping) it.pause() else { it.wake(); it.resetNetwork() } } }
+        }
+    }
+    override fun onCreate() {
+        super.onCreate(); getSystemService(NotificationManager::class.java).createNotificationChannel(NotificationChannel("vpn", "Подключение VPN", NotificationManager.IMPORTANCE_LOW).apply { setShowBadge(false) })
+        val filter = IntentFilter(PowerManager.ACTION_DEVICE_IDLE_MODE_CHANGED)
+        if (Build.VERSION.SDK_INT >= 33) registerReceiver(idle, filter, RECEIVER_NOT_EXPORTED) else registerReceiver(idle, filter)
+    }
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             "STOP" -> {
@@ -185,7 +212,7 @@ class BebekonVpnService : VpnService(), CommandServerHandler {
         if (Build.VERSION.SDK_INT >= 34) startForeground(1, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE) else startForeground(1, notification)
     }
     override fun onRevoke() { desired = false; generation.incrementAndGet(); scope.launch { closeCore(); VpnController.publish(this@BebekonVpnService) { Session() }; withContext(Dispatchers.Main) { stopForeground(STOP_FOREGROUND_REMOVE); stopSelf() } }; super.onRevoke() }
-    override fun onDestroy() { desired = false; generation.incrementAndGet(); scope.launch { closeCore(); scope.cancel(); dispatcher.close() }; super.onDestroy() }
+    override fun onDestroy() { runCatching { unregisterReceiver(idle) }; desired = false; generation.incrementAndGet(); scope.launch { closeCore(); scope.cancel(); dispatcher.close() }; super.onDestroy() }
     override fun serviceStop() { Handler(Looper.getMainLooper()).post { VpnController.stop(this) } }
     override fun serviceReload() { Handler(Looper.getMainLooper()).post { VpnController.reload(this) } }
     override fun getSystemProxyStatus() = SystemProxyStatus()

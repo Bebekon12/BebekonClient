@@ -7,13 +7,19 @@ using System.Security.Cryptography;
 
 namespace Bebekon.Core;
 
-public sealed record LatencyResult(long? Milliseconds, LatencyMode Mode, DateTimeOffset MeasuredAt, bool TimedOut = false);
+public sealed record LatencyResult(long? Milliseconds, LatencyMode Mode, DateTimeOffset MeasuredAt, bool TimedOut = false, string? Country = null);
 public sealed class LatencyService(string executable)
 {
     private readonly ConcurrentDictionary<string, LatencyResult> cache = new();
     private readonly SemaphoreSlim fastLimit = new(6);
     private readonly SemaphoreSlim exactLimit = new(6);
     public static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(5);
+    // Process launch, config check and antivirus scans are not network latency. They get their
+    // own budget, so several parallel checks no longer report a reachable server as a timeout.
+    public static readonly TimeSpan StartupTimeout = TimeSpan.FromSeconds(15);
+    private readonly LocationLookup locations = new();
+    /// <summary>After an HTTPS check, ask a location service through the server for nameless nodes.</summary>
+    public bool DetectCountries { get; set; }
     public async Task<LatencyResult> MeasureAsync(Server server, LatencyMode mode, bool force, CancellationToken ct, Action? started = null)
     {
         ct.ThrowIfCancellationRequested();
@@ -26,9 +32,10 @@ public sealed class LatencyService(string executable)
         {
             started?.Invoke();
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            deadline.CancelAfter(ProbeTimeout);
+            if (mode is LatencyMode.Tcp or LatencyMode.Icmp) deadline.CancelAfter(ProbeTimeout);
             var probeToken = deadline.Token;
             long? ms = null;
+            string? country = null;
             var probeTimedOut = false;
             try
             {
@@ -53,11 +60,11 @@ public sealed class LatencyService(string executable)
                         if (times.Count == 3) { times.Sort(); ms = times[1]; }
                     }
                 }
-                else if (server.Supported) ms = await ExactAsync(server, mode == LatencyMode.HttpsHead ? HttpMethod.Head : HttpMethod.Get, probeToken);
+                else if (server.Supported) (ms, probeTimedOut, country) = await ExactAsync(server, mode == LatencyMode.HttpsHead ? HttpMethod.Head : HttpMethod.Get, probeToken);
             }
             catch (Exception e) when (e is SocketException or PingException or HttpRequestException or OperationCanceledException or UserError or IOException) { ct.ThrowIfCancellationRequested(); }
             ct.ThrowIfCancellationRequested();
-            var result = new LatencyResult(ms, mode, DateTimeOffset.UtcNow, deadline.IsCancellationRequested || probeTimedOut); cache[key] = result; return result;
+            var result = new LatencyResult(ms, mode, DateTimeOffset.UtcNow, deadline.IsCancellationRequested || probeTimedOut, country); cache[key] = result; return result;
         }
         finally { limit.Release(); }
     }
@@ -72,8 +79,9 @@ public sealed class LatencyService(string executable)
         }
         throw new UserError("Не удалось найти свободный локальный порт VPN.");
     }
-    private async Task<long?> ExactAsync(Server server, HttpMethod method, CancellationToken ct)
+    private async Task<(long? Milliseconds, bool TimedOut, string? Country)> ExactAsync(Server server, HttpMethod method, CancellationToken ct)
     {
+        var detect = DetectCountries && CountryInfo.Resolve(server.Name) is null && server.DetectedCountry.Length == 0;
         var root = Path.Combine(Paths.UserRoot, "runtime", "probe-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(root);
         var spec = new ConnectSpec(server, new(), new(), FreePort(), Convert.ToHexString(RandomNumberGenerator.GetBytes(24)));
         try
@@ -81,9 +89,26 @@ public sealed class LatencyService(string executable)
             // Startup and child-process shutdown can wait on the OS. Keep both off the
             // WPF dispatcher so completed results, map motion and Cancel remain responsive.
             return await Task.Run(async () => {
-                using var core = new CoreSession(executable, new(Paths.Logs, "core")); await core.StartAsync(spec, root, true, ct).ConfigureAwait(false);
+                using var core = new CoreSession(executable, new(Paths.Logs, "core"));
+                using (var startup = CancellationTokenSource.CreateLinkedTokenSource(ct)) { startup.CancelAfter(StartupTimeout); await core.StartAsync(spec, root, true, startup.Token).ConfigureAwait(false); }
                 using var http = ProbeClient(spec); http.Timeout = Timeout.InfiniteTimeSpan;
-                return await MeasureHttpAsync(http, method, ct).ConfigureAwait(false);
+                long ms;
+                using (var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct))
+                {
+                    deadline.CancelAfter(ProbeTimeout);
+                    try { ms = await MeasureHttpAsync(http, method, deadline.Token).ConfigureAwait(false); }
+                    catch (OperationCanceledException) when (!ct.IsCancellationRequested) { return ((long?)null, true, (string?)null); }
+                }
+                string? country = null;
+                if (detect)
+                {
+                    // The service sees the VPN exit address, never the user's own IP.
+                    using var lookup = CancellationTokenSource.CreateLinkedTokenSource(ct); lookup.CancelAfter(TimeSpan.FromSeconds(12));
+                    try { country = (await locations.LookupAsync(http, null, lookup.Token).ConfigureAwait(false))?.Country; }
+                    catch (OperationCanceledException) when (!ct.IsCancellationRequested) { }
+                    if (string.IsNullOrEmpty(country)) country = null;
+                }
+                return ((long?)ms, false, country);
             }, ct).ConfigureAwait(false);
         }
         finally { Directory.Delete(root, true); }

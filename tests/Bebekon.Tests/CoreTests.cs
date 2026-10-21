@@ -23,6 +23,20 @@ public class CoreTests
     [Fact] public void UnknownFormatFails() => Assert.Throws<UserError>(() => VlessParser.ParseSubscription("{\"proxies\":[]}"));
     [Fact] public void MalformedLineIsNotSilentlyDropped() => Assert.Throws<UserError>(() => VlessParser.ParseSubscription($"vless://{Id}@a.example.com:443\nss://unsupported"));
     [Fact] public void SelectiveDefaultsDirect() { var c = JsonNode.Parse(ConfigGenerator.Generate(Spec()))!; Assert.Equal("direct", (string?)c["route"]!["final"]); Assert.Equal("direct-dns", (string?)c["dns"]!["final"]); Assert.True((bool)c["route"]!["auto_detect_interface"]!); }
+    [Fact] public void DirectDnsUsesUplinkResolverAndVpnDnsStaysInTunnel()
+    {
+        var servers = JsonNode.Parse(ConfigGenerator.Generate(Spec()))!["dns"]!["servers"]!.AsArray();
+        Assert.Equal("local", (string?)servers.Single(s => (string?)s!["tag"] == "direct-dns")!["type"]);
+        var vpn = servers.Single(s => (string?)s!["tag"] == "vpn-dns")!; Assert.Equal("https", (string?)vpn["type"]); Assert.Equal("vpn", (string?)vpn["detour"]);
+    }
+    [Fact] public void DetectedCountryOnlyFillsNamelessServers()
+    {
+        var named = Node(); named.DetectedCountry = "DE"; Assert.Equal("EE", named.CountryCode);
+        var nameless = Node(); nameless.Name = "Server 7"; Assert.Equal("", nameless.CountryCode);
+        nameless.DetectedCountry = "nl"; Assert.Equal("", nameless.CountryCode);
+        nameless.DetectedCountry = "NL"; Assert.Equal("NL", nameless.CountryCode);
+        Assert.Equal("NL", JsonSerializer.Deserialize<Server>(JsonSerializer.Serialize(nameless, Json.Options), Json.Options)!.CountryCode);
+    }
     [Fact] public void EntirePcDefaultsVpn() { var c = JsonNode.Parse(ConfigGenerator.Generate(Spec(new() { DefaultRoute = RouteTarget.Vpn })))!; Assert.Equal("vpn", (string?)c["route"]!["final"]); Assert.Equal("vpn-dns", (string?)c["dns"]!["final"]); }
     [Fact] public void RoutingPriorityPreservesOrderedProcessException()
     {

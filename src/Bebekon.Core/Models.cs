@@ -84,6 +84,10 @@ public sealed class Server : Observable
     [JsonIgnore] public string SubscriptionLabel { get => subscriptionLabel; set { if (Set(ref subscriptionLabel, value)) Notify(nameof(ConnectionLabel)); } }
     [JsonIgnore] public string ConnectionLabel => SubscriptionLabel.Length == 0 ? Protocol : Protocol + " · " + SubscriptionLabel;
     [JsonIgnore] public string DisplayName => CountryInfo.DisplayName(Name);
+    private string detectedCountry = "";
+    /// <summary>VPN exit country found through the server itself when its name has none.</summary>
+    public string DetectedCountry { get => detectedCountry; set { if (Set(ref detectedCountry, value.Length == 2 && CountryInfo.Resolve(value) == value ? value : "")) Notify(nameof(CountryCode)); } }
+    [JsonIgnore] public string CountryCode => CountryInfo.Resolve(Name) ?? DetectedCountry;
     private string latency = "—";
     [JsonIgnore] public string Latency { get => latency; set => Set(ref latency, value); }
     private long? latencyMs;

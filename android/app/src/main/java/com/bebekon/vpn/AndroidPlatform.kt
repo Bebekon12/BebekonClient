@@ -2,6 +2,8 @@ package com.bebekon.vpn
 
 import android.content.Context
 import android.net.*
+import android.os.Handler
+import android.os.HandlerThread
 import android.os.ParcelFileDescriptor
 import android.system.OsConstants
 import io.nekohasekai.libbox.*
@@ -26,7 +28,7 @@ class AndroidPlatform(private val context: Context, private val vpn: BebekonVpnS
     private val connectivity = context.getSystemService(ConnectivityManager::class.java)
     private val monitors = ConcurrentHashMap<InterfaceUpdateListener, ConnectivityManager.NetworkCallback>()
     @Volatile var descriptor: ParcelFileDescriptor? = null
-    override fun localDNSTransport(): LocalDNSTransport? = null
+    override fun localDNSTransport(): LocalDNSTransport = SystemDns(connectivity)
     override fun usePlatformAutoDetectInterfaceControl() = true
     override fun autoDetectInterfaceControl(fd: Int) { if (vpn != null && !vpn.protect(fd)) error("Не удалось исключить сокет VPN из туннеля") }
     override fun openTun(options: TunOptions): Int {
@@ -64,22 +66,38 @@ class AndroidPlatform(private val context: Context, private val vpn: BebekonVpnS
         val uid = connectivity.getConnectionOwnerUid(ipProtocol, InetSocketAddress(sourceAddress, sourcePort), InetSocketAddress(destinationAddress, destinationPort))
         return ConnectionOwner().apply { userId = uid; setAndroidPackageNames(Strings(context.packageManager.getPackagesForUid(uid)?.toList() ?: emptyList())) }
     }
-    private fun update(listener: InterfaceUpdateListener) {
-        val network = connectivity.allNetworks.firstOrNull { connectivity.getNetworkCapabilities(it)?.let { c -> c.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) && c.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN) && c.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) } == true }
-        val link = network?.let(connectivity::getLinkProperties); val name = link?.interfaceName ?: ""; val index = runCatching { JavaInterface.getByName(name)?.index ?: -1 }.getOrDefault(-1)
-        listener.updateDefaultInterface(name, index, network?.let { connectivity.isActiveNetworkMetered } ?: false, false)
-        vpn?.setUnderlyingNetworks(network?.let { arrayOf(it) })
+    private val monitorLoop = lazy { HandlerThread("BebekonNetwork").apply { start() } }
+    private val monitorThread by monitorLoop
+    private var underlying: Network? = null
+    private var reported = ""
+    /** Reports Android's own default physical network; a real change makes sing-box drop stale connections. */
+    @Synchronized private fun update(listener: InterfaceUpdateListener, preferred: Network?) {
+        val network = preferred?.takeIf { PhysicalNetwork.usable(connectivity, it) } ?: PhysicalNetwork.current(connectivity)
+        val link = network?.let(connectivity::getLinkProperties); val name = link?.interfaceName
+        var index = -1
+        // A new interface can appear in LinkProperties shortly before the kernel reports it.
+        if (name != null) for (attempt in 0 until 10) { index = runCatching { JavaInterface.getByName(name)?.index }.getOrNull() ?: -1; if (index >= 0 || monitors.isEmpty()) break; Thread.sleep(100) }
+        val metered = network?.let(connectivity::getNetworkCapabilities)?.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) == false
+        val key = if (index < 0) "none" else "$name/$index/$metered/${link?.linkAddresses?.joinToString()}"
+        if (key != reported) {
+            reported = key
+            if (index < 0) listener.updateDefaultInterface("", -1, false, false) else listener.updateDefaultInterface(name, index, metered, false)
+        }
+        val current = network.takeIf { index >= 0 }
+        if (vpn != null && current != underlying) { underlying = current; vpn.setUnderlyingNetworks(current?.let { arrayOf(it) }) }
     }
     override fun startDefaultInterfaceMonitor(listener: InterfaceUpdateListener) {
         val callback = object : ConnectivityManager.NetworkCallback() {
-            override fun onAvailable(network: Network) { update(listener) }
-            override fun onLost(network: Network) { update(listener) }
-            override fun onLinkPropertiesChanged(network: Network, linkProperties: LinkProperties) { update(listener) }
-            override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) { update(listener) }
+            @Volatile private var chosen: Network? = null
+            override fun onAvailable(network: Network) { chosen = network; update(listener, network) }
+            override fun onLost(network: Network) { if (chosen == network) chosen = null; update(listener, chosen) }
+            override fun onLinkPropertiesChanged(network: Network, linkProperties: LinkProperties) { if (chosen == null || chosen == network) update(listener, network) }
+            override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) { if (chosen == null || chosen == network) update(listener, network) }
         }
         monitors[listener] = callback
-        connectivity.registerNetworkCallback(NetworkRequest.Builder().addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET).addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN).build(), callback)
-        update(listener)
+        synchronized(this) { reported = "" }
+        PhysicalNetwork.listen(connectivity, callback, Handler(monitorThread.looper))
+        update(listener, null)
     }
     override fun closeDefaultInterfaceMonitor(listener: InterfaceUpdateListener) { monitors.remove(listener)?.let { runCatching { connectivity.unregisterNetworkCallback(it) } } }
     override fun getInterfaces(): NetworkInterfaceIterator {
@@ -116,5 +134,5 @@ class AndroidPlatform(private val context: Context, private val vpn: BebekonVpnS
     override fun tailscaleHostname() = "BebekonAndroid"
     override fun usePlatformBridge() = false
     override fun createBridge(options: BridgeOptions?): BridgeSession { error("Bridge недоступен") }
-    fun close() { monitors.keys.toList().forEach(::closeDefaultInterfaceMonitor); descriptor?.close(); descriptor = null }
+    fun close() { monitors.keys.toList().forEach(::closeDefaultInterfaceMonitor); descriptor?.close(); descriptor = null; if (monitorLoop.isInitialized()) monitorThread.quitSafely() }
 }

@@ -11,12 +11,16 @@ object CoreConfig {
         if (node.config.optString("type") == "trusttunnel") { TrustTunnelProfile.validate(node); require(vpnOverride != null) { "Запустите модуль TrustTunnel" } }
         val vpn = (vpnOverride ?: node.config).also { config -> val reason = ConnectionSafety.reason(config); require(reason.isEmpty()) { reason }; config.put("tag", "vpn"); config.put("domain_resolver", json("server" to "direct-dns", "strategy" to "prefer_ipv4")); config.put("connect_timeout", "4s") }
         val rules = mutableListOf<JSONObject>()
-        rules += json("action" to "sniff", "timeout" to "300ms")
-        rules += json("protocol" to "dns", "action" to "hijack-dns")
-        if (state.preferences.allowLan) rules += json("ip_is_private" to true, "outbound" to "direct")
         val dnsRules = mutableListOf<JSONObject>()
         val sets = mutableMapOf<String, JSONObject>()
-        if (state.preferences.routing == RoutingMode.RULES) {
+        // A probe dials the VPN outbound directly; routing rules and geo sets would only
+        // slow its start inside the measured timeout.
+        if (tunnel) {
+            rules += json("action" to "sniff", "timeout" to "300ms")
+            rules += json("protocol" to "dns", "action" to "hijack-dns")
+            if (state.preferences.allowLan) rules += json("ip_is_private" to true, "outbound" to "direct")
+        }
+        if (tunnel && state.preferences.routing == RoutingMode.RULES) {
             // Last authored exception wins. UI and execution share this precedence.
             for (rule in state.rules.sortedByDescending { it.created }) {
                 validateRule(rule)
@@ -30,7 +34,7 @@ object CoreConfig {
         // A WebAPK shares the browser's UID. Including its browser in Android's allowlist
         // must not turn an unselected browser into a whole-app VPN rule. Authored site rules
         // above still win, then unrelated traffic from that browser goes directly.
-        if (policy.siteOnlyBrowsers.isNotEmpty()) {
+        if (tunnel && policy.siteOnlyBrowsers.isNotEmpty()) {
             rules += json("package_name" to array(policy.siteOnlyBrowsers), "outbound" to "direct")
             dnsRules += json("package_name" to array(policy.siteOnlyBrowsers), "server" to "direct-dns")
         }
@@ -40,7 +44,8 @@ object CoreConfig {
         val route = json("rules" to array(rules), "final" to if (defaultVpn) "vpn" else "direct", "auto_detect_interface" to true, "default_domain_resolver" to "direct-dns", "rule_set" to array(sets.values))
         val resolver = state.preferences.dnsResolver
         val dns = json("servers" to array(listOf(
-            json("type" to "https", "tag" to "direct-dns", "server" to resolver.address, "server_port" to 443, "path" to "/dns-query", "tls" to json("enabled" to true, "server_name" to resolver.hostname)),
+            // The physical network's resolver (see SystemDns): public DoH is throttled on many mobile networks.
+            json("type" to "local", "tag" to "direct-dns"),
             json("type" to "https", "tag" to "vpn-dns", "server" to resolver.address, "server_port" to 443, "path" to "/dns-query", "tls" to json("enabled" to true, "server_name" to resolver.hostname), "detour" to "vpn")
         )), "rules" to array(dnsRules), "final" to if (defaultVpn) "vpn-dns" else "direct-dns", "strategy" to if (state.preferences.ipv6) "prefer_ipv4" else "ipv4_only", "reverse_mapping" to true)
         val log = json("disabled" to !(state.preferences.routingDiagnostics || BuildConfig.DEBUG && node.host == "10.0.2.2"), "level" to "debug")

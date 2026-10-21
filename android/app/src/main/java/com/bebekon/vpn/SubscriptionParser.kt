@@ -179,9 +179,39 @@ object SubscriptionParser {
         is String -> JSONObject.quote(value)
         else -> value.toString()
     }
+    // Ordered: more specific stems first (Австралия before Австрия, Индонезия before Индия).
+    // Stems match at a word start, so Russian case endings and city names are recognised.
+    private val countryWords = listOf(
+        "SE" to "швец|sweden|stockholm|стокгольм", "LV" to "латв|latvia|riga|рига", "LT" to "литв|lithuan|vilnius|вильнюс", "EE" to "эстон|estonia|tallinn|таллин",
+        "NL" to "нидерланд|голланд|netherland|holland|amsterdam|амстердам", "DE" to "герман|germany|frankfurt|франкфурт|berlin|берлин|munich|мюнхен|nuremberg|нюрнберг|falkenstein",
+        "FI" to "финлян|finland|helsinki|хельсинки", "FR" to "франц|france|paris|париж", "US" to "сша|usa|united states|америк|america|new york|нью-йорк|los angeles|chicago|dallas|miami|seattle",
+        "GB" to "британ|англи|united kingdom|england|london|лондон", "RU" to "росси|russia|moscow|москв|petersburg|петербург", "PL" to "польш|poland|warsaw|варшав",
+        "TR" to "турци|turkey|türkiye|istanbul|стамбул", "CH" to "швейцар|switzerland|zurich|цюрих", "JP" to "япони|japan|tokyo|токио", "SG" to "сингапур|singapore",
+        "CA" to "канад|canada|toronto|торонто", "HU" to "венгр|hungary|budapest|будапешт", "BG" to "болгар|bulgaria|sofia|софия", "CZ" to "чехи|czech|prague|прага",
+        "NO" to "норвег|norway|oslo|осло", "AU" to "австрал|australia|sydney|сидней", "AT" to "австри|austria|vienna|вена", "RO" to "румын|romania|bucharest|бухарест",
+        "KZ" to "казах|kazakh|almaty|алматы|astana|астана", "BR" to "бразил|brazil", "AE" to "оаэ|uae|emirates|эмират|dubai|дубай", "HK" to "гонконг|hong kong|hongkong",
+        "IT" to "итали|italy|milan|милан|rome|рим", "ES" to "испани|spain|madrid|мадрид", "KR" to "корея|south korea|korea|seoul|сеул", "ID" to "индонез|indonesia|jakarta|джакарт",
+        "IN" to "индия|india|mumbai|мумбаи", "AM" to "армени|armenia|yerevan|ереван", "GE" to "грузи|tbilisi|тбилиси", "MD" to "молдов|moldova|chisinau|кишин",
+        "UA" to "украин|ukrain|kyiv|киев", "BY" to "белорус|беларус|belarus|minsk|минск", "RS" to "серби|serbia|belgrade|белград", "IL" to "израил|israel|tel aviv|тель-авив",
+        "IE" to "ирланд|ireland|dublin|дублин", "PT" to "португал|portugal|lisbon|лиссабон", "GR" to "греци|greece|athens|афин", "DK" to "дания|denmark|copenhagen|копенгаген",
+        "BE" to "бельги|belgium|brussels|брюссел", "LU" to "люксембург|luxembourg", "IS" to "исланд|iceland|reykjavik", "CY" to "кипр|cyprus", "SK" to "словак|slovakia|bratislava",
+        "SI" to "словени|slovenia|ljubljana", "HR" to "хорват|croatia|zagreb", "AR" to "аргентин|argentina", "MX" to "мексик|mexico", "VN" to "вьетнам|vietnam", "TH" to "таиланд|thailand|bangkok|бангкок",
+        "MY" to "малайз|malaysia", "UZ" to "узбек|uzbek|tashkent|ташкент", "KG" to "киргиз|кыргыз|kyrgyz|bishkek|бишкек", "AZ" to "азербайдж|azerbaijan|baku|баку",
+        "CN" to "китай|china", "TW" to "тайван|taiwan", "ZA" to "юар|south africa", "EG" to "египет|egypt")
+    private val countryPatterns = countryWords.map { (code, words) -> code to Regex("(?iu)(?<![\\p{L}])($words)") }
+    // Uppercase tokens like "DE-1" or "[NL]"; common VPN locations only, so "WS"/"AI"/"TV" in names stay text.
+    private val codeToken = Regex("(?<![A-Za-z])(" + (countryWords.map { it.first } + "UK").joinToString("|") + ")(?![A-Za-z])")
+    private val countryNames by lazy {
+        java.util.Locale.getISOCountries().flatMap { code -> listOf(java.util.Locale.ENGLISH, java.util.Locale("ru")).map { java.util.Locale("", code).getDisplayCountry(it) to code } }
+            .filter { it.first.length >= 4 }.sortedByDescending { it.first.length }
+    }
     fun country(name: String): String {
         val flag = name.codePoints().toArray(); for (i in 0 until flag.size - 1) if (flag[i] in 0x1F1E6..0x1F1FF && flag[i + 1] in 0x1F1E6..0x1F1FF) return "${(flag[i] - 0x1F1E6 + 65).toChar()}${(flag[i + 1] - 0x1F1E6 + 65).toChar()}"
-        val countries = mapOf("SE" to "швец|sweden", "LV" to "латв|latvia", "LT" to "литв|lithuan", "EE" to "эстон|estonia", "NL" to "нидерланд|netherland", "DE" to "герман|germany", "FI" to "финлян|finland", "FR" to "франц|france", "US" to "сша|usa|united states|new york", "GB" to "британ|united kingdom|london", "RU" to "росси|russia", "PL" to "польш|poland", "TR" to "турци|turkey", "CH" to "швейцар|switzerland", "JP" to "япони|japan", "SG" to "сингапур|singapore", "CA" to "канад|canada", "HU" to "венгр|hungary", "BG" to "болгар|bulgaria", "CZ" to "чех|czech", "NO" to "норв|norway", "AT" to "австр|austria", "RO" to "румы|romania", "KZ" to "казах|kazakh", "BR" to "бразил|brazil")
-        return countries.entries.firstOrNull { (code, match) -> Regex("(?i)($match|(?:^|\\s)$code(?:\\s|$))").containsMatchIn(name) }?.key ?: ""
+        countryPatterns.firstOrNull { it.second.containsMatchIn(name) }?.let { return it.first }
+        codeToken.find(name)?.value?.let { return if (it == "UK") "GB" else it }
+        return countryNames.firstOrNull { (label, _) ->
+            val index = name.indexOf(label, ignoreCase = true)
+            index >= 0 && (index == 0 || !name[index - 1].isLetter()) && (index + label.length == name.length || !name[index + label.length].isLetter())
+        }?.second.orEmpty()
     }
 }

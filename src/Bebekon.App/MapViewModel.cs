@@ -18,7 +18,7 @@ public sealed partial class MainViewModel
     private readonly LocationLookup mapLookup = new();
     public GeoPoint? MapDestination => MapLocationEnabled && SelectedServer?.Id == mapEndpointServer ? mapEndpoint?.Point : null;
     public string MapCountry => MapDestination is null ? "" : mapEndpoint?.Country ?? "";
-    public string SelectedCountry => CountryInfo.Resolve(SelectedServer?.Name) ?? MapCountry;
+    public string SelectedCountry => CountryInfo.Resolve(SelectedServer?.Name) ?? (MapCountry.Length > 0 ? MapCountry : SelectedServer?.DetectedCountry ?? "");
     private void ResetMapDestination() { mapEndpoint = null; mapEndpointServer = null; endpointLookupKey = null; Notify(nameof(MapDestination)); Notify(nameof(MapCountry)); Notify(nameof(SelectedCountry)); }
     public bool MapLocationEnabled {
         get => Settings.MapLocation;
@@ -66,6 +66,8 @@ public sealed partial class MainViewModel
                 var result = await mapLookup.LookupAsync(http, ip, lifetime.Token);
                 if (result is not null && MapLocationEnabled && Connected && ReferenceEquals(spec, current) && SelectedServer?.Id == current.Server.Id && System.Net.IPAddress.TryParse(VpnIp, out var actual) && actual.Equals(System.Net.IPAddress.Parse(ip))) {
                     mapEndpoint = result; mapEndpointServer = current.Server.Id; Notify(nameof(MapDestination)); Notify(nameof(MapCountry)); Notify(nameof(SelectedCountry));
+                    // Remember the exit country, so the list flag stays after disconnecting.
+                    if (result.Country.Length > 0 && SelectedServer is { } server && server.CountryCode != result.Country) { server.DetectedCountry = result.Country; Save(); }
                 }
                 return;
             } catch (Exception e) when (e is HttpRequestException or OperationCanceledException or FormatException or System.Text.Json.JsonException or KeyNotFoundException or InvalidOperationException) { }

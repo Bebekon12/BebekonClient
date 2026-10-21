@@ -56,10 +56,15 @@ class TrustTunnelTest {
     }
     @Test fun socksOverrideRetainsRulesAndNeverLeaksNativeCredentials() {
         val node = profile(); val saved = SavedState(subscriptions = listOf(Subscription(name = "Fixture", source = "", nodes = listOf(node))), selected = node.id, preferences = Preferences(routing = RoutingMode.RULES), rules = listOf(Rule(name = "Only this domain", kind = RuleKind.DOMAIN, values = listOf("example.org"))))
-        val config = JSONObject(CoreConfig.build(saved, { JSONObject() }, tunnel = false, vpnOverride = json("type" to "socks", "server" to "127.0.0.1", "server_port" to 12345, "username" to "bebekon", "password" to "local-secret")))
+        val override = { json("type" to "socks", "server" to "127.0.0.1", "server_port" to 12345, "username" to "bebekon", "password" to "local-secret") }
+        val config = JSONObject(CoreConfig.build(saved, { JSONObject() }, vpnOverride = override()))
         assertFalse(config.toString().contains("cert.example")); assertFalse(config.toString().contains("sni.example"))
         assertEquals("socks", config.getJSONArray("outbounds").objects().single { it.optString("tag") == "vpn" }.getString("type"))
         assertTrue(config.getJSONObject("route").getJSONArray("rules").toString().contains("example.org"))
         assertThrows(IllegalArgumentException::class.java) { CoreConfig.build(saved, { JSONObject() }, tunnel = false) }
+        // Probes dial the VPN outbound directly and skip rules and geo sets.
+        val probe = JSONObject(CoreConfig.build(saved, { error("Probe must not load geo sets") }, tunnel = false, vpnOverride = override()))
+        assertEquals(0, probe.getJSONObject("route").getJSONArray("rules").length())
+        assertEquals(0, probe.getJSONArray("inbounds").length())
     }
 }

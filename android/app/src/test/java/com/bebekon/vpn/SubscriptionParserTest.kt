@@ -78,4 +78,17 @@ class SubscriptionParserTest {
     @Test fun dnsMatchesDomainRouting() { val n = SubscriptionParser.link(link); val s = SavedState(subscriptions = listOf(Subscription(name = "P", source = "", nodes = listOf(n))), selected = n.id, preferences = Preferences(routing = RoutingMode.RULES), rules = listOf(Rule(name = "ChatGPT", kind = RuleKind.DOMAIN, values = listOf("chatgpt.com")))); val c = JSONObject(CoreConfig.build(s, { error("Unexpected geo") })); assertEquals("vpn-dns", c.getJSONObject("dns").getJSONArray("rules").getJSONObject(0).getString("server")) }
     @Test(expected = IllegalArgumentException::class) fun websiteValueCannotBeUrl() { CoreConfig.validateRule(Rule(name = "Invalid", kind = RuleKind.DOMAIN, values = listOf("https://example.com/path"))) }
     @Test(expected = IllegalArgumentException::class) fun windowsProcessNotAndroidPackage() { CoreConfig.validateRule(Rule(name = "Telegram", kind = RuleKind.APP, values = listOf("Telegram.exe"))) }
+    @Test fun countryFromNamesWithoutFlags() {
+        mapOf("Amsterdam #3" to "NL", "DE-1 Fast" to "DE", "[FI] Premium" to "FI", "Германия 2" to "DE", "Сервер в Германии" to "DE", "Австралия" to "AU", "Австрия" to "AT",
+            "Индонезия" to "ID", "UK London" to "GB", "Portugal" to "PT", "Kingdom of Spain" to "ES", "Server 1" to "", "Fast WS node" to "", "Индивидуальный" to "", "no limit" to "", "test" to "")
+            .forEach { (name, code) -> assertEquals(name, code, SubscriptionParser.country(name)) }
+    }
+    @Test fun detectedCountriesRoundTripAndRejectInvalidCodes() {
+        val state = SavedState(detectedCountries = mapOf("a" to "NL"))
+        assertEquals(state.detectedCountries, SavedState.fromJson(state.toJson()).detectedCountries)
+        val tampered = state.toJson().put("detectedCountries", JSONObject().put("a", "nl").put("b", "XXX").put("c", "SE"))
+        assertEquals(mapOf("c" to "SE"), SavedState.fromJson(tampered).detectedCountries)
+        assertEquals(emptyMap<String, String>(), SavedState.fromJson(state.toJson().apply { remove("detectedCountries") }).detectedCountries)
+        assertEquals("NL", Node("a", "Server", "{}").displayCountry(state.detectedCountries))
+    }
 }
