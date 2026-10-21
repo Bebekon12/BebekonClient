@@ -499,7 +499,12 @@ public sealed partial class MainViewModel : Observable, IDisposable
         foreach (var name in new[] { nameof(DownloadRate), nameof(UploadRate), nameof(DownloadTotal), nameof(UploadTotal), nameof(DownloadHistory), nameof(UploadHistory) }) Notify(name);
     }
     private void NotifyStatus() { foreach (var n in new[] { nameof(Connected), nameof(ConnectionBusy), nameof(ConnectLabel), nameof(StatusLabel), nameof(StatusDetail), nameof(FooterLabel), nameof(FooterMode), nameof(DownloadRate), nameof(UploadRate) }) Notify(n); StatusChanged?.Invoke(); }
-    public void Report(Exception e) { log.Write("Operation failed: " + e.GetType().Name); Banner = e is UserError ? e.Message : e is OperationCanceledException ? T("Время ожидания истекло.", "Operation timed out.") : T("Не удалось выполнить действие. Проверьте подключение и параметры.", "Action failed. Check your connection and settings."); }
+    public void Report(Exception e) { log.Write("Operation failed: " + e.GetType().Name); Banner = e switch {
+        UserError => e.Message,
+        OperationCanceledException or TimeoutException => T("Сервер не ответил вовремя. Проверьте интернет или выберите другой сервер.", "The server did not respond in time. Check your internet or choose another server."),
+        // The tunnel started, but the HTTPS check through it failed.
+        HttpRequestException => T("Сервер не пропускает трафик. Выберите другой сервер; если не помогает — включите «Совместимость» в настройках.", "The server does not pass traffic. Choose another server; if that does not help, enable Compatibility in settings."),
+        _ => T("Не удалось выполнить действие. Проверьте подключение и параметры.", "Action failed. Check your connection and settings.") }; }
     private void Save() { try { store.Save(Data); } catch (Exception e) { Report(e); } }
     private static void OpenFolder(string dir) { Directory.CreateDirectory(dir); Process.Start(new ProcessStartInfo("explorer.exe") { ArgumentList = { dir }, UseShellExecute = true }); }
     private void OnPower(object sender, PowerModeChangedEventArgs e) { if (e.Mode == PowerModes.Resume) ScheduleNetworkCheck(true); }

@@ -29,6 +29,12 @@ public class CoreTests
         Assert.Equal("local", (string?)servers.Single(s => (string?)s!["tag"] == "direct-dns")!["type"]);
         var vpn = servers.Single(s => (string?)s!["tag"] == "vpn-dns")!; Assert.Equal("https", (string?)vpn["type"]); Assert.Equal("vpn", (string?)vpn["detour"]);
     }
+    [Theory]
+    [InlineData("https://www.youtube.com/watch?v=1", false, "www.youtube.com")] [InlineData("https://www.youtube.com/watch?v=1", true, "youtube.com")]
+    [InlineData("chatgpt.com/c/123", true, "chatgpt.com")] [InlineData("*.example.org", true, "example.org")] [InlineData("http://user@site.example:8080/x", true, "site.example")]
+    [InlineData("www.com", true, "www.com")] [InlineData("Example.COM.", false, "Example.COM")]
+    public void PastedLinksBecomeDomains(string input, bool dropWww, string expected) => Assert.Equal(expected, RuleValidation.SiteHost(input, dropWww));
+    [Fact] public void SiteRuleAcceptsPastedUrl() { var rule = new RoutingRule { Name = "Video", Values = ["https://YouTube.com/watch?v=1"] }; RuleValidation.Validate(rule); Assert.Equal("youtube.com", rule.Values[0]); }
     [Fact] public void DetectedCountryOnlyFillsNamelessServers()
     {
         var named = Node(); named.DetectedCountry = "DE"; Assert.Equal("EE", named.CountryCode);
@@ -66,7 +72,8 @@ public class CoreTests
     [Fact] public void SettingsSerializationRoundTrip() { var original=new Settings {AutoConnect=true,Language="English",Mtu=1400,CompatibilityMode=true}; var parsed=JsonSerializer.Deserialize<Settings>(JsonSerializer.Serialize(original,Json.Options),Json.Options)!; Assert.Equal(1400,parsed.Mtu); Assert.True(parsed.AutoConnect); Assert.Equal("English",parsed.Language); }
     [Fact] public void ProfileRoundTrip() { var p=new Profile {Name="Работа", Rules=[new() {Name="Claude",Values=["claude.ai"],UseVpn=false}]}; var content=ProfileCodec.Export(p); Assert.DoesNotContain("outbounds",content); var loaded=ProfileCodec.Import(content); Assert.Equal("Работа",loaded.Name); Assert.False(loaded.Rules[0].UseVpn); Assert.Equal(RouteTarget.Direct,loaded.DefaultRoute); }
     [Theory] [InlineData("{\"name\":\"A\",\"rules\":null}")] [InlineData("{\"name\":\"A\",\"defaultRoute\":99}")] [InlineData("invalid")] public void CorruptProfilesRejected(string content)=>Assert.Throws<UserError>(()=>ProfileCodec.Import(content));
-    [Theory] [InlineData("https://figma.com")] [InlineData("*.figma.com")] [InlineData("a/b")] public void InvalidDomainRejected(string value)=>Assert.Throws<UserError>(()=>RuleValidation.Validate(new RoutingRule {Name="Bad",Values=[value]}));
+    [Theory] [InlineData("a/b")] [InlineData("https://")] [InlineData("*.")] public void InvalidDomainRejected(string value)=>Assert.Throws<UserError>(()=>RuleValidation.Validate(new RoutingRule {Name="Bad",Values=[value]}));
+    [Theory] [InlineData("https://figma.com")] [InlineData("*.figma.com")] public void PastedSiteFormsNormalize(string value) { var r = new RoutingRule {Name="Figma",Values=[value]}; RuleValidation.Validate(r); Assert.Equal("figma.com", r.Values[0]); }
     [Fact] public void CidrValidated() { var r=new RoutingRule {Name="IP",Kind=RuleKind.Network,Values=["1.2.3.4"]}; RuleValidation.Validate(r); Assert.Equal("1.2.3.4/32",r.Values[0]); Assert.Throws<UserError>(()=>RuleValidation.Validate(new RoutingRule {Name="Bad",Kind=RuleKind.Network,Values=["1.2.3.4/99"]})); }
     [Fact] public void DpapiProtectsSubscriptionAndServerSecrets()
     {

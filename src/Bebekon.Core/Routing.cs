@@ -7,6 +7,18 @@ namespace Bebekon.Core;
 
 public static class RuleValidation
 {
+    /// <summary>Accepts what users paste: "https://www.example.com/page?q" → "www.example.com".</summary>
+    public static string SiteHost(string value, bool dropWww = false)
+    {
+        var v = value.Trim();
+        var scheme = v.IndexOf("://", StringComparison.Ordinal); if (scheme >= 0) v = v[(scheme + 3)..];
+        v = v.Split('/', '?', '#')[0]; v = v[(v.LastIndexOf('@') + 1)..];
+        if (v.Count(c => c == ':') == 1) v = v[..v.IndexOf(':')];
+        v = v.TrimEnd('.'); if (v.StartsWith("*.", StringComparison.Ordinal)) v = v[2..]; v = v.TrimStart('.');
+        // "www." would leave out the bare domain and every other subdomain of the site.
+        if (dropWww && v.StartsWith("www.", StringComparison.OrdinalIgnoreCase) && v.Count(c => c == '.') >= 2) v = v[4..];
+        return v;
+    }
     public static void Validate(RoutingRule rule)
     {
         if (!Enum.IsDefined(rule.Kind) || string.IsNullOrWhiteSpace(rule.Name) || rule.Name.Length > 160 || rule.Values.Count is < 1 or > 500) throw new UserError("Укажите название и адрес правила.");
@@ -18,7 +30,7 @@ public static class RuleValidation
             switch (rule.Kind)
             {
                 case RuleKind.Site:
-                    v = v.TrimEnd('.');
+                    v = SiteHost(v);
                     if (v.Contains('/') || v.Contains(':') || v.Contains('*')) throw new UserError("Введите домен, например figma.com, без https:// и пути.");
                     try { v = new IdnMapping().GetAscii(v).ToLowerInvariant(); } catch (ArgumentException) { throw new UserError("Некорректный домен."); }
                     if (Uri.CheckHostName(v) != UriHostNameType.Dns || !v.Contains('.') || IPAddress.TryParse(v, out _)) throw new UserError("Введите полное доменное имя.");

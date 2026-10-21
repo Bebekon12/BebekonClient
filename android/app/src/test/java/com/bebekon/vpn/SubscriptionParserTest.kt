@@ -91,4 +91,9 @@ class SubscriptionParserTest {
         assertEquals(emptyMap<String, String>(), SavedState.fromJson(state.toJson().apply { remove("detectedCountries") }).detectedCountries)
         assertEquals("NL", Node("a", "Server", "{}").displayCountry(state.detectedCountries))
     }
+    @Test fun pastedLinksBecomeDomains() {
+        mapOf("https://www.youtube.com/watch?v=1" to "youtube.com", "chatgpt.com/c/123" to "chatgpt.com", "*.example.org" to "example.org", "http://user@Site.example:8080/x" to "site.example", "www.com" to "www.com", " instagram.com " to "instagram.com")
+            .forEach { (input, expected) -> assertEquals(input, expected, CoreConfig.siteHost(input)) }
+        CoreConfig.validateRule(Rule(name = "Video", kind = RuleKind.DOMAIN, values = listOf(CoreConfig.siteHost("https://m.youtube.com/"))))
+    }
 }

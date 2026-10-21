@@ -32,6 +32,19 @@ public sealed class RoutingPresetTests
         PresetCatalog.Apply(PresetCatalog.Load()[0], profile);
         Assert.All(profile.Rules.Take(6), r => Assert.False(r.UseVpn)); Assert.Equal("Google", profile.Rules[6].Name);
     }
+    [Fact] public void ServicePresetsUseCompleteBundledSets()
+    {
+        // Short hand-written lists missed CDNs (Twitch video, Instagram media) and Telegram's IP-only app traffic.
+        var services = PresetCatalog.Load().Skip(2).ToList(); Assert.Equal(13, services.Count);
+        foreach (var preset in services)
+        {
+            var profile = new Profile(); Assert.Equal(preset.RuleCount, PresetCatalog.Apply(preset, profile));
+            Assert.Contains(profile.Rules, r => r.Kind == RuleKind.GeoSite && r.UseVpn);
+            Assert.All(profile.Rules, r => Assert.True(r.UseVpn));
+        }
+        Assert.Contains(services.Single(p => p.Name == "Telegram").Rules!, r => r.Kind == RuleKind.GeoIp && r.Values.SequenceEqual(["telegram"]));
+        Assert.Contains("live-video.net", services.Single(p => p.Name == "Twitch").Rules!.SelectMany(r => r.Values));
+    }
     [Fact] public void PresetInstancesAreIndependent()
     {
         var preset = PresetCatalog.Load()[0]; var a = new Profile(); var b = new Profile(); PresetCatalog.Apply(preset, a); PresetCatalog.Apply(preset, b);

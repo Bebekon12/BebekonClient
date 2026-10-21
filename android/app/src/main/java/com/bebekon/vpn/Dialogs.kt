@@ -45,7 +45,7 @@ import androidx.compose.ui.window.Dialog
             if (error.isNotEmpty()) Text(error, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
         }
     }, confirmButton = { Button({
-        val values = value.split('\n', ',').map(String::trim).filter(String::isNotEmpty)
+        val values = value.split('\n', ',', ' ').map { if (kind == RuleKind.DOMAIN) CoreConfig.siteHost(it) else it.trim() }.filter(String::isNotEmpty).distinct()
         val r = Rule(id = existing?.id ?: java.util.UUID.randomUUID().toString(), name = name.ifBlank { values.firstOrNull() ?: "Правило" }, kind = kind, values = values, vpn = vpn, created = existing?.created ?: System.currentTimeMillis())
         try { CoreConfig.validateRule(r); if (kind in listOf(RuleKind.GEOSITE, RuleKind.GEOIP)) values.forEach { context.repo.geo((if (kind == RuleKind.GEOSITE) "geosite-" else "geoip-") + it) }; save(r) } catch (e: Exception) { error = e.message ?: "Проверьте значение" }
     }) { Text("Сохранить") } }, dismissButton = { TextButton(dismiss) { Text("Отмена") } })

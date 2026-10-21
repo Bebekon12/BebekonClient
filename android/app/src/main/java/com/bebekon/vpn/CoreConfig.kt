@@ -54,6 +54,14 @@ object CoreConfig {
         val addresses = listOf("172.19.0.1/30") + if (state.preferences.ipv6) listOf("fdfe:dcba:9876::1/126") else emptyList()
         return json("log" to log, "dns" to dns, "inbounds" to array(if (tunnel) listOf(json("type" to "tun", "tag" to "tun", "address" to array(addresses), "mtu" to state.preferences.mtu, "auto_route" to true, "strict_route" to true, "stack" to "gvisor")) else emptyList()), "outbounds" to array(listOf(vpn, json("type" to "direct", "tag" to "direct"))), "route" to route, "experimental" to json("clash_api" to json())).toString()
     }
+    /** Accepts what users paste: "https://www.example.com/page?q" → "example.com". */
+    fun siteHost(value: String): String {
+        var v = value.trim().substringAfter("://").substringBefore('/').substringBefore('?').substringBefore('#').substringAfterLast('@')
+        if (v.count { it == ':' } == 1) v = v.substringBefore(':')
+        v = v.trimEnd('.').removePrefix("*.").trimStart('.').lowercase()
+        // "www." would leave out the bare domain and every other subdomain of the site.
+        return if (v.startsWith("www.") && v.count { it == '.' } >= 2) v.removePrefix("www.") else v
+    }
     fun validateRule(r: Rule) {
         require(r.values.isNotEmpty() && r.values.size <= 256 && r.values.all { it.isNotBlank() && it.length <= 253 && it.none(Char::isISOControl) }) { "Укажите значение правила" }
         when (r.kind) {
