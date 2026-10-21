@@ -60,7 +60,9 @@ internal static class ProtocolConfig
     internal static JsonObject Outbound(Server s, string tag)
     {
         Validate(s);
-        var vpn = new JsonObject { ["type"] = s.Type, ["tag"] = tag, ["server"] = s.Host, ["server_port"] = s.Port, ["domain_resolver"] = "direct-dns", ["connect_timeout"] = "4s" };
+        // 10 s leaves room for SYN retransmission on lossy Wi-Fi or mobile links; IPv4 first avoids
+        // stalls on networks that announce IPv6 without routing it.
+        var vpn = new JsonObject { ["type"] = s.Type, ["tag"] = tag, ["server"] = s.Host, ["server_port"] = s.Port, ["domain_resolver"] = new JsonObject { ["server"] = "direct-dns", ["strategy"] = "prefer_ipv4" }, ["connect_timeout"] = "10s" };
         if (!s.UdpEnabled) vpn["network"] = "tcp";
         if (s.Type is "vless" or "vmess") { vpn["uuid"] = s.Uuid; vpn["packet_encoding"] = s.PacketEncoding == "none" ? "" : s.PacketEncoding; }
         if (s.Type == "vless" && s.Flow.Length > 0) vpn["flow"] = s.Flow;

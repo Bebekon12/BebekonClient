@@ -4,6 +4,8 @@ namespace Bebekon.App;
 public partial class App : Application
 {
     private Mutex? single;
+    private EventWaitHandle? showRequest;
+    private RegisteredWaitHandle? showWait;
     protected override async void OnStartup(StartupEventArgs e)
     {
         // A failed GPU surface can leave only the DWM frame visible after restore.
@@ -11,16 +13,27 @@ public partial class App : Application
         System.Windows.Media.RenderOptions.ProcessRenderMode = System.Windows.Interop.RenderMode.SoftwareOnly;
         base.OnStartup(e);
         var smoke = e.Args.Contains("--smoke");
-        single = new(true, @"Local\BebekonVPN." + System.Security.Principal.WindowsIdentity.GetCurrent().User!.Value + (smoke ? ".Smoke" : ""), out var first);
-        if (!first) { MessageBox.Show("Bebekon VPN уже запущен. Откройте его через значок в трее."); Shutdown(); return; }
+        var instance = @"Local\BebekonVPN." + System.Security.Principal.WindowsIdentity.GetCurrent().User!.Value + (smoke ? ".Smoke" : "");
+        single = new(true, instance, out var first);
+        if (!first)
+        {
+            // Opening the shortcut while the app already runs (e.g. started with Windows into the
+            // tray) brings that window forward, as users expect, instead of reporting an error.
+            if (!RequestShow(instance + ".Show")) MessageBox.Show("Bebekon VPN уже запущен. Откройте его через значок в трее.");
+            Shutdown(); return;
+        }
+        showRequest = new(false, EventResetMode.AutoReset, instance + ".Show");
+        showWait = ThreadPool.RegisterWaitForSingleObject(showRequest, (_, _) => Dispatcher.BeginInvoke(() => (MainWindow as MainWindow)?.ShowWindow()), null, Timeout.Infinite, false);
         DispatcherUnhandledException += (_, args) => { new SafeLog(Paths.Logs, "app").Write("UI exception: " + args.Exception.GetType().Name); if (MainWindow?.DataContext is MainViewModel vm) vm.Report(args.Exception); args.Handled = true; };
         try
         {
             var vm = smoke ? SmokeHarness.CreateViewModel() : new MainViewModel();
-            var window = new MainWindow(vm); MainWindow = window; window.Show();
+            // Started with Windows: stay in the tray from the first moment. Showing the window and
+            // hiding it after a slow startup connection made it vanish while the user was using it.
+            var window = new MainWindow(vm); MainWindow = window;
+            if (smoke || !e.Args.Contains("--tray")) window.Show();
             if (smoke) { if (e.Args.Contains("--idle")) await SmokeHarness.MeasureIdleAsync(window); else await SmokeHarness.RunAsync(window, vm); await vm.StopScansAsync(); window.ForceExit = true; window.Close(); Shutdown(); return; }
-            await vm.InitializeAsync();
-            if (e.Args.Contains("--tray")) window.Hide();
+            await vm.InitializeAsync(e.Args.Contains("--tray"));
         }
         catch (Exception ex)
         {
@@ -30,5 +43,16 @@ public partial class App : Application
             Shutdown(1);
         }
     }
-    protected override void OnExit(ExitEventArgs e) { single?.Dispose(); base.OnExit(e); }
+    private static bool RequestShow(string name)
+    {
+        // The first instance creates its signal right after the mutex; allow for that moment.
+        for (var attempt = 0; attempt < 20; attempt++)
+        {
+            try { using var signal = EventWaitHandle.OpenExisting(name); return signal.Set(); }
+            catch (WaitHandleCannotBeOpenedException) { Thread.Sleep(150); }
+            catch (UnauthorizedAccessException) { return false; }
+        }
+        return false;
+    }
+    protected override void OnExit(ExitEventArgs e) { showWait?.Unregister(null); showRequest?.Dispose(); single?.Dispose(); base.OnExit(e); }
 }

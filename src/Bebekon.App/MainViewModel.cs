@@ -231,13 +231,32 @@ public sealed partial class MainViewModel : Observable, IDisposable
         Settings.TunnelMode = mode; Save(); Notify(nameof(Settings)); Notify(nameof(IsTunMode)); Notify(nameof(IsProxyMode)); QueueApply(); NotifyStatus();
     }
     private string T(string ru, string en) => Settings.Language == "English" ? en : ru;
-    public async Task InitializeAsync()
+    public async Task InitializeAsync(bool systemStartup = false)
     {
         _ = WatchUpdatesAsync();
         try { var response = await service.SendAsync(new("GetStatus")); ApplyStatus(response.Status); if (Connected) { await DisconnectAsync(); await ConnectAsync(); } }
         catch { SystemProxy.Restore(); }
         _ = RefreshMapOriginAsync();
-        if (Settings.AutoConnect && !Connected && SelectedServer is not null) try { await ConnectAsync(); } catch (Exception e) { Report(e); }
+        if (Settings.AutoConnect && !Connected && SelectedServer is not null) await AutoConnectAsync(systemStartup);
+    }
+    private async Task AutoConnectAsync(bool systemStartup)
+    {
+        // Right after Windows starts, Wi-Fi and DNS often come up later than the app. Wait for a
+        // network instead of failing with a timeout, then retry once if the first attempt is early.
+        for (var attempt = 0; attempt < (systemStartup ? 2 : 1); attempt++)
+        {
+            try
+            {
+                for (var waited = 0; systemStartup && waited < 90 && !NetworkInterface.GetIsNetworkAvailable(); waited++) await Task.Delay(1000, lifetime.Token);
+                if (attempt > 0) await Task.Delay(TimeSpan.FromSeconds(10), lifetime.Token);
+                if (Connected || ConnectionBusy) return;
+                await ConnectAsync(); return;
+            }
+            catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { return; }
+            // Never repeat a declined administrator prompt or a server/config problem on its own.
+            catch (Exception e) when (e is not UserError && attempt + 1 < (systemStartup ? 2 : 1)) { }
+            catch (Exception e) { Report(e); return; }
+        }
     }
     public void Go(string name)
     {
@@ -377,7 +396,9 @@ public sealed partial class MainViewModel : Observable, IDisposable
             // Finish a direct-IP location lookup before installing TUN routes. Otherwise a quick
             // connect discards the origin, or a late lookup could mistake VPN egress for the user.
             locatingBeforeTunnel = true;
-            try { await RefreshMapOriginAsync().WaitAsync(token); }
+            // Location services can be slow or blocked; the map must never delay connecting for long.
+            try { await RefreshMapOriginAsync().WaitAsync(TimeSpan.FromSeconds(3), token); }
+            catch (TimeoutException) { }
             finally { locatingBeforeTunnel = false; }
             token.ThrowIfCancellationRequested();
             spec = new(SelectedServer, ActiveProfile, Settings, LatencyService.FreePort(), Convert.ToHexString(RandomNumberGenerator.GetBytes(24)), Data.Servers.Where(s => ActiveProfile.Rules.Any(r => r.UseVpn && r.ServerId == s.Id)).ToList());

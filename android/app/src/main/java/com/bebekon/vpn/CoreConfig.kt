@@ -9,7 +9,7 @@ object CoreConfig {
         // The outer connection may still need IPv6 (e.g. an IPv6-only mobile network).
         // It is independent from which address families apps see inside the tunnel.
         if (node.config.optString("type") == "trusttunnel") { TrustTunnelProfile.validate(node); require(vpnOverride != null) { "Запустите модуль TrustTunnel" } }
-        val vpn = (vpnOverride ?: node.config).also { config -> val reason = ConnectionSafety.reason(config); require(reason.isEmpty()) { reason }; config.put("tag", "vpn"); config.put("domain_resolver", json("server" to "direct-dns", "strategy" to "prefer_ipv4")); config.put("connect_timeout", "4s") }
+        val vpn = (vpnOverride ?: node.config).also { config -> val reason = ConnectionSafety.reason(config); require(reason.isEmpty()) { reason }; config.put("tag", "vpn"); config.put("domain_resolver", json("server" to "direct-dns", "strategy" to "prefer_ipv4")); config.put("connect_timeout", "10s") }
         val rules = mutableListOf<JSONObject>()
         val dnsRules = mutableListOf<JSONObject>()
         val sets = mutableMapOf<String, JSONObject>()
@@ -26,7 +26,9 @@ object CoreConfig {
                 validateRule(rule)
                 val target = if (rule.vpn) "vpn" else "direct"
                 val field = rule.kind.field
-                val values = if (rule.kind in listOf(RuleKind.GEOSITE, RuleKind.GEOIP)) rule.values.map { val key = (if (rule.kind == RuleKind.GEOSITE) "geosite-" else "geoip-") + it.lowercase(); sets.getOrPut(key) { json("type" to "inline", "tag" to key, "rules" to geo(key).getJSONArray("rules")) }; key } else rule.values
+                // Site-only browsers get their direct fallback after every site rule (below).
+                if (rule.kind == RuleKind.APP && rule.values.all { it in policy.siteOnlyBrowsers }) continue
+                val values = if (rule.kind == RuleKind.APP) rule.values.filterNot { it in policy.siteOnlyBrowsers } else if (rule.kind in listOf(RuleKind.GEOSITE, RuleKind.GEOIP)) rule.values.map { val key = (if (rule.kind == RuleKind.GEOSITE) "geosite-" else "geoip-") + it.lowercase(); sets.getOrPut(key) { json("type" to "inline", "tag" to key, "rules" to geo(key).getJSONArray("rules")) }; key } else rule.values
                 rules += json(field to array(values), "outbound" to target)
                 if (rule.kind in listOf(RuleKind.DOMAIN, RuleKind.KEYWORD, RuleKind.GEOSITE, RuleKind.APP)) dnsRules += json(field to array(values), "server" to if (rule.vpn) "vpn-dns" else "direct-dns")
             }

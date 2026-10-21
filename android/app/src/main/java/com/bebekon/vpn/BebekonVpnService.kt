@@ -131,8 +131,9 @@ class BebekonVpnService : VpnService(), CommandServerHandler {
         try {
             val original = repo.state.value
             val identify: (String) -> WebApp? = { webApp(this, it) }
-            val policy = resolveWebAppPolicy(original, identify)
-            val saved = resolveWebAppRules(original, identify); val node = saved.selectedNode ?: error("Добавьте подписку и выберите сервер")
+            val browsers = browserPackages(this)
+            val policy = resolveWebAppPolicy(original, identify, browsers::contains)
+            val saved = resolveWebAppRules(original, identify, browsers::contains); val node = saved.selectedNode ?: error("Добавьте подписку и выберите сервер")
             check(!isLockdownEnabled || !policy.appOnly && policy.excluded.isEmpty()) { "Android блокирует приложения вне VPN. Отключите «Блокировать соединения без VPN» в системных настройках или выберите «Весь трафик»" }
             NativeCore.setup(this)
             if (node.config.optString("type") == "trusttunnel" || trustTunnel != null) closeCore()
