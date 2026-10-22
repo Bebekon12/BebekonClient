@@ -40,9 +40,21 @@ jobs:
         run: |
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-36" "build-tools;36.0.0" "ndk;$ANDROID_NDK_VERSION" > /dev/null
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION" >> "$GITHUB_ENV"
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ${{ runner.temp }}/tt-work/conan2-cache
+            ${{ runner.temp }}/tt-work/TrustTunnelClient
+            ${{ runner.temp }}/tt-work/bootstrap-complete
+          key: trusttunnel-${{ hashFiles('android/trusttunnel/**') }}-v1
       - name: TrustTunnel native library
         shell: pwsh
-        run: ./android/trusttunnel/build.ps1
+        run: |
+          # Upstream source hosts (boringssl.googlesource.com) sometimes refuse CI runners for a while.
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            try { ./android/trusttunnel/build.ps1 -CacheDirectory "$env:RUNNER_TEMP/tt-work"; break }
+            catch { if ($attempt -eq 3) { throw }; Write-Warning "Attempt $attempt failed: $_"; Start-Sleep -Seconds 120 }
+          }
       - name: sing-box library
         shell: pwsh
         run: ./android/build-core.ps1

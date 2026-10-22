@@ -15,7 +15,8 @@ fi
 test "$(git -C "$TT_SOURCE" rev-parse HEAD)" = 170609c24ca865819fed68437b01c013049bc3fa
 if [ ! -f /work/bootstrap-complete ]; then
   conan profile detect --force
-  printf '\n[conf]\ntools.build:jobs=2\n' >> "$CONAN_HOME/profiles/default"
+  # BoringSSL comes from boringssl.googlesource.com, which often answers CI runners with 503.
+  printf '\n[conf]\ntools.build:jobs=2\ntools.files.download:retry=8\ntools.files.download:retry_wait=45\n' >> "$CONAN_HOME/profiles/default"
   python3 "$TT_SOURCE/scripts/bootstrap_conan_deps.py"
   touch /work/bootstrap-complete
 fi

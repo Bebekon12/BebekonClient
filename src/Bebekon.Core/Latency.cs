@@ -90,7 +90,13 @@ public sealed class LatencyService(string executable)
             // WPF dispatcher so completed results, map motion and Cancel remain responsive.
             return await Task.Run(async () => {
                 using var core = new CoreSession(executable, new(Paths.Logs, "core"));
-                using (var startup = CancellationTokenSource.CreateLinkedTokenSource(ct)) { startup.CancelAfter(StartupTimeout); await core.StartAsync(spec, root, true, startup.Token).ConfigureAwait(false); }
+                // TrustTunnel's startup includes connecting to the endpoint, so it is network time.
+                using (var startup = CancellationTokenSource.CreateLinkedTokenSource(ct))
+                {
+                    startup.CancelAfter(server.IsTrustTunnel ? ProbeTimeout : StartupTimeout);
+                    try { await core.StartAsync(spec, root, true, startup.Token).ConfigureAwait(false); }
+                    catch (OperationCanceledException) when (!ct.IsCancellationRequested) { return ((long?)null, true, (string?)null); }
+                }
                 using var http = ProbeClient(spec); http.Timeout = Timeout.InfiniteTimeSpan;
                 long ms;
                 using (var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct))
