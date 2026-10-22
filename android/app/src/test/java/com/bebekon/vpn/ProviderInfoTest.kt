@@ -39,4 +39,22 @@ class ProviderInfoTest {
         assertFalse(AutoRefresh.due(sub.copy(source = "vless://pasted", updated = 0), now))
         assertFalse(AutoRefresh.due(sub.copy(source = "manual:x", updated = 0), now))
     }
+    @Test fun backupRoundTripsAndReadsWindowsFiles() {
+        val node = SubscriptionParser.link("vless://3bf154da-0ee6-4c45-b5f4-8512b4a2d2bd@vpn.example:443#Sweden")
+        val state = SavedState(subscriptions = listOf(Subscription(name = "P", source = "https://p.example/s", nodes = listOf(node), hidden = true)),
+            rules = listOf(Rule(name = "Old", kind = RuleKind.DOMAIN, values = listOf("old.example"), created = 1), Rule(name = "New", kind = RuleKind.APP, values = listOf("org.telegram.messenger"), created = 2)),
+            preferences = Preferences(mtu = 1300))
+        val data = Backup.parse(Backup.export(state))
+        assertEquals(listOf(Backup.Source("P", "https://p.example/s", true)), data.subscriptions)
+        assertEquals("Priority order survives", listOf("org.telegram.messenger", "old.example"), data.rules.sortedByDescending { it.created }.map { it.values.single() })
+        assertEquals(1300, data.preferences!!.mtu); assertEquals(0, data.skipped)
+        val windows = """{"format":"bebekon-backup","version":1,"platform":"windows","subscriptions":[{"name":"W","source":"https://w.example/s","hidden":false}],
+            "rules":[{"name":"First","kind":"site","values":["first.example"],"vpn":true},{"name":"Exe","kind":"windowsApp","values":["C:\\a.exe"],"vpn":false},{"name":"Second","kind":"cidr","values":["10.0.0.0/8"],"vpn":false}],
+            "windowsSettings":{"mtu":1500}}"""
+        val w = Backup.parse(windows)
+        assertEquals("https://w.example/s", w.subscriptions.single().source)
+        assertEquals("The first Windows rule keeps top priority", listOf("first.example", "10.0.0.0/8"), w.rules.sortedByDescending { it.created }.map { it.values.single() })
+        assertNull(w.preferences); assertEquals(1, w.skipped)
+        assertThrows(IllegalArgumentException::class.java) { Backup.parse("{}") }
+    }
 }

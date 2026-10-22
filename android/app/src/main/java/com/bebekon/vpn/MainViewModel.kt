@@ -80,6 +80,32 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val removed = AutoRefresh.refresh(getApplication(), sub)
         message.value = if (removed) "Подписка обновлена. Прежний сервер удалён провайдером — выберите сервер" else "Подписка обновлена"
     }
+    fun exportBackup(uri: android.net.Uri) = task {
+        getApplication<Application>().contentResolver.openOutputStream(uri, "wt")?.use { it.write(Backup.export(saved.value).toByteArray()) } ?: error("Не удалось записать файл")
+        message.value = "Резервная копия сохранена. В ней ссылки подписок — храните файл в надёжном месте"
+    }
+    /** Re-downloads backed-up subscriptions and adds rules that are not present yet; nothing is removed. */
+    fun importBackup(uri: android.net.Uri) = task {
+        val text = getApplication<Application>().contentResolver.openInputStream(uri)?.use { it.readLimited(4 * 1024 * 1024).toString(Charsets.UTF_8) } ?: error("Не удалось прочитать файл")
+        val data = Backup.parse(text)
+        var added = 0; var failed = data.skipped
+        for (s in data.subscriptions) runCatching {
+            if (s.manualOutbound.isNotEmpty()) {
+                val config = org.json.JSONObject(s.manualOutbound)
+                val node = Node(digest(config.toString()).take(24), s.name, config.toString(), SubscriptionParser.country(s.name))
+                TrustTunnelProfile.validate(node); require(ConnectionSafety.reason(config).isEmpty())
+                if (saved.value.nodes.none { it.id == node.id }) repo.update { it.copy(subscriptions = it.subscriptions + Subscription(name = s.name, source = "manual:" + java.util.UUID.randomUUID(), nodes = listOf(node), hidden = s.hidden), selected = it.selected ?: node.id) }
+            } else repo.add(repo.load(s.source, s.name).copy(hidden = s.hidden))
+        }.onSuccess { added++ }.onFailure { failed++ }
+        var rules = 0
+        repo.update { state ->
+            val signatures = state.rules.map { "${it.kind}|${it.vpn}|${it.values.joinToString()}" }.toSet()
+            val additions = data.rules.filter { "${it.kind}|${it.vpn}|${it.values.joinToString()}" !in signatures }.also { rules = it.size }
+            state.copy(rules = state.rules + additions, preferences = data.preferences ?: state.preferences)
+        }
+        VpnController.reload(getApplication())
+        message.value = "Восстановлено подписок: $added, правил: $rules" + if (failed > 0) " · не удалось: $failed" else ""
+    }
     fun removeSubscription(id: String) = task {
         repo.update { s -> val remaining = s.subscriptions.filterNot { it.id == id }; s.copy(subscriptions = remaining, selected = s.selected?.takeIf { key -> remaining.any { sub -> sub.nodes.any { it.id == key } } }) }
         if (saved.value.selectedNode == null && session.value.active) VpnController.stop(getApplication())

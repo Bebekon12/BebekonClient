@@ -128,6 +128,8 @@ public sealed partial class MainViewModel : Observable, IDisposable
     public ICommand CancelPing { get; }
     public ICommand RefreshSubscriptions { get; }
     public ICommand OpenProviderLink { get; }
+    public ICommand ExportBackup { get; }
+    public ICommand ImportBackup { get; }
     public ICommand AddSubscription { get; }
     public ICommand AddTrustTunnel { get; }
     public ICommand ToggleSubscriptionVisibility { get; }
@@ -206,6 +208,34 @@ public sealed partial class MainViewModel : Observable, IDisposable
         }, () => !Importing && !string.IsNullOrWhiteSpace(QuickSource));
         EditSubscription = Async(async p => { var old = (Subscription)p!; var sub = Dialogs.Subscription(old); if (sub is null) return; var servers = await SubscriptionLoader.LoadAsync(sub.Source, lifetime.Token); old.Name = sub.Name; old.Source = sub.Source; ReplaceServers(old, servers); Save(); Notify(nameof(NoSubscriptions)); });
         RefreshSubscription = Async(p => RefreshSubAsync((Subscription)p!));
+        ExportBackup = new Command(_ =>
+        {
+            var dialog = new Microsoft.Win32.SaveFileDialog { Filter = "Bebekon backup (*.json)|*.json", FileName = "bebekon-backup-" + DateTime.Now.ToString("yyyyMMdd") + ".json" };
+            if (dialog.ShowDialog() != true) return;
+            File.WriteAllText(dialog.FileName, BackupCodec.Export(Data, ActiveProfile));
+            Banner = T("Резервная копия сохранена. В ней ссылки подписок — храните файл в надёжном месте.", "Backup saved. It contains subscription links; keep the file safe.");
+        });
+        ImportBackup = Async(async _ =>
+        {
+            var dialog = new Microsoft.Win32.OpenFileDialog { Filter = "Bebekon backup (*.json)|*.json|All files|*.*" };
+            if (dialog.ShowDialog() != true) return;
+            var data = BackupCodec.Import(await File.ReadAllTextAsync(dialog.FileName, lifetime.Token));
+            int added = 0, failed = data.Skipped;
+            // Subscriptions download current servers; nothing already present is replaced or removed.
+            foreach (var item in data.Subscriptions.Where(i => Data.Subscriptions.All(s => s.Source != i.Source)))
+            {
+                try { var (servers, info) = await SubscriptionLoader.LoadWithInfoAsync(item.Source, lifetime.Token); var sub = new Subscription { Name = item.Name, Source = item.Source, Hidden = item.Hidden }; sub.Apply(info); Data.Subscriptions.Add(sub); ReplaceServers(sub, servers); added++; }
+                catch (Exception e) when (e is UserError or HttpRequestException or OperationCanceledException && !lifetime.IsCancellationRequested) { failed++; }
+            }
+            static string Signature(RoutingRule r) => $"{r.Kind}|{r.UseVpn}|{string.Join('\n', r.Values).ToLowerInvariant()}";
+            var existing = ActiveProfile.Rules.Select(Signature).ToHashSet();
+            var rules = data.Rules.Where(r => existing.Add(Signature(r))).ToList();
+            foreach (var rule in rules) ActiveProfile.Rules.Add(rule);
+            if (data.Settings is { } settings && settings.Mtu is >= 1280 and <= 9000)
+                foreach (var property in typeof(Settings).GetProperties().Where(p => p.CanWrite && p.Name != nameof(Settings.DesignVersion))) property.SetValue(Settings, property.GetValue(settings));
+            Save(); if (rules.Count > 0) RulesChanged(); else QueueApply();
+            Banner = T($"Восстановлено подписок: {added}, правил: {rules.Count}", $"Restored subscriptions: {added}, rules: {rules.Count}") + (failed > 0 ? T($" · не удалось: {failed}", $" · failed: {failed}") : "");
+        });
         // Provider links are validated as https when stored (ProviderInfo.SafeLink).
         OpenProviderLink = new Command(p => { if (ProviderInfo.SafeLink(p as string) is { Length: > 0 } link) Process.Start(new ProcessStartInfo(link) { UseShellExecute = true }); });
         DeleteSubscription = Async(async p => { var sub = (Subscription)p!; if (!Dialogs.Confirm(T("Удалить подписку?", "Delete subscription?"), sub.Name)) return; if (Connected && SelectedServer?.SubscriptionId == sub.Id) await DisconnectAsync(); Data.Subscriptions.Remove(sub); foreach (var s in Data.Servers.Where(s => s.SubscriptionId == sub.Id).ToArray()) Data.Servers.Remove(s); if (!Data.Servers.Contains(SelectedServer!)) SelectedServer = Data.Servers.FirstOrDefault(); Save(); RefreshServers(); Notify(nameof(NoSubscriptions)); });

@@ -37,6 +37,8 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
     val manager = context.getSystemService(NotificationManager::class.java)
     var notificationsEnabled by remember { mutableStateOf(manager.areNotificationsEnabled()) }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { notificationsEnabled = manager.areNotificationsEnabled() }
+    val exportBackup = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri -> if (uri != null) model.exportBackup(uri) }
+    val importBackup = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) model.importBackup(uri) }
     val lifecycle = LocalLifecycleOwner.current
     DisposableEffect(lifecycle) {
         val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_RESUME) notificationsEnabled = manager.areNotificationsEnabled() }
@@ -70,6 +72,8 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
         if (visible("Уведомления", "Разрешение уведомлений звуки Android")) item { ActionCard(Icons.Outlined.Notifications, "Уведомления Android", if (notificationsEnabled) "Разрешены · настройте звуки и категории" else "Запрещены системой · нажмите, чтобы разрешить") { context.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)) } }
         if (visible("Уведомления", "Постоянное уведомление VPN")) item { Text("Постоянное уведомление VPN нужно для фоновой работы Android. В нём есть кнопка отключения; звук настраивается отдельно от событий.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, lineHeight = 17.sp) }
         if (visible("Данные", "Подписки импорт")) item { ActionCard(Icons.Outlined.Link, "Подписки", "Ссылки, QR-коды и файлы · ${state.subscriptions.size} подписок", subscriptions) }
+        if (visible("Данные", "Резервная копия экспорт сохранить")) item { ActionCard(Icons.Outlined.SaveAlt, "Сохранить резервную копию", "Подписки, правила и настройки в файл. Подходит и для Windows", { exportBackup.launch("bebekon-backup-" + java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.ROOT).format(java.util.Date()) + ".json") }) }
+        if (visible("Данные", "Резервная копия восстановить импорт")) item { ActionCard(Icons.Outlined.Restore, "Восстановить из копии", "Подписки скачаются заново, правила добавятся к вашим", { importBackup.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) }) }
         if (visible("Данные", "Обновить подписки")) item { ActionCard(Icons.Outlined.Sync, "Обновить все подписки", "Выбранный сервер сохраняется", { model.refreshAll() }) }
         if (visible("Данные", "Автоматическая проверка обновлений")) item { ToggleCard(Icons.Outlined.Update, "Проверять обновления при запуске", "Покажем окно: обновить или пропустить на этот раз", p.checkUpdates) { model.preferences(p.copy(checkUpdates = it)) } }
         if (visible("Данные", "Обновления установить версия")) item { ActionCard(Icons.Outlined.SystemUpdate, "Обновления", "Проверить и установить прямо из приложения") { context.updater.check() } }
