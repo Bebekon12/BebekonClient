@@ -78,6 +78,9 @@ object NativeCore {
 class BebekonVpnService : VpnService(), CommandServerHandler {
     private val dispatcher = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
     private val scope = CoroutineScope(SupervisorJob() + dispatcher)
+    // Blocking subscription downloads must not hold the serialized core executor.
+    private val background = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private var refreshJob: Job? = null
     private val generation = AtomicLong()
     private var server: CommandServer? = null
     private var client: CommandClient? = null
@@ -182,6 +185,8 @@ class BebekonVpnService : VpnService(), CommandServerHandler {
             VpnController.publish(this) { it.copy(phase = Phase.ON, publicIp = if (it.server == node.name) it.publicIp else "", server = node.name, message = "", started = if (reload && it.started != 0L) it.started else System.currentTimeMillis()) }
             foreground(node.name)
             repo.log(if (reload) "Настройки маршрутизации применены" else "VPN подключён")
+            // Long sessions keep the provider's servers current (see AutoRefresh).
+            if (refreshJob?.isActive != true) refreshJob = background.launch { delay(120_000); while (isActive) { AutoRefresh.runDue(this@BebekonVpnService); delay(1_800_000) } }
             val ip = runCatching { NativeCore.probe(this, saved, "GET", "https://api.ipify.org").body.trim() }.getOrDefault("")
             if (desired && generation.get() == version && Regex("[0-9a-fA-F:.]{3,45}").matches(ip)) VpnController.publish(this) { it.copy(publicIp = ip) }
         } catch (e: Exception) {
@@ -213,7 +218,7 @@ class BebekonVpnService : VpnService(), CommandServerHandler {
         if (Build.VERSION.SDK_INT >= 34) startForeground(1, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE) else startForeground(1, notification)
     }
     override fun onRevoke() { desired = false; generation.incrementAndGet(); scope.launch { closeCore(); VpnController.publish(this@BebekonVpnService) { Session() }; withContext(Dispatchers.Main) { stopForeground(STOP_FOREGROUND_REMOVE); stopSelf() } }; super.onRevoke() }
-    override fun onDestroy() { runCatching { unregisterReceiver(idle) }; desired = false; generation.incrementAndGet(); scope.launch { closeCore(); scope.cancel(); dispatcher.close() }; super.onDestroy() }
+    override fun onDestroy() { runCatching { unregisterReceiver(idle) }; background.cancel(); desired = false; generation.incrementAndGet(); scope.launch { closeCore(); scope.cancel(); dispatcher.close() }; super.onDestroy() }
     override fun serviceStop() { Handler(Looper.getMainLooper()).post { VpnController.stop(this) } }
     override fun serviceReload() { Handler(Looper.getMainLooper()).post { VpnController.reload(this) } }
     override fun getSystemProxyStatus() = SystemProxyStatus()

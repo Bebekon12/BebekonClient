@@ -33,4 +33,15 @@ public class ProviderInfoTests
         sub.Expire = now.AddMinutes(-1); Assert.Equal("Подписка истекла — продлите её у провайдера", sub.WarningText(now));
         Assert.Equal("", new Subscription().UsageText(now));
     }
+    [Fact]
+    public void RemoteSubscriptionsRefreshAtProviderIntervalOrTwelveHours()
+    {
+        var now = DateTimeOffset.Now;
+        var sub = new Subscription { Source = "https://p.example/s", Updated = now.AddHours(-11) };
+        Assert.False(sub.RefreshDue(now)); Assert.True(sub.RefreshDue(now.AddHours(1)));
+        sub.UpdateIntervalHours = 2; Assert.True(sub.RefreshDue(now));
+        Assert.True(new Subscription { Source = "https://p.example/s" }.RefreshDue(now));
+        Assert.False(new Subscription { Source = "vless://pasted", Updated = now.AddDays(-9) }.RefreshDue(now));
+        Assert.False(new Subscription { Source = "tt://not-a-link", Updated = now.AddDays(-9) }.RefreshDue(now));
+    }
 }

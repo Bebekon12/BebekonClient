@@ -166,6 +166,18 @@ public sealed class Subscription : Observable
         if (Total > 0 && Total - (Upload + Download) <= Total / 10) return Upload + Download >= Total ? "Трафик закончился" : "Осталось мало трафика";
         return "";
     }
+    /// <summary>Remote subscriptions refresh at the provider's interval, otherwise every 12 hours.</summary>
+    public bool RefreshDue(DateTimeOffset now) => Remote && (Updated is null || now - Updated.Value >= TimeSpan.FromHours(UpdateIntervalHours > 0 ? UpdateIntervalHours : 12));
+    [JsonIgnore] public bool Remote
+    {
+        get
+        {
+            var source = Source.Trim();
+            if (source.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) return true;
+            if (!source.StartsWith("tt://", StringComparison.OrdinalIgnoreCase) || source.Contains('\n')) return false;
+            try { return TrustTunnelParser.SubscriptionUrl(source) is not null; } catch (UserError) { return false; }
+        }
+    }
     [JsonIgnore] public bool HasUsage => UsageLabel.Length > 0;
     [JsonIgnore] public bool HasWarning => Warning.Length > 0;
     [JsonIgnore] public bool HasSupport => SupportUrl.Length > 0;

@@ -31,4 +31,12 @@ class ProviderInfoTest {
         assertEquals("", Subscription.fromJson(sub.toJson().put("supportUrl", "javascript:alert(1)")).supportUrl)
         assertEquals(0, Subscription.fromJson(JSONObject(sub.toJson().toString()).apply { remove("updateInterval") }).updateInterval)
     }
+    @Test fun remoteSubscriptionsRefreshAtProviderIntervalOrTwelveHours() {
+        val sub = Subscription(name = "P", source = "https://p.example/s", nodes = emptyList(), updated = now - 11 * 3_600_000L)
+        assertFalse(AutoRefresh.due(sub, now)); assertTrue(AutoRefresh.due(sub, now + 3_600_000L))
+        assertTrue(AutoRefresh.due(sub.copy(updateInterval = 2), now))
+        assertFalse("A failed attempt waits an hour", AutoRefresh.due(sub.copy(updateInterval = 2), now, lastAttempt = now - 60_000))
+        assertFalse(AutoRefresh.due(sub.copy(source = "vless://pasted", updated = 0), now))
+        assertFalse(AutoRefresh.due(sub.copy(source = "manual:x", updated = 0), now))
+    }
 }

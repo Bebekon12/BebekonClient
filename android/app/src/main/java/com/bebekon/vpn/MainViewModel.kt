@@ -41,6 +41,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         } }
         viewModelScope.launch { while (isActive) { delay(30_000); origin.refresh(); refreshMapDestination(saved.value, session.value) } }
         viewModelScope.launch { origin.countries.collect { live -> rememberCountries(live) } }
+        viewModelScope.launch(Dispatchers.IO) { AutoRefresh.runDue(getApplication()) }
         // Older Xray imports lost profile remarks. Refresh them once per launch; identity stays unchanged.
         saved.value.subscriptions.filter { sub -> sub.source.startsWith("https://") && sub.nodes.any { it.country.isBlank() && it.name.lowercase() in setOf("proxy", "vpn", "out", "outbound") } }.forEach(::refresh)
     }
@@ -76,12 +77,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (saved.value.selectedNode == null && session.value.active) VpnController.stop(getApplication())
     }
     fun refresh(sub: Subscription) = task {
-        val before = saved.value.selectedNode
-        val new = repo.load(sub.source, sub.name).copy(id = sub.id); repo.add(new)
-        val after = saved.value.selectedNode
-        if (before != null && after == null) VpnController.stop(getApplication())
-        else if (before?.outbound != after?.outbound) VpnController.reload(getApplication())
-        message.value = if (before != null && after == null) "Подписка обновлена. Прежний сервер удалён провайдером — выберите сервер" else "Подписка обновлена"
+        val removed = AutoRefresh.refresh(getApplication(), sub)
+        message.value = if (removed) "Подписка обновлена. Прежний сервер удалён провайдером — выберите сервер" else "Подписка обновлена"
     }
     fun removeSubscription(id: String) = task {
         repo.update { s -> val remaining = s.subscriptions.filterNot { it.id == id }; s.copy(subscriptions = remaining, selected = s.selected?.takeIf { key -> remaining.any { sub -> sub.nodes.any { it.id == key } } }) }
@@ -98,8 +95,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (old.ping != value.ping || old.pingTarget != value.pingTarget) withContext(Dispatchers.Main) { pingJobs.values.forEach { it.cancel() }; pingJobs.clear(); repo.pings.value = emptyMap() }
         if (old.routing != value.routing || old.sitesInAllApps != value.sitesInAllApps || old.allowLan != value.allowLan || old.dnsResolver != value.dnsResolver || old.mtu != value.mtu || old.routingDiagnostics != value.routingDiagnostics || old.ipv6 != value.ipv6) VpnController.reload(getApplication())
     }
-    private fun remoteSubscription(source: String): Boolean = source.startsWith("https://") ||
-        (source.startsWith("tt://", true) && runCatching { TrustTunnelProfile.link(source).second != null }.getOrDefault(false))
     fun refreshAll() { saved.value.subscriptions.filter { remoteSubscription(it.source) }.forEach(::refresh) }
     override fun onCleared() { origin.close(); super.onCleared() }
     fun saveAppRules(apps: List<InstalledApp>, actions: Map<String, Boolean>) = task {

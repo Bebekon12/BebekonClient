@@ -243,7 +243,29 @@ public sealed partial class MainViewModel : Observable, IDisposable
         catch { SystemProxy.Restore(); }
         _ = RefreshMapOriginAsync();
         WarnSubscription();
+        _ = AutoRefreshAsync();
         if (Settings.AutoConnect && !Connected && SelectedServer is not null) await AutoConnectAsync(systemStartup);
+    }
+    private readonly Dictionary<string, DateTimeOffset> refreshAttempts = [];
+    /// <summary>Providers rotate servers; keep subscriptions current. A failure keeps the old servers and retries after an hour.</summary>
+    private async Task AutoRefreshAsync()
+    {
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(15), lifetime.Token);
+            while (!lifetime.IsCancellationRequested)
+            {
+                var now = DateTimeOffset.Now;
+                foreach (var sub in Data.Subscriptions.Where(s => s.RefreshDue(now) && (!refreshAttempts.TryGetValue(s.Id, out var last) || now - last >= TimeSpan.FromHours(1))).ToArray())
+                {
+                    refreshAttempts[sub.Id] = now;
+                    try { await RefreshSubAsync(sub); log.Write("Subscription refreshed automatically."); }
+                    catch (Exception e) when (e is not OperationCanceledException || !lifetime.IsCancellationRequested) { log.Write("Automatic subscription refresh failed: " + e.GetType().Name); }
+                }
+                await Task.Delay(TimeSpan.FromMinutes(30), lifetime.Token);
+            }
+        }
+        catch (OperationCanceledException) { }
     }
     private async Task AutoConnectAsync(bool systemStartup)
     {
