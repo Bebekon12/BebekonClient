@@ -20,8 +20,15 @@ public class KillSwitchTests
     /// <summary>Real Windows Filtering Platform filters; needs an elevated Windows run (CI is).</summary>
     [Fact] public async Task BlocksOutsideTheTunnelKeepsLoopbackAndTrustedCoresAndCleansUp()
     {
-        if (!OperatingSystem.IsWindows() || !new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator)) return;
-        if (!await CanConnect(Internet)) return; // no internet on this machine: nothing to compare
+        // GitHub's Windows runners are elevated and online: there the test must really run.
+        var ci = OperatingSystem.IsWindows() && Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true";
+        if (!OperatingSystem.IsWindows()) return;
+        var elevated = new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator);
+        Assert.True(elevated || !ci, "CI must run this test elevated");
+        if (!elevated) return;
+        var online = await CanConnect(Internet);
+        Assert.True(online || !ci, "CI must have internet for this test");
+        if (!online) return; // no internet on this machine: nothing to compare
         using var listener = new TcpListener(IPAddress.Loopback, 0); listener.Start();
         var loopback = (IPEndPoint)listener.LocalEndpoint;
         using (KillSwitch.Enable([]))
