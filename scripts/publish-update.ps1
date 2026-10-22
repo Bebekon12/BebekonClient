@@ -10,7 +10,10 @@ Add-Type -AssemblyName System.Security
 $rsa = [Security.Cryptography.RSACryptoServiceProvider]::new(3072)
 $rsa.PersistKeyInCsp = $false
 try {
-    if (Test-Path -LiteralPath $keyPath) {
+    if ($env:BEBEKON_RELEASE_KEY_XML) {
+        # GitHub Actions: the private key comes from an encrypted repository secret, never from the repository.
+        $rsa.FromXmlString($env:BEBEKON_RELEASE_KEY_XML)
+    } elseif (Test-Path -LiteralPath $keyPath) {
         $bytes = [Security.Cryptography.ProtectedData]::Unprotect([IO.File]::ReadAllBytes($keyPath), $null, [Security.Cryptography.DataProtectionScope]::CurrentUser)
         try { $rsa.FromXmlString([Text.Encoding]::UTF8.GetString($bytes)) } finally { [Array]::Clear($bytes, 0, $bytes.Length) }
     } elseif ($InitializeKey -and -not (Test-Path -LiteralPath $publicPath)) {

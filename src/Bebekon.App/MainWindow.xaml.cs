@@ -70,7 +70,7 @@ public partial class MainWindow : Window
         menu.Items.Add(new Forms.ToolStripSeparator()); menu.Items.Add(I18n.T("Открыть", "Open")).Click += (_, _) => ShowWindow(); menu.Items.Add(I18n.T("Выход", "Exit")).Click += async (_, _) => await ExitAsync();
         return menu;
     }
-    private void ShowWindow()
+    internal void ShowWindow()
     {
         Show();
         if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;

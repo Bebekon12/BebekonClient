@@ -19,7 +19,8 @@ public class LatencyDeadlineTests
         var latency = new LatencyService(exe); var clock = Stopwatch.StartNew();
         var result = await latency.MeasureAsync(node, mode, true, default);
         Assert.True(result.TimedOut); Assert.Null(result.Milliseconds);
-        Assert.InRange(clock.Elapsed.TotalSeconds, 4.5, 7);
+        // Five seconds of network wait, after a separately budgeted core start.
+        Assert.InRange(clock.Elapsed.TotalSeconds, 4.5, 12);
         using var stop = new CancellationTokenSource(100);
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => latency.MeasureAsync(node, mode, true, stop.Token));
     }

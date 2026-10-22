@@ -2,8 +2,6 @@ package com.bebekon.vpn
 
 import android.app.Application
 import android.content.Context
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
 import android.provider.Settings
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
@@ -116,8 +114,7 @@ class Repository(private val context: Context) {
     } }
 }
 fun directConnection(context: Context, url: java.net.URL): HttpURLConnection {
-    val manager = context.getSystemService(ConnectivityManager::class.java)
-    val network = manager.allNetworks.firstOrNull { manager.getNetworkCapabilities(it)?.let { c -> c.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) && c.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN) && c.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) } == true }
+    val network = PhysicalNetwork.current(context)
     return (network?.openConnection(url) ?: url.openConnection(java.net.Proxy.NO_PROXY)) as HttpURLConnection
 }
 /** InputStream.readNBytes is not available on all supported Android 10 devices. */

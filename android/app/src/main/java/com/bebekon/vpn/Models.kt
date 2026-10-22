@@ -74,12 +74,14 @@ fun appTunnelPolicy(state: SavedState): AppTunnelPolicy {
     return if (state.preferences.sitesInAllApps || selected.isEmpty() && sitesNeedTunnel) AppTunnelPolicy(excluded = apps.filterValues { !it }.keys)
     else AppTunnelPolicy(allowed = selected)
 }
-data class SavedState(val subscriptions: List<Subscription> = emptyList(), val selected: String? = null, val favorites: Set<String> = emptySet(), val rules: List<Rule> = emptyList(), val preferences: Preferences = Preferences()) {
+/** [detectedCountries]: node id → ISO code of the VPN exit, for servers whose name has no country. */
+data class SavedState(val subscriptions: List<Subscription> = emptyList(), val selected: String? = null, val favorites: Set<String> = emptySet(), val rules: List<Rule> = emptyList(), val preferences: Preferences = Preferences(), val detectedCountries: Map<String, String> = emptyMap()) {
     val nodes get() = subscriptions.flatMap { it.nodes }.distinctBy { it.id }
     val visibleNodes get() = subscriptions.filterNot { it.hidden }.flatMap { it.nodes }.distinctBy { it.id }
     val selectedNode get() = nodes.firstOrNull { it.id == selected }
-    fun toJson() = json("version" to 1, "subscriptions" to array(subscriptions.map(Subscription::toJson)), "selected" to selected, "favorites" to array(favorites), "rules" to array(rules.map(Rule::toJson)), "preferences" to preferences.toJson())
-    companion object { fun fromJson(o: JSONObject): SavedState { require(o.optInt("version") == 1) { "Неизвестная версия настроек" }; return SavedState(o.getJSONArray("subscriptions").objects().map(Subscription::fromJson), if (o.isNull("selected")) null else o.optString("selected").takeIf { it.isNotEmpty() }, o.getJSONArray("favorites").strings().toSet(), o.getJSONArray("rules").objects().map(Rule::fromJson), Preferences.fromJson(o.getJSONObject("preferences"))) } }
+    fun toJson() = json("version" to 1, "subscriptions" to array(subscriptions.map(Subscription::toJson)), "selected" to selected, "favorites" to array(favorites), "rules" to array(rules.map(Rule::toJson)), "preferences" to preferences.toJson(), "detectedCountries" to JSONObject(detectedCountries))
+    companion object { fun fromJson(o: JSONObject): SavedState { require(o.optInt("version") == 1) { "Неизвестная версия настроек" }; return SavedState(o.getJSONArray("subscriptions").objects().map(Subscription::fromJson), if (o.isNull("selected")) null else o.optString("selected").takeIf { it.isNotEmpty() }, o.getJSONArray("favorites").strings().toSet(), o.getJSONArray("rules").objects().map(Rule::fromJson), Preferences.fromJson(o.getJSONObject("preferences")),
+            o.optJSONObject("detectedCountries")?.let { c -> c.keys().asSequence().associateWith { c.optString(it) }.filterValues { it.matches(Regex("[A-Z]{2}")) } }.orEmpty()) } }
 }
 enum class Phase { OFF, STARTING, ON, RECONNECTING, STOPPING, ERROR }
 data class Session(val phase: Phase = Phase.OFF, val server: String = "", val message: String = "", val started: Long = 0, val down: Long = 0, val up: Long = 0, val totalDown: Long = 0, val totalUp: Long = 0, val publicIp: String = "") {

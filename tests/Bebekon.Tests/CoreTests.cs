@@ -23,6 +23,26 @@ public class CoreTests
     [Fact] public void UnknownFormatFails() => Assert.Throws<UserError>(() => VlessParser.ParseSubscription("{\"proxies\":[]}"));
     [Fact] public void MalformedLineIsNotSilentlyDropped() => Assert.Throws<UserError>(() => VlessParser.ParseSubscription($"vless://{Id}@a.example.com:443\nss://unsupported"));
     [Fact] public void SelectiveDefaultsDirect() { var c = JsonNode.Parse(ConfigGenerator.Generate(Spec()))!; Assert.Equal("direct", (string?)c["route"]!["final"]); Assert.Equal("direct-dns", (string?)c["dns"]!["final"]); Assert.True((bool)c["route"]!["auto_detect_interface"]!); }
+    [Fact] public void DirectDnsUsesUplinkResolverAndVpnDnsStaysInTunnel()
+    {
+        var servers = JsonNode.Parse(ConfigGenerator.Generate(Spec()))!["dns"]!["servers"]!.AsArray();
+        Assert.Equal("local", (string?)servers.Single(s => (string?)s!["tag"] == "direct-dns")!["type"]);
+        var vpn = servers.Single(s => (string?)s!["tag"] == "vpn-dns")!; Assert.Equal("https", (string?)vpn["type"]); Assert.Equal("vpn", (string?)vpn["detour"]);
+    }
+    [Theory]
+    [InlineData("https://www.youtube.com/watch?v=1", false, "www.youtube.com")] [InlineData("https://www.youtube.com/watch?v=1", true, "youtube.com")]
+    [InlineData("chatgpt.com/c/123", true, "chatgpt.com")] [InlineData("*.example.org", true, "example.org")] [InlineData("http://user@site.example:8080/x", true, "site.example")]
+    [InlineData("www.com", true, "www.com")] [InlineData("Example.COM.", false, "Example.COM")]
+    public void PastedLinksBecomeDomains(string input, bool dropWww, string expected) => Assert.Equal(expected, RuleValidation.SiteHost(input, dropWww));
+    [Fact] public void SiteRuleAcceptsPastedUrl() { var rule = new RoutingRule { Name = "Video", Values = ["https://YouTube.com/watch?v=1"] }; RuleValidation.Validate(rule); Assert.Equal("youtube.com", rule.Values[0]); }
+    [Fact] public void DetectedCountryOnlyFillsNamelessServers()
+    {
+        var named = Node(); named.DetectedCountry = "DE"; Assert.Equal("EE", named.CountryCode);
+        var nameless = Node(); nameless.Name = "Server 7"; Assert.Equal("", nameless.CountryCode);
+        nameless.DetectedCountry = "nl"; Assert.Equal("", nameless.CountryCode);
+        nameless.DetectedCountry = "NL"; Assert.Equal("NL", nameless.CountryCode);
+        Assert.Equal("NL", JsonSerializer.Deserialize<Server>(JsonSerializer.Serialize(nameless, Json.Options), Json.Options)!.CountryCode);
+    }
     [Fact] public void EntirePcDefaultsVpn() { var c = JsonNode.Parse(ConfigGenerator.Generate(Spec(new() { DefaultRoute = RouteTarget.Vpn })))!; Assert.Equal("vpn", (string?)c["route"]!["final"]); Assert.Equal("vpn-dns", (string?)c["dns"]!["final"]); }
     [Fact] public void RoutingPriorityPreservesOrderedProcessException()
     {
@@ -46,12 +66,14 @@ public class CoreTests
     [Fact] public void ExactPathDoesNotAlsoMatchOtherExecutablesWithSameName() { var c=JsonNode.Parse(ConfigGenerator.Generate(Spec(new() { Rules=[new() {Name="App",Kind=RuleKind.Application,Values=[@"C:\Apps\foo.exe"]}]})))!; Assert.Null(c["route"]!["rules"]![4]!["process_name"]); }
     [Fact] public void NameFallbackSupported() { var c=JsonNode.Parse(ConfigGenerator.Generate(Spec(new() { Rules=[new() {Name="App",Kind=RuleKind.Application,Values=["foo.exe"]}]})))!; Assert.Equal("foo.exe",(string?)c["route"]!["rules"]![4]!["process_name"]![0]); }
     [Fact] public void ModernFieldsOnly() { var text=ConfigGenerator.Generate(Spec()); foreach(var forbidden in new[]{"geosite","geoip","inet4_address","sniff_override_destination","address_resolver","independent_cache","external_controller"}) Assert.DoesNotContain("\""+forbidden+"\"",text); Assert.Contains("\"dns_mode\": \"hijack\"",text); }
-    [Fact] public void CompatibilityDisablesStrictRoute() { var c=JsonNode.Parse(ConfigGenerator.Generate(Spec(settings:new() {CompatibilityMode=true})))!; Assert.False((bool)c["inbounds"]![1]!["strict_route"]!); }
+    [Fact] public void CompatibilityDisablesStrictRoute() { var c=JsonNode.Parse(ConfigGenerator.Generate(Spec(settings:new() {CompatibilityMode=true})))!; Assert.False((bool)c["inbounds"]![1]!["strict_route"]!); Assert.Equal("gvisor",(string?)c["inbounds"]![1]!["stack"]); Assert.Equal("mixed",(string?)JsonNode.Parse(ConfigGenerator.Generate(Spec()))!["inbounds"]![1]!["stack"]); }
+    [Fact] public void ServerDialToleratesSlowLinksAndPrefersIpv4() { var vpn=JsonNode.Parse(ConfigGenerator.Generate(Spec()))!["outbounds"]![0]!; Assert.Equal("10s",(string?)vpn["connect_timeout"]); Assert.Equal("direct-dns",(string?)vpn["domain_resolver"]!["server"]); Assert.Equal("prefer_ipv4",(string?)vpn["domain_resolver"]!["strategy"]); }
     [Fact] public void ProbeIsForcedThroughVpn() { var c=JsonNode.Parse(ConfigGenerator.Generate(Spec(),true))!; Assert.Single(c["inbounds"]!.AsArray()); Assert.Equal("vpn",(string?)c["route"]!["final"]); Assert.Equal("127.0.0.1",(string?)c["inbounds"]![0]!["listen"]); Assert.NotNull(c["inbounds"]![0]!["users"]); }
     [Fact] public void SettingsSerializationRoundTrip() { var original=new Settings {AutoConnect=true,Language="English",Mtu=1400,CompatibilityMode=true}; var parsed=JsonSerializer.Deserialize<Settings>(JsonSerializer.Serialize(original,Json.Options),Json.Options)!; Assert.Equal(1400,parsed.Mtu); Assert.True(parsed.AutoConnect); Assert.Equal("English",parsed.Language); }
     [Fact] public void ProfileRoundTrip() { var p=new Profile {Name="Работа", Rules=[new() {Name="Claude",Values=["claude.ai"],UseVpn=false}]}; var content=ProfileCodec.Export(p); Assert.DoesNotContain("outbounds",content); var loaded=ProfileCodec.Import(content); Assert.Equal("Работа",loaded.Name); Assert.False(loaded.Rules[0].UseVpn); Assert.Equal(RouteTarget.Direct,loaded.DefaultRoute); }
     [Theory] [InlineData("{\"name\":\"A\",\"rules\":null}")] [InlineData("{\"name\":\"A\",\"defaultRoute\":99}")] [InlineData("invalid")] public void CorruptProfilesRejected(string content)=>Assert.Throws<UserError>(()=>ProfileCodec.Import(content));
-    [Theory] [InlineData("https://figma.com")] [InlineData("*.figma.com")] [InlineData("a/b")] public void InvalidDomainRejected(string value)=>Assert.Throws<UserError>(()=>RuleValidation.Validate(new RoutingRule {Name="Bad",Values=[value]}));
+    [Theory] [InlineData("a/b")] [InlineData("https://")] [InlineData("*.")] public void InvalidDomainRejected(string value)=>Assert.Throws<UserError>(()=>RuleValidation.Validate(new RoutingRule {Name="Bad",Values=[value]}));
+    [Theory] [InlineData("https://figma.com")] [InlineData("*.figma.com")] public void PastedSiteFormsNormalize(string value) { var r = new RoutingRule {Name="Figma",Values=[value]}; RuleValidation.Validate(r); Assert.Equal("figma.com", r.Values[0]); }
     [Fact] public void CidrValidated() { var r=new RoutingRule {Name="IP",Kind=RuleKind.Network,Values=["1.2.3.4"]}; RuleValidation.Validate(r); Assert.Equal("1.2.3.4/32",r.Values[0]); Assert.Throws<UserError>(()=>RuleValidation.Validate(new RoutingRule {Name="Bad",Kind=RuleKind.Network,Values=["1.2.3.4/99"]})); }
     [Fact] public void DpapiProtectsSubscriptionAndServerSecrets()
     {

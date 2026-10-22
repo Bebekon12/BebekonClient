@@ -6,7 +6,9 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 
@@ -19,6 +21,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val importText = MutableStateFlow("")
     val siteCheck = MutableStateFlow(SiteCheck())
     val origin = OriginLocation(app, viewModelScope)
+    /** Exit countries for servers without one in their name; a live connected lookup wins. */
+    val countries = combine(origin.countries, saved) { live, state -> state.detectedCountries + live }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, saved.value.detectedCountries)
     fun diagnoseSite(address: String) {
         if (siteCheck.value.running) return
         siteCheck.value = SiteCheck(running = true)
@@ -35,6 +40,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             refreshMapDestination(state, current)
         } }
         viewModelScope.launch { while (isActive) { delay(30_000); origin.refresh(); refreshMapDestination(saved.value, session.value) } }
+        viewModelScope.launch { origin.countries.collect { live -> rememberCountries(live) } }
         // Older Xray imports lost profile remarks. Refresh them once per launch; identity stays unchanged.
         saved.value.subscriptions.filter { sub -> sub.source.startsWith("https://") && sub.nodes.any { it.country.isBlank() && it.name.lowercase() in setOf("proxy", "vpn", "out", "outbound") } }.forEach(::refresh)
     }
@@ -118,13 +124,38 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 repo.pings.value = repo.pings.value + (node.id to (repo.pings.value[node.id] ?: PingResult(method = method)).copy(running = true, queued = false))
                 val result = withContext(Dispatchers.IO) { runCatching {
                     if (method == PingMethod.TCP) {
-                        NativeCore.setup(getApplication()); val platform = AndroidPlatform(getApplication()); try { io.nekohasekai.libbox.Libbox.bebekonTCPProbe(node.host, node.port, platform) } finally { platform.close() }
-                    } else NativeCore.probe(getApplication(), SavedState(subscriptions = listOf(Subscription(name = "probe", source = "", nodes = listOf(node))), selected = node.id, preferences = preferences), if (method == PingMethod.HTTPS_HEAD) "HEAD" else "GET").also { check(it.statusCode == 204) { "HTTPS-проверка не вернула ожидаемый ответ 204" } }.millis
+                        NativeCore.bounded(8000) { NativeCore.setup(getApplication()); val platform = AndroidPlatform(getApplication()); try { io.nekohasekai.libbox.Libbox.bebekonTCPProbe(node.host, node.port, platform) } finally { platform.close() } }
+                    } else NativeCore.probe(getApplication(), probeState(node, preferences), if (method == PingMethod.HTTPS_HEAD) "HEAD" else "GET").also { check(it.statusCode == 204) { "HTTPS-проверка не вернула ожидаемый ответ 204" } }.millis
                 } }
                 repo.pings.value = repo.pings.value + (node.id to result.fold({ PingResult(millis = it.coerceAtLeast(1), method = method, target = target) }, { PingResult(failed = true, method = method, target = target) }))
+                if (result.isSuccess) detectCountry(node)
             }
         }
     }
     fun pingAll() { saved.value.visibleNodes.forEach(::ping) }
+    private val countryLimit = Semaphore(2)
+    private val countryJobs = mutableSetOf<String>()
+    private val exitGeo = GeoLookup()
+    private suspend fun rememberCountries(found: Map<String, String>) {
+        if (found.all { (id, code) -> saved.value.detectedCountries[id] == code }) return
+        withContext(Dispatchers.IO) { runCatching { repo.update { s -> s.copy(detectedCountries = s.detectedCountries.filterKeys { id -> s.nodes.any { it.id == id } } + found.filterKeys { id -> s.nodes.any { it.id == id } }) } } }
+    }
+    /** Asks a location service through the server itself, so it sees the VPN exit rather than the user's IP. */
+    private fun detectCountry(node: Node) {
+        val state = saved.value
+        if (!state.preferences.mapLocation || node.country.isNotBlank() || node.id in state.detectedCountries || !countryJobs.add(node.id)) return
+        viewModelScope.launch {
+            try {
+                countryLimit.withPermit {
+                    val code = withContext(Dispatchers.IO) { runCatching { exitGeo.lookup("") { url -> exitReply(node, url) } }.getOrNull() }?.country.orEmpty()
+                    if (code.matches(Regex("[A-Z]{2}"))) rememberCountries(mapOf(node.id to code))
+                }
+            } finally { countryJobs.remove(node.id) }
+        }
+    }
+    private fun exitReply(node: Node, url: String): GeoReply = try {
+        NativeCore.probe(getApplication(), probeState(node, saved.value.preferences), "GET", url).let { GeoReply(it.statusCode, it.body) }
+    } catch (e: Exception) { e.message?.removePrefix("probe HTTP ")?.toIntOrNull()?.let { GeoReply(it) } ?: throw e }
+    private fun probeState(node: Node, preferences: Preferences) = SavedState(subscriptions = listOf(Subscription(name = "probe", source = "", nodes = listOf(node))), selected = node.id, preferences = preferences)
     fun receive(intent: Intent?) { val text = when (intent?.action) { Intent.ACTION_SEND -> intent.getStringExtra(Intent.EXTRA_TEXT); Intent.ACTION_VIEW -> intent.dataString; else -> null }; if (!text.isNullOrBlank()) importText.value = text }
 }

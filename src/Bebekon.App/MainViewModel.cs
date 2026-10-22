@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Net.Http;
 using System.Net.NetworkInformation;
 using System.Security.Cryptography;
 using System.Windows.Input;
@@ -231,13 +232,32 @@ public sealed partial class MainViewModel : Observable, IDisposable
         Settings.TunnelMode = mode; Save(); Notify(nameof(Settings)); Notify(nameof(IsTunMode)); Notify(nameof(IsProxyMode)); QueueApply(); NotifyStatus();
     }
     private string T(string ru, string en) => Settings.Language == "English" ? en : ru;
-    public async Task InitializeAsync()
+    public async Task InitializeAsync(bool systemStartup = false)
     {
         _ = WatchUpdatesAsync();
         try { var response = await service.SendAsync(new("GetStatus")); ApplyStatus(response.Status); if (Connected) { await DisconnectAsync(); await ConnectAsync(); } }
         catch { SystemProxy.Restore(); }
         _ = RefreshMapOriginAsync();
-        if (Settings.AutoConnect && !Connected && SelectedServer is not null) try { await ConnectAsync(); } catch (Exception e) { Report(e); }
+        if (Settings.AutoConnect && !Connected && SelectedServer is not null) await AutoConnectAsync(systemStartup);
+    }
+    private async Task AutoConnectAsync(bool systemStartup)
+    {
+        // Right after Windows starts, Wi-Fi and DNS often come up later than the app. Wait for a
+        // network instead of failing with a timeout, then retry once if the first attempt is early.
+        for (var attempt = 0; attempt < (systemStartup ? 2 : 1); attempt++)
+        {
+            try
+            {
+                for (var waited = 0; systemStartup && waited < 90 && !NetworkInterface.GetIsNetworkAvailable(); waited++) await Task.Delay(1000, lifetime.Token);
+                if (attempt > 0) await Task.Delay(TimeSpan.FromSeconds(10), lifetime.Token);
+                if (Connected || ConnectionBusy) return;
+                await ConnectAsync(); return;
+            }
+            catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { return; }
+            // Never repeat a declined administrator prompt or a server/config problem on its own.
+            catch (Exception e) when (e is not UserError && attempt + 1 < (systemStartup ? 2 : 1)) { }
+            catch (Exception e) { Report(e); return; }
+        }
     }
     public void Go(string name)
     {
@@ -272,6 +292,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
         var request = ++latencyRequest;
         latestLatencyRequests[node.Id] = request;
         var identity = ServerRefresh.ConnectionKey(node);
+        latency.DetectCountries = MapLocationEnabled;
         bool Current() => generation == latencyGeneration && latestLatencyRequests.GetValueOrDefault(node.Id) == request && (Data.Servers.Contains(node) || ReferenceEquals(SelectedServer, node)) && identity == ServerRefresh.ConnectionKey(node);
         var result = await (testLatency ?? latency.MeasureAsync)(node, mode, force, token, () => { if (Current() && node.LatencyMs is null) node.Latency = T("Проверка…", "Checking…"); });
         token.ThrowIfCancellationRequested();
@@ -282,6 +303,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
             : result.TimedOut ? T("Таймаут", "Timeout") : T("Недоступен", "Unavailable");
         node.MeasuredMode = result.Mode;
         node.LatencyMs = result.Milliseconds ?? (supported ? -1 : null);
+        if (result.Country is { } country && node.CountryCode.Length == 0) { node.DetectedCountry = country; Save(); if (ReferenceEquals(node, SelectedServer)) Notify(nameof(SelectedCountry)); }
         QueuePingSort();
     }
     private async void QueuePingSort()
@@ -375,7 +397,9 @@ public sealed partial class MainViewModel : Observable, IDisposable
             // Finish a direct-IP location lookup before installing TUN routes. Otherwise a quick
             // connect discards the origin, or a late lookup could mistake VPN egress for the user.
             locatingBeforeTunnel = true;
-            try { await RefreshMapOriginAsync().WaitAsync(token); }
+            // Location services can be slow or blocked; the map must never delay connecting for long.
+            try { await RefreshMapOriginAsync().WaitAsync(TimeSpan.FromSeconds(3), token); }
+            catch (TimeoutException) { }
             finally { locatingBeforeTunnel = false; }
             token.ThrowIfCancellationRequested();
             spec = new(SelectedServer, ActiveProfile, Settings, LatencyService.FreePort(), Convert.ToHexString(RandomNumberGenerator.GetBytes(24)), Data.Servers.Where(s => ActiveProfile.Rules.Any(r => r.UseVpn && r.ServerId == s.Id)).ToList());
@@ -411,8 +435,19 @@ public sealed partial class MainViewModel : Observable, IDisposable
     private async Task ProbeConnectionAsync(ConnectSpec current, CancellationToken token)
     {
         if (testProbe is not null) { await testProbe(current, token); return; }
-        using var http = LatencyService.ProbeClient(current);
-        using var response = await http.GetAsync("https://www.gstatic.com/generate_204", token); response.EnsureSuccessStatusCode();
+        // A cold first request over a phone hotspot or mobile link can need several round trips.
+        // One slow endpoint must not tear down a working tunnel, so allow time and a second target.
+        Exception? failure = null;
+        foreach (var target in new[] { "https://www.gstatic.com/generate_204", "https://cp.cloudflare.com/generate_204" })
+        {
+            try
+            {
+                using var http = LatencyService.ProbeClient(current); http.Timeout = TimeSpan.FromSeconds(10);
+                using var response = await http.GetAsync(target, token); response.EnsureSuccessStatusCode(); return;
+            }
+            catch (Exception e) when ((e is HttpRequestException or TaskCanceledException) && !token.IsCancellationRequested) { failure = e; }
+        }
+        throw failure!;
     }
     private async Task UpdateIpAsync(ConnectSpec current, int generation, CancellationToken token)
     {
@@ -465,7 +500,12 @@ public sealed partial class MainViewModel : Observable, IDisposable
         foreach (var name in new[] { nameof(DownloadRate), nameof(UploadRate), nameof(DownloadTotal), nameof(UploadTotal), nameof(DownloadHistory), nameof(UploadHistory) }) Notify(name);
     }
     private void NotifyStatus() { foreach (var n in new[] { nameof(Connected), nameof(ConnectionBusy), nameof(ConnectLabel), nameof(StatusLabel), nameof(StatusDetail), nameof(FooterLabel), nameof(FooterMode), nameof(DownloadRate), nameof(UploadRate) }) Notify(n); StatusChanged?.Invoke(); }
-    public void Report(Exception e) { log.Write("Operation failed: " + e.GetType().Name); Banner = e is UserError ? e.Message : e is OperationCanceledException ? T("Время ожидания истекло.", "Operation timed out.") : T("Не удалось выполнить действие. Проверьте подключение и параметры.", "Action failed. Check your connection and settings."); }
+    public void Report(Exception e) { log.Write("Operation failed: " + e.GetType().Name); Banner = e switch {
+        UserError => e.Message,
+        OperationCanceledException or TimeoutException => T("Сервер не ответил вовремя. Проверьте интернет или выберите другой сервер.", "The server did not respond in time. Check your internet or choose another server."),
+        // The tunnel started, but the HTTPS check through it failed.
+        HttpRequestException => T("Сервер не пропускает трафик. Выберите другой сервер; если не помогает — включите «Совместимость» в настройках.", "The server does not pass traffic. Choose another server; if that does not help, enable Compatibility in settings."),
+        _ => T("Не удалось выполнить действие. Проверьте подключение и параметры.", "Action failed. Check your connection and settings.") }; }
     private void Save() { try { store.Save(Data); } catch (Exception e) { Report(e); } }
     private static void OpenFolder(string dir) { Directory.CreateDirectory(dir); Process.Start(new ProcessStartInfo("explorer.exe") { ArgumentList = { dir }, UseShellExecute = true }); }
     private void OnPower(object sender, PowerModeChangedEventArgs e) { if (e.Mode == PowerModes.Resume) ScheduleNetworkCheck(true); }

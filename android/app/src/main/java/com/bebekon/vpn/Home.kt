@@ -36,7 +36,7 @@ private val SignalRed = Color(0xFFFF687A)
 @Composable fun HomeScreen(saved: SavedState, session: Session, model: MainViewModel, toggle: () -> Unit, servers: () -> Unit, routing: () -> Unit, subscriptions: () -> Unit) {
     val origin by model.origin.point.collectAsState()
     val destination by model.origin.destination.collectAsState()
-    val resolvedCountries by model.origin.countries.collectAsState()
+    val resolvedCountries by model.countries.collectAsState()
     val history by VpnController.trafficHistory.collectAsState()
     val pings by model.repo.pings.collectAsState()
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }

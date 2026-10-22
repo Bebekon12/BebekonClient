@@ -17,6 +17,15 @@ public class ServerRefreshTests
         Assert.Equal(ServerRefresh.ConnectionKey(first), ServerRefresh.ConnectionKey(selected));
     }
     [Fact]
+    public void DetectedCountryFollowsOnlyAnUnchangedConnection()
+    {
+        var old = CoreTests.Node(); old.SubscriptionId = "a"; old.Name = "Node"; old.DetectedCountry = "FI";
+        var same = CoreTests.Node(); same.Id = old.Id; same.Name = "Node";
+        Assert.Equal("FI", Assert.Single(ServerRefresh.Merge("a", [old], [same], old.Id)).DetectedCountry);
+        var moved = CoreTests.Node(); moved.Id = old.Id; moved.Name = "Node"; moved.Host = "moved.example";
+        Assert.Equal("", Assert.Single(ServerRefresh.Merge("a", [old], [moved], old.Id)).DetectedCountry);
+    }
+    [Fact]
     public void RemovedSelectionStaysAvailableInsteadOfSwitchingServers()
     {
         var selected = CoreTests.Node(); selected.SubscriptionId = "a";

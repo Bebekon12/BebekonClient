@@ -1,15 +1,326 @@
 [
- {"name":"Telegram","icon":"↗","domains":["telegram.org","t.me","telegram.me","telegra.ph","tdesktop.com"]},
- {"name":"YouTube","icon":"▶","domains":["youtube.com","youtu.be","googlevideo.com","ytimg.com","youtubei.googleapis.com"]},
- {"name":"Netflix","icon":"N","domains":["netflix.com","netflix.net","nflxvideo.net","nflximg.net","nflxext.com","nflxso.net"]},
- {"name":"Discord","icon":"◈","domains":["discord.com","discord.gg","discordapp.com","discordapp.net","discord.media"]},
- {"name":"OpenAI / ChatGPT","icon":"✳","domains":["openai.com","chatgpt.com","oaistatic.com","oaiusercontent.com"]},
- {"name":"Claude / Anthropic","icon":"✺","domains":["claude.ai","anthropic.com","claudeusercontent.com"]},
- {"name":"TikTok","icon":"♪","domains":["tiktok.com","tiktokv.com","tiktokcdn.com","byteoversea.com","ibytedtos.com"]},
- {"name":"Instagram","icon":"◎","domains":["instagram.com","cdninstagram.com"]},
- {"name":"Facebook","icon":"f","domains":["facebook.com","fb.com","fbcdn.net","fbsbx.com","messenger.com"]},
- {"name":"Twitter / X","icon":"X","domains":["x.com","twitter.com","twimg.com","t.co"]},
- {"name":"WhatsApp","icon":"◉","domains":["whatsapp.com","whatsapp.net"]},
- {"name":"Google","icon":"G","domains":["google.com","googleapis.com","gstatic.com","googleusercontent.com"]},
- {"name":"Twitch","icon":"▣","domains":["twitch.tv","ttvnw.net","jtvnw.net","twitchcdn.net"]}
+  {
+    "name": "Telegram",
+    "icon": "↗",
+    "domains": [
+      "telegram.org",
+      "t.me",
+      "telegram.me",
+      "telegra.ph",
+      "tdesktop.com"
+    ],
+    "description": "Полный встроенный список доменов и IP-сети приложения",
+    "rules": [
+      {
+        "name": "Telegram",
+        "kind": "geoSite",
+        "values": [
+          "telegram"
+        ],
+        "useVpn": true
+      },
+      {
+        "name": "Telegram · IP-сети",
+        "kind": "geoIp",
+        "values": [
+          "telegram"
+        ],
+        "useVpn": true
+      }
+    ]
+  },
+  {
+    "name": "YouTube",
+    "icon": "▶",
+    "domains": [
+      "youtube.com",
+      "youtu.be",
+      "googlevideo.com",
+      "ytimg.com",
+      "youtubei.googleapis.com"
+    ],
+    "description": "Полный встроенный список доменов",
+    "rules": [
+      {
+        "name": "YouTube",
+        "kind": "geoSite",
+        "values": [
+          "youtube"
+        ],
+        "useVpn": true
+      }
+    ]
+  },
+  {
+    "name": "Netflix",
+    "icon": "N",
+    "domains": [
+      "netflix.com",
+      "netflix.net",
+      "nflxvideo.net",
+      "nflximg.net",
+      "nflxext.com",
+      "nflxso.net"
+    ],
+    "description": "Полный встроенный список доменов",
+    "rules": [
+      {
+        "name": "Netflix",
+        "kind": "geoSite",
+        "values": [
+          "netflix"
+        ],
+        "useVpn": true
+      }
+    ]
+  },
+  {
+    "name": "Discord",
+    "icon": "◈",
+    "domains": [
+      "discord.com",
+      "discord.gg",
+      "discordapp.com",
+      "discordapp.net",
+      "discord.media"
+    ],
+    "description": "Полный встроенный список доменов",
+    "rules": [
+      {
+        "name": "Discord",
+        "kind": "geoSite",
+        "values": [
+          "discord"
+        ],
+        "useVpn": true
+      }
+    ]
+  },
+  {
+    "name": "OpenAI / ChatGPT",
+    "icon": "✳",
+    "domains": [
+      "openai.com",
+      "chatgpt.com",
+      "oaistatic.com",
+      "oaiusercontent.com"
+    ],
+    "description": "Полный встроенный список доменов",
+    "rules": [
+      {
+        "name": "OpenAI / ChatGPT",
+        "kind": "geoSite",
+        "values": [
+          "openai"
+        ],
+        "useVpn": true
+      }
+    ]
+  },
+  {
+    "name": "Claude / Anthropic",
+    "icon": "✺",
+    "domains": [
+      "claude.ai",
+      "anthropic.com",
+      "claudeusercontent.com"
+    ],
+    "description": "Полный встроенный список доменов",
+    "rules": [
+      {
+        "name": "Claude / Anthropic",
+        "kind": "geoSite",
+        "values": [
+          "anthropic"
+        ],
+        "useVpn": true
+      }
+    ]
+  },
+  {
+    "name": "TikTok",
+    "icon": "♪",
+    "domains": [
+      "tiktok.com",
+      "tiktokv.com",
+      "tiktokcdn.com",
+      "byteoversea.com",
+      "ibytedtos.com"
+    ],
+    "description": "Полный встроенный список доменов · CDN: byteoversea.com, ibytedtos.com",
+    "rules": [
+      {
+        "name": "TikTok",
+        "kind": "geoSite",
+        "values": [
+          "tiktok"
+        ],
+        "useVpn": true
+      },
+      {
+        "name": "TikTok · CDN",
+        "kind": "site",
+        "values": [
+          "byteoversea.com",
+          "ibytedtos.com"
+        ],
+        "useVpn": true
+      }
+    ]
+  },
+  {
+    "name": "Instagram",
+    "icon": "◎",
+    "domains": [
+      "instagram.com",
+      "cdninstagram.com"
+    ],
+    "description": "Полный встроенный список доменов · CDN: fbcdn.net",
+    "rules": [
+      {
+        "name": "Instagram",
+        "kind": "geoSite",
+        "values": [
+          "instagram"
+        ],
+        "useVpn": true
+      },
+      {
+        "name": "Instagram · CDN",
+        "kind": "site",
+        "values": [
+          "fbcdn.net"
+        ],
+        "useVpn": true
+      }
+    ]
+  },
+  {
+    "name": "Facebook",
+    "icon": "f",
+    "domains": [
+      "facebook.com",
+      "fb.com",
+      "fbcdn.net",
+      "fbsbx.com",
+      "messenger.com"
+    ],
+    "description": "Полный встроенный список доменов · CDN: messenger.com",
+    "rules": [
+      {
+        "name": "Facebook",
+        "kind": "geoSite",
+        "values": [
+          "facebook"
+        ],
+        "useVpn": true
+      },
+      {
+        "name": "Facebook · CDN",
+        "kind": "site",
+        "values": [
+          "messenger.com"
+        ],
+        "useVpn": true
+      }
+    ]
+  },
+  {
+    "name": "Twitter / X",
+    "icon": "X",
+    "domains": [
+      "x.com",
+      "twitter.com",
+      "twimg.com",
+      "t.co"
+    ],
+    "description": "Полный встроенный список доменов",
+    "rules": [
+      {
+        "name": "Twitter / X",
+        "kind": "geoSite",
+        "values": [
+          "twitter"
+        ],
+        "useVpn": true
+      }
+    ]
+  },
+  {
+    "name": "WhatsApp",
+    "icon": "◉",
+    "domains": [
+      "whatsapp.com",
+      "whatsapp.net"
+    ],
+    "description": "Полный встроенный список доменов · CDN: wa.me",
+    "rules": [
+      {
+        "name": "WhatsApp",
+        "kind": "geoSite",
+        "values": [
+          "whatsapp"
+        ],
+        "useVpn": true
+      },
+      {
+        "name": "WhatsApp · CDN",
+        "kind": "site",
+        "values": [
+          "wa.me"
+        ],
+        "useVpn": true
+      }
+    ]
+  },
+  {
+    "name": "Google",
+    "icon": "G",
+    "domains": [
+      "google.com",
+      "googleapis.com",
+      "gstatic.com",
+      "googleusercontent.com"
+    ],
+    "description": "Полный встроенный список доменов",
+    "rules": [
+      {
+        "name": "Google",
+        "kind": "geoSite",
+        "values": [
+          "google"
+        ],
+        "useVpn": true
+      }
+    ]
+  },
+  {
+    "name": "Twitch",
+    "icon": "▣",
+    "domains": [
+      "twitch.tv",
+      "ttvnw.net",
+      "jtvnw.net",
+      "twitchcdn.net"
+    ],
+    "description": "Полный встроенный список доменов · CDN: live-video.net",
+    "rules": [
+      {
+        "name": "Twitch",
+        "kind": "geoSite",
+        "values": [
+          "twitch"
+        ],
+        "useVpn": true
+      },
+      {
+        "name": "Twitch · CDN",
+        "kind": "site",
+        "values": [
+          "live-video.net"
+        ],
+        "useVpn": true
+      }
+    ]
+  }
 ]

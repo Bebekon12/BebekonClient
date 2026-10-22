@@ -103,7 +103,7 @@ internal sealed class RuleEditor : StackPanel
     }
     internal RoutingRule Build()
     {
-        var values = ValueField.Text.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+        var values = ValueField.Text.Split(Kind == RuleKind.Application ? new[] { ',', '\n', '\r' } : new[] { ',', '\n', '\r', ' ' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(v => Kind == RuleKind.Site ? RuleValidation.SiteHost(v, dropWww: true) : v).Where(v => v.Length > 0).Distinct().ToList();
         var name = NameField.Text.Trim();
         if (name.Length == 0 && values.Count > 0) name = Kind == RuleKind.Application ? Path.GetFileNameWithoutExtension(values[0]) : values[0];
         var result = new RoutingRule { Id = original?.Id ?? Guid.NewGuid().ToString("N"), CreatedAt = original is null ? DateTimeOffset.UtcNow : original.CreatedAt, Name = name, Kind = Kind, Values = values, UseVpn = UseVpn, ServerId = UseVpn ? (ServerField.SelectedItem as RuleServerChoice)?.Id : null };

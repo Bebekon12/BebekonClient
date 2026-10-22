@@ -31,7 +31,7 @@ internal class TrustTunnelNative(private val context: Context, private val servi
         override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) = changed()
         override fun onLinkPropertiesChanged(network: Network, properties: android.net.LinkProperties) = changed()
     }
-    private fun network(): Network? = connectivity.allNetworks.firstOrNull { network -> connectivity.getNetworkCapabilities(network)?.let { it.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) && it.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN) && it.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) } == true }
+    private fun network(): Network? = PhysicalNetwork.current(connectivity)
     @Synchronized private fun changed() { if (!closed && pointer != 0L) networkNative(pointer, network() != null) }
     @Synchronized fun start(node: Node, timeoutMillis: Long = 4500): JSONObject {
         val deadline = android.os.SystemClock.elapsedRealtime() + timeoutMillis.coerceIn(1, 4500)

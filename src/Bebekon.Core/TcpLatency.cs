@@ -10,7 +10,10 @@ internal static class TcpLatency
     public static async Task<long> MeasureAsync(string host, int port, CancellationToken token)
     {
         var addresses = await Dns.GetHostAddressesAsync(host, token);
-        var local = NetworkAddresses.Read().Address;
+        // Without our TUN the OS route is already the right uplink; forcing a guessed adapter
+        // broke checks on PCs with several adapters (e.g. Ethernet plus a phone hotspot).
+        var tunnel = NetworkInterface.GetAllNetworkInterfaces().Any(n => n.Name == "Bebekon" && n.OperationalStatus == OperationalStatus.Up);
+        var local = tunnel ? NetworkAddresses.Read().Address : null;
         var physical = local is null ? null : NetworkInterface.GetAllNetworkInterfaces()
             .FirstOrDefault(n => n.GetIPProperties().UnicastAddresses.Any(a => a.Address.ToString() == local));
         var times = new List<long>();
@@ -19,7 +22,7 @@ internal static class TcpLatency
             foreach (var destination in addresses.OrderBy(a => a.AddressFamily == AddressFamily.InterNetwork ? 0 : 1)) {
                 try {
                     using var tcp = new TcpClient(destination.AddressFamily);
-                    if (!IPAddress.IsLoopback(destination)) {
+                    if (tunnel && !IPAddress.IsLoopback(destination)) {
                         // A TUN's local TCP stack can acknowledge SYN immediately. Bind
                         // only this probe to the physical uplink to measure the remote port.
                         var properties = physical?.GetIPProperties() ?? throw new SocketException((int)SocketError.NetworkUnreachable);

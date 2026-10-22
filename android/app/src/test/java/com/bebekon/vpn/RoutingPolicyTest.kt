@@ -55,7 +55,9 @@ class RoutingPolicyTest {
         assertEquals(p, Preferences.fromJson(p.toJson()))
         val c = JSONObject(CoreConfig.build(state(emptyList()).copy(preferences = p), { error("No geo") }))
         assertEquals(1280, c.getJSONArray("inbounds").getJSONObject(0).getInt("mtu"))
-        assertEquals("8.8.8.8", c.getJSONObject("dns").getJSONArray("servers").getJSONObject(0).getString("server"))
+        val servers = c.getJSONObject("dns").getJSONArray("servers").objects()
+        assertEquals("8.8.8.8", servers.first { it.getString("tag") == "vpn-dns" }.getString("server"))
+        assertEquals("Direct DNS follows the physical network", "local", servers.first { it.getString("tag") == "direct-dns" }.getString("type"))
         assertFalse(c.getJSONObject("log").getBoolean("disabled"))
     }
     @Test fun ipv4CompatibilityDefaultMigratesOldSettingsAndMatchesTunnelDns() {
@@ -130,6 +132,34 @@ class RoutingPolicyTest {
         val explicitPolicy = resolveWebAppPolicy(explicit, identify)
         assertTrue("An explicit whole-browser VPN selection still works", explicitPolicy.siteOnlyBrowsers.isEmpty())
         assertTrue("Shared mode needs no implicit browser fallback", resolveWebAppPolicy(s.copy(preferences = s.preferences.copy(sitesInAllApps = true)), identify).siteOnlyBrowsers.isEmpty())
+    }
+    @Test fun directBrowserStillUsesVpnSiteRulesWhileOtherDirectAppsStayExcluded() {
+        val browser: (String) -> Boolean = { it == "com.yandex.browser" }
+        val site = Rule(name = "Site", kind = RuleKind.DOMAIN, values = listOf("example.org"), created = 5)
+        // The browser rule is newer than the site rule; the site must still win inside the browser.
+        val shared = state(listOf(site, app("com.yandex.browser", false, 20), app("ru.sberbankmobile", false, 30)))
+        val policy = resolveWebAppPolicy(shared, { null }, browser)
+        assertNull(policy.allowed)
+        assertEquals(setOf("ru.sberbankmobile"), policy.excluded)
+        assertEquals(setOf("com.yandex.browser"), policy.siteOnlyBrowsers)
+        val config = JSONObject(CoreConfig.build(shared, { error("No geo") }, policy = policy))
+        val routes = config.getJSONObject("route").getJSONArray("rules").objects()
+        val siteIndex = routes.indexOfFirst { it.has("domain_suffix") }
+        val browserRoutes = routes.withIndex().filter { (_, r) -> r.has("package_name") && "com.yandex.browser" in r.getJSONArray("package_name").strings() }
+        assertEquals("vpn", routes[siteIndex].getString("outbound"))
+        assertEquals(listOf(routes.lastIndex), browserRoutes.map { it.index })
+        assertEquals("direct", routes.last().getString("outbound"))
+        val dns = config.getJSONObject("dns").getJSONArray("rules").objects()
+        assertEquals("vpn-dns", dns.first { it.has("domain_suffix") }.getString("server"))
+        assertEquals("direct-dns", dns.last().getString("server"))
+        val selected = state(listOf(site, app("org.telegram.messenger"), app("com.yandex.browser", false, 20)))
+        val appOnly = resolveWebAppPolicy(selected, { null }, browser)
+        assertEquals(setOf("org.telegram.messenger", "com.yandex.browser"), appOnly.allowed)
+        assertEquals(setOf("org.telegram.messenger"), appOnly.nativeApps)
+        val noSites = state(listOf(app("com.yandex.browser", false)))
+        assertTrue("Without VPN site rules a Direct browser stays outside", resolveWebAppPolicy(noSites, { null }, browser).siteOnlyBrowsers.isEmpty())
+        val webApp = shared.copy(rules = shared.rules + app("org.chromium.webapk.chatgpt", created = 40))
+        assertEquals(listOf("chatgpt.com"), resolveWebAppRules(webApp, { if (it.startsWith("org.chromium.webapk")) WebApp("chatgpt.com", "com.yandex.browser") else null }, browser).rules.last().values)
     }
     @Test fun appOnlyAndSitesOnlyRemainDistinctWithPresetsAndExceptions() {
         val site = Rule(name = "Preset", kind = RuleKind.GEOSITE, values = listOf("openai"))

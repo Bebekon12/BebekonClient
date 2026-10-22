@@ -114,7 +114,7 @@ private fun cleanName(s: String) = s.replace(Regex("[\\x{1F1E6}-\\x{1F1FF}]"), "
 @Composable private fun ServersScreen(saved: SavedState, model: MainViewModel, addTrustTunnel: () -> Unit, editTrustTunnel: (Node) -> Unit) {
     var search by rememberSaveable { mutableStateOf("") }; var favorites by rememberSaveable { mutableStateOf(false) }; var methods by remember { mutableStateOf(false) }; var sortPing by rememberSaveable { mutableStateOf(true) }
     val ping by model.repo.pings.collectAsState()
-    val countries by model.origin.countries.collectAsState()
+    val countries by model.countries.collectAsState()
     val nodes = saved.visibleNodes.filter { (!favorites || it.id in saved.favorites) && (it.name.contains(search, true) || Locale("", it.displayCountry(countries)).getDisplayCountry(Locale("ru")).contains(search, true) || Locale("", it.displayCountry(countries)).getDisplayCountry(Locale.ENGLISH).contains(search, true)) }.let { if (sortPing) nodesByPing(it, ping) else it }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item { PageTitle("Выбор сервера", "${saved.visibleNodes.size} серверов · ${saved.subscriptions.size} подписок") }
