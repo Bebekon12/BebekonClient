@@ -62,6 +62,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
     private static string AutoKey(IEnumerable<Server>? servers) => string.Join("\n", (servers ?? []).Where(ConfigGenerator.AutoEligible).Select(ServerRefresh.ConnectionKey).Order(StringComparer.Ordinal));
     /// <summary>Maps the core's "auto-N" tag back through the list used for the running connection.</summary>
     private Server? ActiveAutoServer => Connected && spec is { } current && traffic?.ActiveOutbound is { } tag && int.TryParse(tag.AsSpan(5), out var index) && ConfigGenerator.AutoServers(current) is { Count: >= 2 } list && index >= 0 && index < list.Count ? list[index] : null;
+    public bool KillSwitchEnabled { get => Settings.KillSwitch; set { if (Settings.KillSwitch == value) return; Settings.KillSwitch = value; Notify(); Save(); QueueApply(); } }
     public bool TlsFragmentEnabled { get => Settings.TlsFragment; set { if (Settings.TlsFragment == value) return; Settings.TlsFragment = value; Notify(); Save(); QueueApply(); } }
     public bool AutoServerEnabled { get => Settings.AutoServer; set { if (Settings.AutoServer == value) return; Settings.AutoServer = value; Notify(); Notify(nameof(ServerLabel)); Save(); QueueApply(); if (value && !AutoActive) Banner = T("Для автовыбора нужно минимум два сервера VLESS, VMess, Trojan, Shadowsocks, Hysteria2 или TUIC.", "Auto needs at least two VLESS, VMess, Trojan, Shadowsocks, Hysteria2 or TUIC servers."); } }
     private Profile activeProfile;
@@ -446,7 +447,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
             {
                 token.ThrowIfCancellationRequested();
                 if (!desiredConnected || appliedConfigurationVersion == configurationVersion) return;
-                await StopConnectionCoreAsync();
+                await StopConnectionCoreAsync(reconnecting: true);
                 // Keep the gate across stop/start; later edits are captured by the new snapshot.
                 if (desiredConnected) await ConnectCoreAsync();
             }
@@ -454,7 +455,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
         }
         catch (OperationCanceledException) { } catch (Exception e) { Report(e); }
     }
-    private async Task ToggleSafelyAsync() { try { if (desiredConnected || Connected) await DisconnectAsync(); else await ConnectAsync(); } catch (Exception e) { Report(e); } }
+    private async Task ToggleSafelyAsync() { try { if (Blocking) await ConnectAsync(); else if (desiredConnected || Connected) await DisconnectAsync(); else await ConnectAsync(); } catch (Exception e) { Report(e); } }
     public async Task ConnectAsync()
     {
         desiredConnected = true;
@@ -548,12 +549,13 @@ public sealed partial class MainViewModel : Observable, IDisposable
         catch { State = ConnectionState.Error; throw; }
         finally { connectionGate.Release(); }
     }
-    private async Task StopConnectionCoreAsync()
+    /// <param name="reconnecting">Leak protection keeps blocking until the following connect.</param>
+    private async Task StopConnectionCoreAsync(bool reconnecting = false)
     {
         monitorId++; networkDelay?.Cancel(); connectionAttempt?.Cancel(); State = ConnectionState.Disconnecting;
         try
         {
-            var reply = await service.SendAsync(new("StopCore"), true, lifetime.Token);
+            var reply = await service.SendAsync(new("StopCore", KeepBlocking: reconnecting), true, lifetime.Token);
             if (!reply.Ok) throw new UserError(reply.Message ?? "Не удалось остановить VPN.");
             ApplyStatus(reply.Status);
         }
@@ -562,9 +564,12 @@ public sealed partial class MainViewModel : Observable, IDisposable
     private async Task MonitorAsync()
     {
         var id = ++monitorId;
-        try { while (id == monitorId && Connected && !lifetime.IsCancellationRequested) { await Task.Delay(1000, lifetime.Token); if (id != monitorId || !Connected) break; var response = await service.SendAsync(new("GetStatus"), ct: lifetime.Token); if (id != monitorId) break; ApplyStatus(response.Status); _ = RefreshMapOriginAsync(); _ = RefreshMapDestinationAsync(); if (started is { } time) Session = (DateTimeOffset.UtcNow - time).ToString(@"hh\:mm\:ss"); if (!Connected && testProbe is null) SystemProxy.Restore(); } }
+        try { while (id == monitorId && Monitoring && !lifetime.IsCancellationRequested) { await Task.Delay(1000, lifetime.Token); if (id != monitorId || !Monitoring) break; var response = await service.SendAsync(new("GetStatus"), ct: lifetime.Token); if (id != monitorId) break; var wasConnected = Connected; ApplyStatus(response.Status); if (wasConnected && Blocking) Banner = T("Ядро VPN остановилось, защита от утечек держит интернет вне VPN закрытым. Нажмите кнопку подключения — VPN переподключится (если не выйдет, блокировка снимется).", "The VPN core stopped and leak protection keeps internet outside the VPN closed. Press the connect button to reconnect (if that fails, the block is released)."); _ = RefreshMapOriginAsync(); _ = RefreshMapDestinationAsync(); if (started is { } time) Session = (DateTimeOffset.UtcNow - time).ToString(@"hh\:mm\:ss"); if (!Connected && testProbe is null) SystemProxy.Restore(); } }
         catch (OperationCanceledException) { } catch (Exception e) { if (id == monitorId) { if (testProbe is null) SystemProxy.Restore(); State = ConnectionState.Error; SetTraffic(null); Report(e); } }
     }
+    /// <summary>The core stopped while leak protection holds traffic; keep the service (and its block) alive.</summary>
+    private bool Blocking => desiredConnected && Settings.KillSwitch && Settings.TunnelMode == TunnelMode.Tun && State == ConnectionState.Error;
+    private bool Monitoring => Connected || Blocking;
     private void ApplyStatus(ServiceStatus s) { State = s.State; started = s.ConnectedAt; SetTraffic(s.State == ConnectionState.Connected ? s.Traffic : null); if (s.Error is not null) Banner = s.Error; }
     private void SetTraffic(TrafficSnapshot? value)
     {
@@ -623,7 +628,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
                 }
             }
             await connectionGate.WaitAsync(token);
-            try { if (generation == monitorId && desiredConnected && Connected) { await StopConnectionCoreAsync(); if (desiredConnected) await ConnectCoreAsync(); } }
+            try { if (generation == monitorId && desiredConnected && Connected) { await StopConnectionCoreAsync(reconnecting: true); if (desiredConnected) await ConnectCoreAsync(); } }
             finally { connectionGate.Release(); }
         }
         catch (OperationCanceledException) { }

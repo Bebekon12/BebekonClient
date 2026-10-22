@@ -5,7 +5,8 @@ using System.Text.Json;
 
 namespace Bebekon.Core;
 
-public sealed record ServiceRequest(string Operation, ConnectSpec? Spec = null);
+/// <param name="KeepBlocking">StopCore for a reconnect: leak protection stays on until the next StartCore.</param>
+public sealed record ServiceRequest(string Operation, ConnectSpec? Spec = null, bool KeepBlocking = false);
 public sealed record ServiceStatus(ConnectionState State, string? Error = null, DateTimeOffset? ConnectedAt = null, int? CorePid = null, TrafficSnapshot? Traffic = null);
 public sealed record ServiceResponse(bool Ok, ServiceStatus Status, string? Message = null);
 public static class PipeProtocol

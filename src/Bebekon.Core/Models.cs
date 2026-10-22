@@ -206,6 +206,8 @@ public sealed class Settings
     public bool AutoServer { get; set; }
     /// <summary>Split the TLS ClientHello of direct (non-VPN) connections, against throttling by SNI.</summary>
     public bool TlsFragment { get; set; }
+    /// <summary>Block traffic outside the tunnel while connected or reconnecting (TUN mode, see KillSwitch).</summary>
+    public bool KillSwitch { get; set; }
     public bool GlowEffects { get; set; } = true;
     public bool PureBlack { get; set; }
     public string AccentColor { get; set; } = "Blue";
