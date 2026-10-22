@@ -102,13 +102,19 @@ public static class SubscriptionLoader
 {
     public static readonly HttpClient Http = new(new SocketsHttpHandler { UseProxy = false, AllowAutoRedirect = false, PooledConnectionLifetime = TimeSpan.FromMinutes(5) }) { Timeout = TimeSpan.FromSeconds(20) };
     public static async Task<List<Server>> LoadAsync(string source, CancellationToken ct = default)
-        => await LoadAsync(source, ct, 0);
-    private static async Task<List<Server>> LoadAsync(string source, CancellationToken ct, int depth)
+        => await LoadAsync(source, ct, 0, null);
+    /// <summary>Also returns the provider's traffic/expiry/links headers (empty for pasted configs).</summary>
+    public static async Task<(List<Server> Servers, ProviderInfo Info)> LoadWithInfoAsync(string source, CancellationToken ct = default)
+    {
+        var info = new ProviderInfo();
+        return (await LoadAsync(source, ct, 0, i => info = i), info);
+    }
+    private static async Task<List<Server>> LoadAsync(string source, CancellationToken ct, int depth, Action<ProviderInfo>? capture)
     {
         if (depth > 3) throw new UserError("Подписка содержит циклические или слишком вложенные ссылки.");
         source = source.Trim().TrimStart('\uFEFF').TrimStart();
         if (source.StartsWith("tt://", StringComparison.OrdinalIgnoreCase) && !source.Contains('\n') && TrustTunnelParser.SubscriptionUrl(source) is { } subscriptionUrl)
-            return await LoadAsync(subscriptionUrl, ct, depth + 1);
+            return await LoadAsync(subscriptionUrl, ct, depth + 1, capture);
         if (!source.StartsWith("http://", StringComparison.OrdinalIgnoreCase) && !source.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
             return VlessParser.ParseSubscription(source);
         if (!Uri.TryCreate(source, UriKind.Absolute, out var uri)) throw new UserError("Укажите URL подписки HTTP/HTTPS.");
@@ -148,6 +154,7 @@ public static class SubscriptionLoader
             if (HeaderFlag("x-hwid-not-supported"))
                 throw new UserError("Провайдер не принял идентификатор устройства (HWID). Проверьте поддержку клиента у провайдера.");
             if (!response.IsSuccessStatusCode) throw new UserError($"Провайдер вернул HTTP {(int)response.StatusCode}. Проверьте подписку.");
+            capture?.Invoke(ProviderInfo.From(response.Headers));
             if (response.Content.Headers.ContentLength > 4 * 1024 * 1024) throw new UserError("Подписка слишком большая.");
             await using var stream = await response.Content.ReadAsStreamAsync(deadline.Token);
             using var output = new MemoryStream(); var buffer = new byte[16384]; int n;
@@ -160,7 +167,7 @@ public static class SubscriptionLoader
             {
                 var content = new UTF8Encoding(false, true).GetString(output.ToArray());
                 var servers = content.Trim().StartsWith("tt://", StringComparison.OrdinalIgnoreCase) && !content.Trim().Contains('\n')
-                    ? await LoadAsync(content, deadline.Token, depth + 1) : VlessParser.ParseSubscription(content);
+                    ? await LoadAsync(content, deadline.Token, depth + 1, null) : VlessParser.ParseSubscription(content);
                 if (servers.All(server => IPAddress.TryParse(server.Host, out var address) && (address.Equals(IPAddress.Any) || address.Equals(IPAddress.IPv6Any))))
                     throw new UserError("Провайдер вернул информационные записи вместо рабочих серверов. Проверьте HWID, лимит устройств и статус подписки в кабинете провайдера.");
                 return servers;

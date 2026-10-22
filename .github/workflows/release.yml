@@ -135,7 +135,7 @@ jobs:
       - name: Build, test and package
         shell: pwsh
         run: |
-          $notes = 'Стабильная работа на мобильном интернете и раздаче, точные пинги, страны серверов, запуск с Windows и правила сайтов в браузерах.'
+          $notes = 'Автовыбор сервера, трафик и срок подписки, автообновление подписок, резервная копия, ссылки «Добавить в Bebekon», обход замедления сайтов без VPN и защита от утечек.'
           if ($env:RELEASE -eq 'true') { ./build.ps1 -PublishFolder artifacts/release-updates -ReleaseNotes $notes }
           else { ./build.ps1 -PublishFolder artifacts/release-updates -ReleaseNotes $notes -SkipUpdateSigning }
       - name: Core sources

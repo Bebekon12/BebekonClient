@@ -66,7 +66,7 @@ class Repository(private val context: Context) {
         return list
     }
     fun load(source: String, name: String): Subscription {
-        val text = source.trim(); var content = text; var title = name.trim(); var info = ""
+        val text = source.trim(); var content = text; var title = name.trim(); var info = ""; var interval = 0; var support = ""; var web = ""; var announce = ""
         val remote = if (text.startsWith("tt://", true)) TrustTunnelProfile.link(text).second ?: text else text
         if (remote.startsWith("https://") || remote.startsWith("http://")) {
             val original = URI(remote); require(original.scheme == "https" || original.host in listOf("localhost", "127.0.0.1", "[::1]")) { "Для ссылки подписки нужен HTTPS" }
@@ -90,13 +90,17 @@ class Repository(private val context: Context) {
                 budget.check()
                 val data = connection.inputStream.use { it.readLimited(4 * 1024 * 1024, budget) }; content = data.toString(Charsets.UTF_8)
                 if (title.isEmpty()) { val h = connection.getHeaderField("profile-title") ?: ""; title = if (h.startsWith("base64:")) runCatching { SubscriptionParser.decode(h.substringAfter(':')) }.getOrDefault("") else h }
-                info = connection.getHeaderField("subscription-userinfo") ?: ""
+                info = connection.getHeaderField("subscription-userinfo")?.take(512) ?: ""
+                interval = ProviderHeaders.updateInterval(connection.getHeaderField("profile-update-interval"))
+                support = ProviderHeaders.safeLink(connection.getHeaderField("support-url"))
+                web = ProviderHeaders.safeLink(connection.getHeaderField("profile-web-page-url"))
+                announce = ProviderHeaders.text(connection.getHeaderField("announce"), 300)
             } finally { connection.disconnect() }
             if (title.isEmpty()) title = u.host
         }
         val nodes = SubscriptionParser.parse(content)
         if (title.isEmpty()) title = "Моя подписка"
-        return Subscription(name = title.take(80), source = text, nodes = nodes, info = info)
+        return Subscription(name = title.take(80), source = text, nodes = nodes, info = info, updateInterval = interval, supportUrl = support, webPageUrl = web, announce = announce)
     }
     fun add(subscription: Subscription) { update { s ->
         val old = s.subscriptions.firstOrNull { it.source == subscription.source }

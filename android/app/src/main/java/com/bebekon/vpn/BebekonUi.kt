@@ -19,6 +19,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.*
@@ -111,6 +112,9 @@ private fun cleanName(s: String) = s.replace(Regex("[\\x{1F1E6}-\\x{1F1FF}]"), "
         }
     }
 }
+/** Auto: sing-box picks the fastest working server and leaves one that fails (see CoreConfig.autoNodes). */
+@Composable fun AutoChip(saved: SavedState, model: MainViewModel) =
+    FilterChip(saved.preferences.autoServer, { model.preferences(saved.preferences.copy(autoServer = !saved.preferences.autoServer)) }, { Text("Авто", fontSize = 11.sp) }, leadingIcon = { Icon(Icons.Outlined.Bolt, null, Modifier.size(15.dp)) })
 @Composable private fun ServersScreen(saved: SavedState, model: MainViewModel, addTrustTunnel: () -> Unit, editTrustTunnel: (Node) -> Unit) {
     var search by rememberSaveable { mutableStateOf("") }; var favorites by rememberSaveable { mutableStateOf(false) }; var methods by remember { mutableStateOf(false) }; var sortPing by rememberSaveable { mutableStateOf(true) }
     val ping by model.repo.pings.collectAsState()
@@ -120,7 +124,8 @@ private fun cleanName(s: String) = s.replace(Regex("[\\x{1F1E6}-\\x{1F1FF}]"), "
         item { PageTitle("Выбор сервера", "${saved.visibleNodes.size} серверов · ${saved.subscriptions.size} подписок") }
         item { OutlinedButton(addTrustTunnel, Modifier.fillMaxWidth().height(48.dp), shape = RoundedCornerShape(14.dp)) { Icon(Icons.Outlined.Add, null); Text("TrustTunnel · ввести вручную", Modifier.padding(start = 8.dp)) } }
         item { OutlinedTextField(search, { search = it }, Modifier.fillMaxWidth(), placeholder = { Text("Страна или название") }, leadingIcon = { Icon(Icons.Outlined.Search, null) }, singleLine = true, shape = RoundedCornerShape(16.dp)) }
-        item { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) { FilterChip(favorites, { favorites = !favorites }, { Text("Избранное", fontSize = 11.sp) }); FilterChip(sortPing, { sortPing = !sortPing }, { Text("По пингу", fontSize = 11.sp) }); Spacer(Modifier.weight(1f)); IconButton({ sortPing = true; model.pingAll() }) { Icon(Icons.Outlined.Speed, "Проверить пинг всех серверов") } } }
+        item { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) { FilterChip(favorites, { favorites = !favorites }, { Text("Избранное", fontSize = 11.sp) }); FilterChip(sortPing, { sortPing = !sortPing }, { Text("По пингу", fontSize = 11.sp) }); AutoChip(saved, model); Spacer(Modifier.weight(1f)); IconButton({ sortPing = true; model.pingAll() }) { Icon(Icons.Outlined.Speed, "Проверить пинг всех серверов") } } }
+        if (saved.preferences.autoServer) item { Text(if (remember(saved) { CoreConfig.autoNodes(saved).size >= 2 }) "Авто: VPN сам использует самый быстрый работающий сервер из видимых подписок и переключается, если сервер перестал отвечать. Выбранный сервер проверяется первым." else "Авто выключен для этого выбора: нужно минимум два сервера, TrustTunnel в автовыборе не участвует.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         item { Box { TextButton({ methods = true }) { Icon(Icons.Outlined.NetworkCheck, null, Modifier.size(18.dp)); Text(saved.preferences.ping.label, fontSize = 12.sp, modifier = Modifier.padding(start = 6.dp)); Icon(Icons.Outlined.ExpandMore, null) }; DropdownMenu(methods, { methods = false }) { PingMethod.entries.forEach { m -> DropdownMenuItem(text = { Text(m.label) }, onClick = { model.preferences(saved.preferences.copy(ping = m)); methods = false }) } } } }
         item { Text(if (saved.preferences.ping == PingMethod.TCP) "TCP — подключение к порту сервера напрямую. Это не проверка VPN." else "HTTPS — полный запрос через VPN, включая DNS и TLS. Запуск ядра и время очереди не учитываются; таймаут 5 с.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         if (saved.preferences.ping != PingMethod.TCP) item {
@@ -161,9 +166,19 @@ private fun cleanName(s: String) = s.replace(Regex("[\\x{1F1E6}-\\x{1F1FF}]"), "
                 Column(Modifier.padding(18.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Outlined.Link, null, Modifier.size(28.dp), tint = MaterialTheme.colorScheme.secondary); Column(Modifier.weight(1f).padding(start = 12.dp)) { Text(sub.name, fontSize = 17.sp, fontWeight = FontWeight.SemiBold); Text("${sub.nodes.count { it.unsupported.isEmpty() }} доступных · ${sub.nodes.size} всего", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp)) }; IconButton({ model.toggleSubscriptionVisibility(sub.id) }) { Icon(if (sub.hidden) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility, if (sub.hidden) "Показать серверы подписки" else "Скрыть серверы подписки") }; IconButton({ model.removeSubscription(sub.id) }) { Icon(Icons.Outlined.DeleteOutline, "Удалить подписку") } }
                     Text(if (sub.source.startsWith("manual:")) "Профиль введён вручную" else "Обновлено ${java.text.SimpleDateFormat("dd.MM HH:mm", Locale.ROOT).format(java.util.Date(sub.updated))}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 16.dp))
+                    val usage = sub.usage
+                    usage.label().takeIf(String::isNotEmpty)?.let { Text(it, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp)) }
+                    usage.warning().takeIf(String::isNotEmpty)?.let { Text(it, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 4.dp)) }
+                    if (sub.announce.isNotEmpty()) Text(sub.announce, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp))
                     Row {
                         if (!sub.source.startsWith("manual:")) TextButton({ model.refresh(sub) }) { Icon(Icons.Outlined.Refresh, null, Modifier.size(18.dp)); Text("Обновить", Modifier.padding(start = 6.dp)) }
                         sub.nodes.singleOrNull()?.takeIf { it.config.optString("type") == "trusttunnel" }?.let { node -> TextButton({ editTrustTunnel(node) }) { Icon(Icons.Outlined.Edit, null, Modifier.size(18.dp)); Text("Изменить сервер", Modifier.padding(start = 6.dp)) } }
+                    }
+                    // Provider links were restricted to https when the subscription was loaded.
+                    if (sub.supportUrl.isNotEmpty() || sub.webPageUrl.isNotEmpty()) Row {
+                        val links = LocalUriHandler.current
+                        if (sub.supportUrl.isNotEmpty()) TextButton({ runCatching { links.openUri(sub.supportUrl) } }) { Icon(Icons.Outlined.SupportAgent, null, Modifier.size(18.dp)); Text("Поддержка", Modifier.padding(start = 6.dp)) }
+                        if (sub.webPageUrl.isNotEmpty()) TextButton({ runCatching { links.openUri(sub.webPageUrl) } }) { Icon(Icons.Outlined.OpenInBrowser, null, Modifier.size(18.dp)); Text("Сайт провайдера", Modifier.padding(start = 6.dp)) }
                     }
                 }
             }

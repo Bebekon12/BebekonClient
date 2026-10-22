@@ -15,7 +15,7 @@
         <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTop">
             <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
             <intent-filter><action android:name="android.intent.action.SEND" /><category android:name="android.intent.category.DEFAULT" /><data android:mimeType="text/plain" /></intent-filter>
-            <intent-filter><action android:name="android.intent.action.VIEW" /><category android:name="android.intent.category.DEFAULT" /><category android:name="android.intent.category.BROWSABLE" /><data android:scheme="vless" /><data android:scheme="vmess" /><data android:scheme="ss" /><data android:scheme="trojan" /><data android:scheme="hysteria" /><data android:scheme="hysteria2" /><data android:scheme="hy2" /><data android:scheme="tt" /></intent-filter>
+            <intent-filter><action android:name="android.intent.action.VIEW" /><category android:name="android.intent.category.DEFAULT" /><category android:name="android.intent.category.BROWSABLE" /><data android:scheme="vless" /><data android:scheme="vmess" /><data android:scheme="ss" /><data android:scheme="trojan" /><data android:scheme="hysteria" /><data android:scheme="hysteria2" /><data android:scheme="hy2" /><data android:scheme="tt" /><data android:scheme="bebekon" /></intent-filter>
         </activity>
         <service android:name=".BebekonVpnService" android:permission="android.permission.BIND_VPN_SERVICE" android:exported="true" android:foregroundServiceType="specialUse">
             <intent-filter><action android:name="android.net.VpnService" /></intent-filter>
