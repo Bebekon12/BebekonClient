@@ -40,6 +40,16 @@ public class AutoServerTests
         Assert.Empty(ConfigGenerator.AutoServers(Spec(a, [a, b], auto: false)));
     }
 
+    /// <summary>The app compares the running pool with the visible servers; a JSON round trip (IPC) must not look like a change.</summary>
+    [Fact] public void PoolSurvivesTheServiceRoundTripUnchanged()
+    {
+        var pool = new List<Server> { Node("a.example.com", "security=reality&type=tcp&sni=example.net&pbk=" + new string('A', 43) + "&sid=abcd&fp=chrome&flow=xtls-rprx-vision"), Node("b.example.com", "security=tls&type=ws&sni=b.example.com&path=%2Fws"), Node("c.example.com", "security=tls&type=grpc&sni=c.example.com&serviceName=g") };
+        var spec = Spec(pool[0], pool);
+        var copy = System.Text.Json.JsonSerializer.Deserialize<ConnectSpec>(System.Text.Json.JsonSerializer.Serialize(spec, Json.Options), Json.Options)!;
+        Assert.Equal(pool.Select(ServerRefresh.ConnectionKey), copy.AutoServers!.Select(ServerRefresh.ConnectionKey));
+        Assert.Equal(ConfigGenerator.Generate(spec), ConfigGenerator.Generate(copy));
+    }
+
     [Fact] public void LargePoolIsCappedInsteadOfFailing()
     {
         var pool = Enumerable.Range(0, 80).Select(i => Node($"s{i}.example.com")).ToList();
