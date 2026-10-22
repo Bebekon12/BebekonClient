@@ -81,6 +81,8 @@ class BebekonVpnService : VpnService(), CommandServerHandler {
     // Blocking subscription downloads must not hold the serialized core executor.
     private val background = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var refreshJob: Job? = null
+    private var healthJob: Job? = null
+    private val health by lazy { TunnelCheck.endpoint() }
     private val generation = AtomicLong()
     private var server: CommandServer? = null
     private var client: CommandClient? = null
@@ -141,9 +143,9 @@ class BebekonVpnService : VpnService(), CommandServerHandler {
             NativeCore.setup(this)
             if (node.config.optString("type") == "trusttunnel" || trustTunnel != null) closeCore()
             val override = if (node.config.optString("type") == "trusttunnel") TrustTunnelNative(this, this).also { trustTunnel = it }.start(node) else null
-            val config = CoreConfig.build(saved, repo::geo, policy = policy, vpnOverride = override); Libbox.checkConfig(config)
+            val config = CoreConfig.build(saved, repo::geo, policy = policy, vpnOverride = override, health = health); Libbox.checkConfig(config)
             validConfig = true
-            VpnController.publish(this) { if (reload) it.copy(phase = Phase.RECONNECTING, message = "Применение правил…") else it.copy(phase = Phase.STARTING, server = node.name) }
+            VpnController.publish(this) { if (reload) it.copy(phase = Phase.RECONNECTING, message = "Применение правил…") else it.copy(phase = Phase.STARTING, server = if (CoreConfig.autoNodes(saved).size >= 2 && override == null) "Авто" else node.name) }
             if (server == null) { platform = AndroidPlatform(this, this); server = CommandServer(this, platform).also { it.start() } }
             platform!!.tunnelState = saved
             platform!!.tunnelPolicy = policy
@@ -154,6 +156,7 @@ class BebekonVpnService : VpnService(), CommandServerHandler {
             // Native counters start from zero after a reload; keep the accumulated session bytes.
             downTotal.beginCounter(); upTotal.beginCounter()
             val statusVersion = version
+            val auto = CoreConfig.autoNodes(saved).takeIf { it.size >= 2 && override == null }.orEmpty()
             client = CommandClient(object : CommandClientHandler {
                 override fun connected() = Unit
                 override fun disconnected(message: String?) = Unit
@@ -167,27 +170,44 @@ class BebekonVpnService : VpnService(), CommandServerHandler {
                         if (repo.state.value.preferences.routingDiagnostics) repo.routingLog(message, original)
                     }
                 }
-                override fun writeGroups(message: OutboundGroupIterator?) = Unit
+                override fun writeGroups(message: OutboundGroupIterator?) {
+                    // Which server the auto group uses now; only tags cross this boundary.
+                    while (message?.hasNext() == true) {
+                        val group = message.next()
+                        if (group.tag != "vpn") continue
+                        val name = group.selected.removePrefix("auto-").toIntOrNull()?.let(auto::getOrNull)?.name.orEmpty()
+                        if (desired && generation.get() == statusVersion) VpnController.publish(this@BebekonVpnService) { if (it.autoServer == name) it else it.copy(autoServer = name) }
+                    }
+                }
                 override fun writeOutbounds(message: OutboundGroupItemIterator?) = Unit
                 override fun initializeClashMode(modeList: StringIterator?, currentMode: String?) = Unit
                 override fun updateClashMode(newMode: String?) = Unit
                 override fun writeConnectionEvents(events: ConnectionEvents?) = Unit
-            }, CommandClientOptions().apply { addCommand(Libbox.CommandStatus); if (saved.preferences.routingDiagnostics || BuildConfig.DEBUG && node.host == "10.0.2.2") addCommand(Libbox.CommandLog); statusInterval = 1_000_000_000 }).also { it.connect() }
+            }, CommandClientOptions().apply { addCommand(Libbox.CommandStatus); if (auto.size >= 2) addCommand(Libbox.CommandGroup); if (saved.preferences.routingDiagnostics || BuildConfig.DEBUG && node.host == "10.0.2.2") addCommand(Libbox.CommandLog); statusInterval = 1_000_000_000 }).also { it.connect() }
             // A verified HTTPS response through this outbound confirms usable connectivity.
-            val probe = runCatching { NativeCore.probe(this, saved, "GET") }.recoverCatching {
+            var probe = runCatching { NativeCore.probe(this, saved, "GET") }.recoverCatching {
                 if (!desired || generation.get() != version) throw CancellationException()
                 val backup = PingTarget.entries.first { it != saved.preferences.pingTarget }
                 NativeCore.probe(this, saved, "GET", backup.url)
             }
+            // Auto mode works while any server in the group does; the group itself moves off a
+            // failed server, so check a few others before giving up.
+            for (other in auto.drop(1).take(3)) {
+                if (probe.isSuccess || !desired || generation.get() != version) break
+                probe = runCatching { NativeCore.probe(this, saved.copy(selected = other.id), "GET") }
+            }
             if (BuildConfig.DEBUG && node.host == "10.0.2.2" && probe.isFailure) android.util.Log.w("BebekonDebug", "Fixture HTTPS check failed", probe.exceptionOrNull())
             if (!desired || generation.get() != version) return
             require(probe.isSuccess) { "Сервер не ответил при проверке подключения. Попробуйте другой сервер" }
-            VpnController.publish(this) { it.copy(phase = Phase.ON, publicIp = if (it.server == node.name) it.publicIp else "", server = node.name, message = "", started = if (reload && it.started != 0L) it.started else System.currentTimeMillis()) }
-            foreground(node.name)
+            val label = if (auto.isNotEmpty()) "Авто" else node.name
+            VpnController.publish(this) { it.copy(phase = Phase.ON, publicIp = if (it.server == label) it.publicIp else "", server = label, autoServer = if (auto.isEmpty()) "" else it.autoServer, message = "", started = if (reload && it.started != 0L) it.started else System.currentTimeMillis()) }
+            foreground(label)
             repo.log(if (reload) "Настройки маршрутизации применены" else "VPN подключён")
             // Long sessions keep the provider's servers current (see AutoRefresh).
             if (refreshJob?.isActive != true) refreshJob = background.launch { delay(120_000); while (isActive) { AutoRefresh.runDue(this@BebekonVpnService); delay(1_800_000) } }
-            val ip = runCatching { NativeCore.probe(this, saved, "GET", "https://api.ipify.org").body.trim() }.getOrDefault("")
+            if (healthJob?.isActive != true) healthJob = background.launch { monitor() }
+            // Through the running tunnel, so Auto mode shows the exit IP apps really use.
+            val ip = withContext(Dispatchers.IO) { runCatching { TunnelCheck.get(health, "api.ipify.org", "/").takeIf { it.status == 200 }?.body?.trim().orEmpty() }.getOrDefault("") }
             if (desired && generation.get() == version && Regex("[0-9a-fA-F:.]{3,45}").matches(ip)) VpnController.publish(this) { it.copy(publicIp = ip) }
         } catch (e: Exception) {
             if (BuildConfig.DEBUG) android.util.Log.e("BebekonDebug", "VPN startup failed", e)
@@ -208,6 +228,40 @@ class BebekonVpnService : VpnService(), CommandServerHandler {
                 repo.log(message); VpnController.publish(this) { Session(Phase.ERROR, message = message) }
                 withContext(Dispatchers.Main) { stopForeground(STOP_FOREGROUND_REMOVE); stopSelf() }
             }
+        }
+    }
+    /**
+     * A tunnel can stop passing traffic while the core still runs: a server restart, expired NAT
+     * after a network change, a provider-side block. The sign is apps sending while nothing comes
+     * back. Only then (never on an idle or busy-and-working tunnel, to spare data and battery)
+     * check through the tunnel, and reconnect after two failed checks in a row, at most once per
+     * five minutes. Skipped in Doze and without a network, where a failure says nothing about the VPN.
+     */
+    private suspend fun monitor() {
+        var failures = 0; var lastReload = 0L; var lastCheck = 0L
+        var lastUp = VpnController.session.value.totalUp; var lastDown = VpnController.session.value.totalDown
+        while (currentCoroutineContext().isActive) {
+            delay(if (failures > 0) 30_000 else 60_000)
+            val session = VpnController.session.value
+            val sent = session.totalUp - lastUp; val received = session.totalDown - lastDown
+            lastUp = session.totalUp; lastDown = session.totalDown
+            val now = android.os.SystemClock.elapsedRealtime()
+            if (!desired || session.phase != Phase.ON || getSystemService(PowerManager::class.java).isDeviceIdleMode || PhysicalNetwork.current(this) == null) { failures = 0; continue }
+            val stalled = sent >= 4096 && received in 0 until 512
+            if (failures == 0 && (!stalled || now - lastCheck < 120_000)) continue
+            lastCheck = now
+            if (TunnelCheck.works(health)) { failures = 0; continue }
+            failures++
+            if (failures == 1) {
+                // Auto re-measures its servers now instead of on its next interval.
+                scope.launch { runCatching { client?.urlTest("vpn") } }
+                continue
+            }
+            if (repo.state.value.preferences.autoReconnect && (lastReload == 0L || now - lastReload >= 300_000)) {
+                lastReload = now; failures = 0
+                repo.log("Туннель перестал отвечать — переподключение")
+                withContext(Dispatchers.Main) { VpnController.reload(this@BebekonVpnService) }
+            } else failures = 0
         }
     }
     private fun closeCore() { runCatching { client?.disconnect() }; client = null; runCatching { server?.closeService() }; runCatching { server?.close() }; server = null; runCatching { platform?.close() }; platform = null; runCatching { trustTunnel?.close() }; trustTunnel = null; File(noBackupFilesDir, "core/configuration.json").delete() }

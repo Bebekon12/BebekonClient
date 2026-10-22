@@ -60,11 +60,11 @@ enum class DnsResolver(val label: String, val address: String, val hostname: Str
     CLOUDFLARE("Cloudflare", "1.1.1.1", "cloudflare-dns.com"), GOOGLE("Google", "8.8.8.8", "dns.google")
 }
 data class Preferences(val theme: ThemeChoice = ThemeChoice.DARK, val routing: RoutingMode = RoutingMode.ALL, val ping: PingMethod = PingMethod.HTTPS_GET, val animations: Boolean = true, val allowLan: Boolean = true, val autoReconnect: Boolean = true, val pingTarget: PingTarget = PingTarget.CLOUDFLARE,
-    val mapLocation: Boolean = true, val dnsResolver: DnsResolver = DnsResolver.CLOUDFLARE, val mtu: Int = 1400, val connectionNotifications: Boolean = true, val checkUpdates: Boolean = true, val sitesInAllApps: Boolean = false, val routingDiagnostics: Boolean = false, val ipv6: Boolean = false) {
+    val mapLocation: Boolean = true, val dnsResolver: DnsResolver = DnsResolver.CLOUDFLARE, val mtu: Int = 1400, val connectionNotifications: Boolean = true, val checkUpdates: Boolean = true, val sitesInAllApps: Boolean = false, val routingDiagnostics: Boolean = false, val ipv6: Boolean = false, val autoServer: Boolean = false) {
     fun toJson() = json("theme" to theme.name, "routing" to routing.name, "ping" to ping.name, "animations" to animations, "allowLan" to allowLan, "autoReconnect" to autoReconnect, "pingTarget" to pingTarget.name,
-        "mapLocation" to mapLocation, "dnsResolver" to dnsResolver.name, "mtu" to mtu, "connectionNotifications" to connectionNotifications, "checkUpdates" to checkUpdates, "sitesInAllApps" to sitesInAllApps, "routingDiagnostics" to routingDiagnostics, "ipv6" to ipv6)
+        "mapLocation" to mapLocation, "dnsResolver" to dnsResolver.name, "mtu" to mtu, "connectionNotifications" to connectionNotifications, "checkUpdates" to checkUpdates, "sitesInAllApps" to sitesInAllApps, "routingDiagnostics" to routingDiagnostics, "ipv6" to ipv6, "autoServer" to autoServer)
     companion object { fun fromJson(o: JSONObject) = Preferences(ThemeChoice.valueOf(o.optString("theme", "DARK")), RoutingMode.valueOf(o.optString("routing", "ALL")), PingMethod.valueOf(o.optString("ping", "HTTPS_GET")), o.optBoolean("animations", true), o.optBoolean("allowLan", true), o.optBoolean("autoReconnect", true), PingTarget.valueOf(o.optString("pingTarget", "CLOUDFLARE")),
-        o.optBoolean("mapLocation", true), DnsResolver.valueOf(o.optString("dnsResolver", "CLOUDFLARE")), o.optInt("mtu", 1400).also { require(it in 1280..1500) }, o.optBoolean("connectionNotifications", true), o.optBoolean("checkUpdates", true), o.optBoolean("sitesInAllApps", false), o.optBoolean("routingDiagnostics", false), o.optBoolean("ipv6", false)) }
+        o.optBoolean("mapLocation", true), DnsResolver.valueOf(o.optString("dnsResolver", "CLOUDFLARE")), o.optInt("mtu", 1400).also { require(it in 1280..1500) }, o.optBoolean("connectionNotifications", true), o.optBoolean("checkUpdates", true), o.optBoolean("sitesInAllApps", false), o.optBoolean("routingDiagnostics", false), o.optBoolean("ipv6", false), o.optBoolean("autoServer", false)) }
 }
 
 /** App selection is an OS filter. Adding a site must never silently broaden that filter. */
@@ -90,7 +90,7 @@ data class SavedState(val subscriptions: List<Subscription> = emptyList(), val s
             o.optJSONObject("detectedCountries")?.let { c -> c.keys().asSequence().associateWith { c.optString(it) }.filterValues { it.matches(Regex("[A-Z]{2}")) } }.orEmpty()) } }
 }
 enum class Phase { OFF, STARTING, ON, RECONNECTING, STOPPING, ERROR }
-data class Session(val phase: Phase = Phase.OFF, val server: String = "", val message: String = "", val started: Long = 0, val down: Long = 0, val up: Long = 0, val totalDown: Long = 0, val totalUp: Long = 0, val publicIp: String = "") {
+data class Session(val phase: Phase = Phase.OFF, val server: String = "", val message: String = "", val started: Long = 0, val down: Long = 0, val up: Long = 0, val totalDown: Long = 0, val totalUp: Long = 0, val publicIp: String = "", val autoServer: String = "") {
     val active get() = phase in listOf(Phase.STARTING, Phase.ON, Phase.RECONNECTING)
     val busy get() = phase in listOf(Phase.STARTING, Phase.STOPPING, Phase.RECONNECTING)
 }

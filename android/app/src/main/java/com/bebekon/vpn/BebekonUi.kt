@@ -112,6 +112,9 @@ private fun cleanName(s: String) = s.replace(Regex("[\\x{1F1E6}-\\x{1F1FF}]"), "
         }
     }
 }
+/** Auto: sing-box picks the fastest working server and leaves one that fails (see CoreConfig.autoNodes). */
+@Composable fun AutoChip(saved: SavedState, model: MainViewModel) =
+    FilterChip(saved.preferences.autoServer, { model.preferences(saved.preferences.copy(autoServer = !saved.preferences.autoServer)) }, { Text("Авто", fontSize = 11.sp) }, leadingIcon = { Icon(Icons.Outlined.Bolt, null, Modifier.size(15.dp)) })
 @Composable private fun ServersScreen(saved: SavedState, model: MainViewModel, addTrustTunnel: () -> Unit, editTrustTunnel: (Node) -> Unit) {
     var search by rememberSaveable { mutableStateOf("") }; var favorites by rememberSaveable { mutableStateOf(false) }; var methods by remember { mutableStateOf(false) }; var sortPing by rememberSaveable { mutableStateOf(true) }
     val ping by model.repo.pings.collectAsState()
@@ -121,7 +124,8 @@ private fun cleanName(s: String) = s.replace(Regex("[\\x{1F1E6}-\\x{1F1FF}]"), "
         item { PageTitle("Выбор сервера", "${saved.visibleNodes.size} серверов · ${saved.subscriptions.size} подписок") }
         item { OutlinedButton(addTrustTunnel, Modifier.fillMaxWidth().height(48.dp), shape = RoundedCornerShape(14.dp)) { Icon(Icons.Outlined.Add, null); Text("TrustTunnel · ввести вручную", Modifier.padding(start = 8.dp)) } }
         item { OutlinedTextField(search, { search = it }, Modifier.fillMaxWidth(), placeholder = { Text("Страна или название") }, leadingIcon = { Icon(Icons.Outlined.Search, null) }, singleLine = true, shape = RoundedCornerShape(16.dp)) }
-        item { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) { FilterChip(favorites, { favorites = !favorites }, { Text("Избранное", fontSize = 11.sp) }); FilterChip(sortPing, { sortPing = !sortPing }, { Text("По пингу", fontSize = 11.sp) }); Spacer(Modifier.weight(1f)); IconButton({ sortPing = true; model.pingAll() }) { Icon(Icons.Outlined.Speed, "Проверить пинг всех серверов") } } }
+        item { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) { FilterChip(favorites, { favorites = !favorites }, { Text("Избранное", fontSize = 11.sp) }); FilterChip(sortPing, { sortPing = !sortPing }, { Text("По пингу", fontSize = 11.sp) }); AutoChip(saved, model); Spacer(Modifier.weight(1f)); IconButton({ sortPing = true; model.pingAll() }) { Icon(Icons.Outlined.Speed, "Проверить пинг всех серверов") } } }
+        if (saved.preferences.autoServer) item { Text(if (CoreConfig.autoNodes(saved).size >= 2) "Авто: VPN сам использует самый быстрый работающий сервер из видимых подписок и переключается, если сервер перестал отвечать. Выбранный сервер проверяется первым." else "Авто выключен для этого выбора: нужно минимум два сервера, TrustTunnel в автовыборе не участвует.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         item { Box { TextButton({ methods = true }) { Icon(Icons.Outlined.NetworkCheck, null, Modifier.size(18.dp)); Text(saved.preferences.ping.label, fontSize = 12.sp, modifier = Modifier.padding(start = 6.dp)); Icon(Icons.Outlined.ExpandMore, null) }; DropdownMenu(methods, { methods = false }) { PingMethod.entries.forEach { m -> DropdownMenuItem(text = { Text(m.label) }, onClick = { model.preferences(saved.preferences.copy(ping = m)); methods = false }) } } } }
         item { Text(if (saved.preferences.ping == PingMethod.TCP) "TCP — подключение к порту сервера напрямую. Это не проверка VPN." else "HTTPS — полный запрос через VPN, включая DNS и TLS. Запуск ядра и время очереди не учитываются; таймаут 5 с.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         if (saved.preferences.ping != PingMethod.TCP) item {

@@ -38,11 +38,11 @@ object AutoRefresh {
     /** Re-downloads one subscription, keeping its id, name and visibility, and applies the result to an active VPN. */
     fun refresh(context: Context, sub: Subscription): Boolean {
         val repo = context.repo
-        val before = repo.state.value.selectedNode
+        val before = repo.state.value.selectedNode; val pool = CoreConfig.autoKey(repo.state.value)
         repo.add(repo.load(sub.source, sub.name).copy(id = sub.id))
         val after = repo.state.value.selectedNode
         val removed = before != null && after == null
-        if (removed) VpnController.stop(context) else if (before?.outbound != after?.outbound) VpnController.reload(context)
+        if (removed) VpnController.stop(context) else if (before?.outbound != after?.outbound || pool != CoreConfig.autoKey(repo.state.value)) VpnController.reload(context)
         return removed
     }
 }

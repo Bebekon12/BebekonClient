@@ -64,8 +64,10 @@ private val SignalRed = Color(0xFFFF687A)
                         DashboardCard(Modifier.fillMaxWidth().height(rowHeight).clickable(onClick = servers)) {
                             Flag(node?.displayCountry(resolvedCountries).orEmpty(), Modifier.size(42.dp, 30.dp))
                             Column(Modifier.weight(1f).fillMaxHeight().padding(horizontal = 12.dp), verticalArrangement = Arrangement.Center) {
-                                Text(node?.name?.let(::displayName) ?: "Выбрать сервер", fontSize = 17.sp, lineHeight = 20.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                if (node != null) PingText(pings[node.id] ?: PingResult(), { model.ping(node) })
+                                val auto = node != null && CoreConfig.autoNodes(saved).size >= 2
+                                Text(if (auto) "Авто" + session.autoServer.takeIf { session.phase == Phase.ON && it.isNotEmpty() }?.let { " · " + displayName(it) }.orEmpty() else node?.name?.let(::displayName) ?: "Выбрать сервер", fontSize = 17.sp, lineHeight = 20.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                if (auto) Text("Самый быстрый работающий сервер", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                else if (node != null) PingText(pings[node.id] ?: PingResult(), { model.ping(node) })
                                 else Text("Добавьте вашу подписку", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                             Icon(Icons.Outlined.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -107,7 +109,7 @@ private val SignalRed = Color(0xFFFF687A)
                             }
                         }
                     }
-                    item { Row(Modifier.fillMaxWidth().padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) { Text("Все серверы", fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)); TextButton({ model.pingAll() }) { Icon(Icons.Outlined.Speed, null, Modifier.size(17.dp)); Text("Пинг", Modifier.padding(start = 5.dp)) } } }
+                    item { Row(Modifier.fillMaxWidth().padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) { Text("Все серверы", fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)); if (saved.visibleNodes.size >= 2) AutoChip(saved, model); TextButton({ model.pingAll() }) { Icon(Icons.Outlined.Speed, null, Modifier.size(17.dp)); Text("Пинг", Modifier.padding(start = 5.dp)) } } }
                     if (saved.nodes.isEmpty()) item { Button(subscriptions, Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) { Text("Добавить подписку") } }
                     items(nodesByPing(saved.visibleNodes, pings), key = { "home-" + it.id }) { server -> ServerRow(server, server.id == saved.selected, server.id in saved.favorites, pings[server.id] ?: PingResult(), { model.select(server) }, { model.favorite(server) }, { model.ping(server) }, server.displayCountry(resolvedCountries)) }
                 }
