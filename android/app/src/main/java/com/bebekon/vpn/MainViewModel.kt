@@ -181,5 +181,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         NativeCore.probe(getApplication(), probeState(node, saved.value.preferences), "GET", url).let { GeoReply(it.statusCode, it.body) }
     } catch (e: Exception) { e.message?.removePrefix("probe HTTP ")?.toIntOrNull()?.let { GeoReply(it) } ?: throw e }
     private fun probeState(node: Node, preferences: Preferences) = SavedState(subscriptions = listOf(Subscription(name = "probe", source = "", nodes = listOf(node))), selected = node.id, preferences = preferences)
-    fun receive(intent: Intent?) { val text = when (intent?.action) { Intent.ACTION_SEND -> intent.getStringExtra(Intent.EXTRA_TEXT); Intent.ACTION_VIEW -> intent.dataString; else -> null }; if (!text.isNullOrBlank()) importText.value = text }
+    fun receive(intent: Intent?) { val text = when (intent?.action) { Intent.ACTION_SEND -> intent.getStringExtra(Intent.EXTRA_TEXT); Intent.ACTION_VIEW -> intent.dataString; else -> null }
+        if (text.isNullOrBlank()) return
+        val link = ImportLink.decode(text)
+        if (link == null) message.value = "Ссылка Bebekon повреждена или ведёт не на подписку" else importText.value = link
+    }
 }

@@ -325,6 +325,13 @@ public sealed partial class MainViewModel : Observable, IDisposable
             catch (Exception e) { Report(e); return; }
         }
     }
+    /// <summary>Prefills a provider's bebekon:// link; adding it still takes the user's click.</summary>
+    public void OfferImport(string text)
+    {
+        if (ImportLink.Decode(text) is not { } link) { Banner = T("Ссылка Bebekon повреждена или ведёт не на подписку.", "The Bebekon link is damaged or does not point to a subscription."); return; }
+        QuickSource = link; Go("Subscriptions");
+        Banner = T("Проверьте ссылку от провайдера и нажмите «Добавить».", "Check the provider's link and press Add.");
+    }
     public void Go(string name)
     {
         scanGeneration++; scan?.Cancel(); PageName = name; Page = name switch { "Servers" => new ServersPage(this), "Rules" => new RulesPage(this), "Subscriptions" => new SubscriptionsPage(this), "Settings" => new SettingsPage(this), _ => new HomePage(this) };
