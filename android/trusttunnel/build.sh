@@ -20,6 +20,16 @@ if [ ! -f /work/bootstrap-complete ]; then
   python3 "$TT_SOURCE/scripts/bootstrap_conan_deps.py"
   touch /work/bootstrap-complete
 fi
+# boringssl.googlesource.com refuses GitHub-hosted runners (HTTP 503). Fetch the same pinned
+# commit (tag 0.20260508.0) from Google's official GitHub mirror; the recipe's patches still apply.
+python3 - "$(conan cache path openssl/boring-2026-05-08@adguard/oss)/conanfile.py" <<'PY'
+import sys
+path = sys.argv[1]; text = open(path).read()
+old = 'url="https://boringssl.googlesource.com/boringssl/+archive/d589045a772678d5ca131f4c8087d001b9258380.tar.gz",'
+new = 'url="https://github.com/google/boringssl/archive/d589045a772678d5ca131f4c8087d001b9258380.tar.gz", strip_root=True,'
+if old in text: open(path, 'w').write(text.replace(old, new))
+elif new not in text: sys.exit("Unexpected BoringSSL recipe")
+PY
 mkdir -p /work/adapter
 cp /input/bridge.cpp /input/CMakeLists.txt /input/CMakePresets.json /input/Makefile /work/adapter/
 cp "$TT_SOURCE/conanfile.py" /work/adapter/conanfile.py
