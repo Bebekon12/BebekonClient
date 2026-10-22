@@ -19,6 +19,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.*
@@ -161,9 +162,19 @@ private fun cleanName(s: String) = s.replace(Regex("[\\x{1F1E6}-\\x{1F1FF}]"), "
                 Column(Modifier.padding(18.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Outlined.Link, null, Modifier.size(28.dp), tint = MaterialTheme.colorScheme.secondary); Column(Modifier.weight(1f).padding(start = 12.dp)) { Text(sub.name, fontSize = 17.sp, fontWeight = FontWeight.SemiBold); Text("${sub.nodes.count { it.unsupported.isEmpty() }} доступных · ${sub.nodes.size} всего", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp)) }; IconButton({ model.toggleSubscriptionVisibility(sub.id) }) { Icon(if (sub.hidden) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility, if (sub.hidden) "Показать серверы подписки" else "Скрыть серверы подписки") }; IconButton({ model.removeSubscription(sub.id) }) { Icon(Icons.Outlined.DeleteOutline, "Удалить подписку") } }
                     Text(if (sub.source.startsWith("manual:")) "Профиль введён вручную" else "Обновлено ${java.text.SimpleDateFormat("dd.MM HH:mm", Locale.ROOT).format(java.util.Date(sub.updated))}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 16.dp))
+                    val usage = sub.usage
+                    usage.label().takeIf(String::isNotEmpty)?.let { Text(it, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp)) }
+                    usage.warning().takeIf(String::isNotEmpty)?.let { Text(it, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 4.dp)) }
+                    if (sub.announce.isNotEmpty()) Text(sub.announce, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp))
                     Row {
                         if (!sub.source.startsWith("manual:")) TextButton({ model.refresh(sub) }) { Icon(Icons.Outlined.Refresh, null, Modifier.size(18.dp)); Text("Обновить", Modifier.padding(start = 6.dp)) }
                         sub.nodes.singleOrNull()?.takeIf { it.config.optString("type") == "trusttunnel" }?.let { node -> TextButton({ editTrustTunnel(node) }) { Icon(Icons.Outlined.Edit, null, Modifier.size(18.dp)); Text("Изменить сервер", Modifier.padding(start = 6.dp)) } }
+                    }
+                    // Provider links were restricted to https when the subscription was loaded.
+                    if (sub.supportUrl.isNotEmpty() || sub.webPageUrl.isNotEmpty()) Row {
+                        val links = LocalUriHandler.current
+                        if (sub.supportUrl.isNotEmpty()) TextButton({ runCatching { links.openUri(sub.supportUrl) } }) { Icon(Icons.Outlined.SupportAgent, null, Modifier.size(18.dp)); Text("Поддержка", Modifier.padding(start = 6.dp)) }
+                        if (sub.webPageUrl.isNotEmpty()) TextButton({ runCatching { links.openUri(sub.webPageUrl) } }) { Icon(Icons.Outlined.OpenInBrowser, null, Modifier.size(18.dp)); Text("Сайт провайдера", Modifier.padding(start = 6.dp)) }
                     }
                 }
             }

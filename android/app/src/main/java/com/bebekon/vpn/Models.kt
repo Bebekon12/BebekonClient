@@ -21,9 +21,15 @@ data class Node(val id: String, val name: String, val outbound: String, val coun
     fun toJson() = json("id" to id, "name" to name, "outbound" to config, "country" to country, "unsupported" to unsupported)
     companion object { fun fromJson(o: JSONObject) = Node(o.getString("id"), o.getString("name"), o.getJSONObject("outbound").toString(), o.optString("country"), o.optString("unsupported")) }
 }
-data class Subscription(val id: String = UUID.randomUUID().toString(), val name: String, val source: String, val nodes: List<Node>, val updated: Long = System.currentTimeMillis(), val info: String = "", val hidden: Boolean = false) {
-    fun toJson() = json("id" to id, "name" to name, "source" to source, "nodes" to array(nodes.map(Node::toJson)), "updated" to updated, "info" to info, "hidden" to hidden)
-    companion object { fun fromJson(o: JSONObject) = Subscription(o.getString("id"), o.getString("name"), o.getString("source"), o.getJSONArray("nodes").objects().map(Node::fromJson), o.optLong("updated"), o.optString("info"), o.optBoolean("hidden")) }
+/** [info] is the provider's subscription-userinfo header; the other provider fields come from its headers too. */
+data class Subscription(val id: String = UUID.randomUUID().toString(), val name: String, val source: String, val nodes: List<Node>, val updated: Long = System.currentTimeMillis(), val info: String = "", val hidden: Boolean = false,
+                        val updateInterval: Int = 0, val supportUrl: String = "", val webPageUrl: String = "", val announce: String = "") {
+    val usage get() = SubscriptionUsage.parse(info)
+    val remote get() = source.startsWith("https://") || source.startsWith("http://") || source.startsWith("tt://", true)
+    fun toJson() = json("id" to id, "name" to name, "source" to source, "nodes" to array(nodes.map(Node::toJson)), "updated" to updated, "info" to info, "hidden" to hidden,
+        "updateInterval" to updateInterval, "supportUrl" to supportUrl, "webPageUrl" to webPageUrl, "announce" to announce)
+    companion object { fun fromJson(o: JSONObject) = Subscription(o.getString("id"), o.getString("name"), o.getString("source"), o.getJSONArray("nodes").objects().map(Node::fromJson), o.optLong("updated"), o.optString("info"), o.optBoolean("hidden"),
+        ProviderHeaders.updateInterval(o.optString("updateInterval")), ProviderHeaders.safeLink(o.optString("supportUrl")), ProviderHeaders.safeLink(o.optString("webPageUrl")), ProviderHeaders.text(o.optString("announce"), 300)) }
 }
 enum class RuleKind(val label: String, val field: String) {
     DOMAIN("Сайт и поддомены", "domain_suffix"), KEYWORD("Слово в домене", "domain_keyword"), APP("Приложение", "package_name"), CIDR("IP / подсеть", "ip_cidr"), GEOSITE("GeoSite", "rule_set"), GEOIP("GeoIP", "rule_set")

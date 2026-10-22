@@ -127,6 +127,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
     public ICommand ChangeRoutingMode { get; }
     public ICommand CancelPing { get; }
     public ICommand RefreshSubscriptions { get; }
+    public ICommand OpenProviderLink { get; }
     public ICommand AddSubscription { get; }
     public ICommand AddTrustTunnel { get; }
     public ICommand ToggleSubscriptionVisibility { get; }
@@ -189,7 +190,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
         RefreshSubscriptions = Async(async _ => { foreach (var sub in Data.Subscriptions.ToArray()) await RefreshSubAsync(sub); });
         AddTrustTunnel = new Command(_ => { var sub = Dialogs.ManualTrustTunnel(); if (sub is null) return; var nodes = VlessParser.ParseSubscription(sub.Source); Data.Subscriptions.Add(sub); ReplaceServers(sub, nodes); Save(); Go("Servers"); });
         ToggleSubscriptionVisibility = new Command(p => { if (p is not Subscription sub) return; sub.Hidden = !sub.Hidden; Save(); RefreshServers(); });
-        AddSubscription = Async(async _ => { var sub = Dialogs.Subscription(null); if (sub is null) return; var servers = await SubscriptionLoader.LoadAsync(sub.Source, lifetime.Token); Data.Subscriptions.Add(sub); ReplaceServers(sub, servers); Save(); Go("Servers"); });
+        AddSubscription = Async(async _ => { var sub = Dialogs.Subscription(null); if (sub is null) return; var (servers, info) = await SubscriptionLoader.LoadWithInfoAsync(sub.Source, lifetime.Token); sub.Apply(info); Data.Subscriptions.Add(sub); ReplaceServers(sub, servers); Save(); Go("Servers"); });
         ImportQuickSubscription = Async(async _ =>
         {
             Importing = true;
@@ -197,13 +198,16 @@ public sealed partial class MainViewModel : Observable, IDisposable
             {
                 var source = QuickSource.Trim();
                 var sub = new Subscription { Source = source, Name = Dialogs.SuggestSubscriptionName(source) };
-                var nodes = await SubscriptionLoader.LoadAsync(source, lifetime.Token);
+                var (nodes, info) = await SubscriptionLoader.LoadWithInfoAsync(source, lifetime.Token);
+                sub.Apply(info); if (info.Title.Length > 0) sub.Name = info.Title;
                 Data.Subscriptions.Add(sub); ReplaceServers(sub, nodes); Save(); QuickSource = ""; Go("Servers");
             }
             finally { Importing = false; }
         }, () => !Importing && !string.IsNullOrWhiteSpace(QuickSource));
         EditSubscription = Async(async p => { var old = (Subscription)p!; var sub = Dialogs.Subscription(old); if (sub is null) return; var servers = await SubscriptionLoader.LoadAsync(sub.Source, lifetime.Token); old.Name = sub.Name; old.Source = sub.Source; ReplaceServers(old, servers); Save(); Notify(nameof(NoSubscriptions)); });
         RefreshSubscription = Async(p => RefreshSubAsync((Subscription)p!));
+        // Provider links are validated as https when stored (ProviderInfo.SafeLink).
+        OpenProviderLink = new Command(p => { if (ProviderInfo.SafeLink(p as string) is { Length: > 0 } link) Process.Start(new ProcessStartInfo(link) { UseShellExecute = true }); });
         DeleteSubscription = Async(async p => { var sub = (Subscription)p!; if (!Dialogs.Confirm(T("Удалить подписку?", "Delete subscription?"), sub.Name)) return; if (Connected && SelectedServer?.SubscriptionId == sub.Id) await DisconnectAsync(); Data.Subscriptions.Remove(sub); foreach (var s in Data.Servers.Where(s => s.SubscriptionId == sub.Id).ToArray()) Data.Servers.Remove(s); if (!Data.Servers.Contains(SelectedServer!)) SelectedServer = Data.Servers.FirstOrDefault(); Save(); RefreshServers(); Notify(nameof(NoSubscriptions)); });
         AddRule = new Command(_ => { var rule = Dialogs.Rule(null, Data.Servers); if (rule is not null) { ActiveProfile.Rules.Add(rule); RulesChanged(); } });
         EditRule = new Command(p => { var rule = (RoutingRule)p!; var edit = Dialogs.Rule(rule, Data.Servers); if (edit is null) return; var i = ActiveProfile.Rules.IndexOf(rule); rule.PropertyChanged -= OnRuleChanged; ActiveProfile.Rules[i] = edit; RulesChanged(); });
@@ -238,6 +242,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
         try { var response = await service.SendAsync(new("GetStatus")); ApplyStatus(response.Status); if (Connected) { await DisconnectAsync(); await ConnectAsync(); } }
         catch { SystemProxy.Restore(); }
         _ = RefreshMapOriginAsync();
+        WarnSubscription();
         if (Settings.AutoConnect && !Connected && SelectedServer is not null) await AutoConnectAsync(systemStartup);
     }
     private async Task AutoConnectAsync(bool systemStartup)
@@ -314,7 +319,9 @@ public sealed partial class MainViewModel : Observable, IDisposable
         catch (OperationCanceledException) { }
         finally { pingSortPending = false; }
     }
-    private async Task RefreshSubAsync(Subscription sub) { var servers = await SubscriptionLoader.LoadAsync(sub.Source, lifetime.Token); ReplaceServers(sub, servers); Save(); }
+    private async Task RefreshSubAsync(Subscription sub) { var (servers, info) = await SubscriptionLoader.LoadWithInfoAsync(sub.Source, lifetime.Token); sub.Apply(info); ReplaceServers(sub, servers); Save(); WarnSubscription(); }
+    /// <summary>Warn before the provider cuts the selected server off (expiry or traffic limit).</summary>
+    private void WarnSubscription() { if (Data.Subscriptions.FirstOrDefault(s => s.Id == SelectedServer?.SubscriptionId) is { HasWarning: true } sub) Banner = sub.Name + ": " + sub.Warning; }
     internal void ReplaceServers(Subscription sub, List<Server> incoming)
     {
         var oldId = SelectedServer?.Id;

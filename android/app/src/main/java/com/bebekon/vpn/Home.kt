@@ -51,6 +51,15 @@ private val SignalRed = Color(0xFFFF687A)
             sheetDragHandle = { Box(Modifier.padding(top = 8.dp, bottom = 8.dp).size(44.dp, 4.dp).clip(CircleShape).background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .65f))) },
             containerColor = MaterialTheme.colorScheme.background, sheetContent = {
                 LazyColumn(Modifier.fillMaxWidth(), contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // Warn before the provider cuts the connection (expiry or traffic limit).
+                    val warning = saved.subscriptions.firstOrNull { sub -> sub.nodes.any { it.id == node?.id } }?.usage?.warning().orEmpty()
+                    if (warning.isNotEmpty()) item {
+                        DashboardCard(Modifier.fillMaxWidth().clickable(onClick = subscriptions)) {
+                            Icon(Icons.Outlined.WarningAmber, null, tint = MaterialTheme.colorScheme.error)
+                            Text(warning, Modifier.weight(1f).padding(horizontal = 12.dp, vertical = 12.dp), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.error)
+                            Icon(Icons.Outlined.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
                     item {
                         DashboardCard(Modifier.fillMaxWidth().height(rowHeight).clickable(onClick = servers)) {
                             Flag(node?.displayCountry(resolvedCountries).orEmpty(), Modifier.size(42.dp, 30.dp))

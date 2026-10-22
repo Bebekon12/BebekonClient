@@ -133,6 +133,44 @@ public sealed class Subscription : Observable
     public int ServerCount { get; set; }
     [JsonIgnore] public string SafeSource => Uri.TryCreate(Source, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https" && uri.UserInfo.Length == 0 ? uri.GetLeftPart(UriPartial.Authority) + "/••••••" : "Защищённая подписка";
     [JsonIgnore] public string Summary => $"{ServerCount} серверов · Обновлено: {Updated?.ToLocalTime().ToString("dd.MM HH:mm") ?? "ещё не обновлялось"}";
+    // Provider data from the last refresh (subscription-userinfo and related headers).
+    public long Upload { get; set; }
+    public long Download { get; set; }
+    public long Total { get; set; }
+    public DateTimeOffset? Expire { get; set; }
+    public int UpdateIntervalHours { get; set; }
+    public string SupportUrl { get; set; } = "";
+    public string WebPageUrl { get; set; } = "";
+    public string Announce { get; set; } = "";
+    public void Apply(ProviderInfo info)
+    {
+        (Upload, Download, Total, Expire, UpdateIntervalHours) = (info.Upload, info.Download, info.Total, info.Expire, info.UpdateIntervalHours);
+        (SupportUrl, WebPageUrl, Announce) = (info.SupportUrl, info.WebPageUrl, info.Announce);
+        foreach (var name in new[] { nameof(UsageLabel), nameof(Warning), nameof(HasUsage), nameof(HasWarning), nameof(HasSupport), nameof(HasWebPage), nameof(HasAnnounce) }) Notify(name);
+    }
+    [JsonIgnore] public string UsageLabel => UsageText(DateTimeOffset.Now);
+    public string UsageText(DateTimeOffset now)
+    {
+        var used = Upload + Download; var parts = new List<string>();
+        if (Total > 0) parts.Add($"Осталось {ProviderInfo.Size(Math.Max(0, Total - used))} из {ProviderInfo.Size(Total)}");
+        else if (used > 0) parts.Add($"Использовано {ProviderInfo.Size(used)} · без лимита");
+        if (Expire is { } expire) parts.Add(expire <= now ? "срок истёк" : "до " + expire.ToLocalTime().ToString("dd.MM.yyyy"));
+        return string.Join(" · ", parts);
+    }
+    [JsonIgnore] public string Warning => WarningText(DateTimeOffset.Now);
+    /// <summary>Shown before a provider cuts the connection: expiry within 3 days or under 10% traffic left.</summary>
+    public string WarningText(DateTimeOffset now)
+    {
+        if (Expire is { } expire && expire <= now) return "Подписка истекла — продлите её у провайдера";
+        if (Expire is { } soon && soon - now < TimeSpan.FromDays(3)) return $"Подписка закончится через {Math.Max(1, (int)Math.Ceiling((soon - now).TotalDays))} дн.";
+        if (Total > 0 && Total - (Upload + Download) <= Total / 10) return Upload + Download >= Total ? "Трафик закончился" : "Осталось мало трафика";
+        return "";
+    }
+    [JsonIgnore] public bool HasUsage => UsageLabel.Length > 0;
+    [JsonIgnore] public bool HasWarning => Warning.Length > 0;
+    [JsonIgnore] public bool HasSupport => SupportUrl.Length > 0;
+    [JsonIgnore] public bool HasWebPage => WebPageUrl.Length > 0;
+    [JsonIgnore] public bool HasAnnounce => Announce.Length > 0;
 }
 public sealed class Settings
 {
