@@ -45,6 +45,8 @@ private val SignalRed = Color(0xFFFF687A)
         val rowHeight = (maxHeight * .103f).coerceIn(64.dp, 74.dp)
         val peek = rowHeight * 4 + 44.dp
         val node = saved.selectedNode
+        // Parses every server's config; recompute only when the state changes, not every second.
+        val auto = remember(saved) { node != null && CoreConfig.autoNodes(saved).size >= 2 }
         BottomSheetScaffold(sheetPeekHeight = peek, sheetContainerColor = MaterialTheme.colorScheme.surface,
             sheetTonalElevation = 0.dp, sheetShadowElevation = 4.dp,
             sheetShape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
@@ -64,7 +66,6 @@ private val SignalRed = Color(0xFFFF687A)
                         DashboardCard(Modifier.fillMaxWidth().height(rowHeight).clickable(onClick = servers)) {
                             Flag(node?.displayCountry(resolvedCountries).orEmpty(), Modifier.size(42.dp, 30.dp))
                             Column(Modifier.weight(1f).fillMaxHeight().padding(horizontal = 12.dp), verticalArrangement = Arrangement.Center) {
-                                val auto = node != null && CoreConfig.autoNodes(saved).size >= 2
                                 Text(if (auto) "Авто" + session.autoServer.takeIf { session.phase == Phase.ON && it.isNotEmpty() }?.let { " · " + displayName(it) }.orEmpty() else node?.name?.let(::displayName) ?: "Выбрать сервер", fontSize = 17.sp, lineHeight = 20.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 if (auto) Text("Самый быстрый работающий сервер", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 else if (node != null) PingText(pings[node.id] ?: PingResult(), { model.ping(node) })
