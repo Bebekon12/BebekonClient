@@ -53,7 +53,16 @@ public sealed partial class MainViewModel : Observable, IDisposable
     public Visibility NavTextVisibility => SidebarCollapsed ? Visibility.Collapsed : Visibility.Visible;
     private Server? selectedServer;
     public Server? SelectedServer { get => selectedServer; set { var changed = selectedServer?.Id != value?.Id || (selectedServer is not null && value is not null && ServerRefresh.ConnectionKey(selectedServer) != ServerRefresh.ConnectionKey(value)); if (Set(ref selectedServer, value)) { Data.SelectedServerId = value?.Id; Notify(nameof(ServerLabel)); Notify(nameof(SelectedCountry)); Save(); if (changed) { ResetMapDestination(); QueueApply(); } } } }
-    public string ServerLabel => SelectedServer?.DisplayName ?? T("Выберите сервер", "Choose a server");
+    public string ServerLabel => AutoActive ? T("Авто", "Auto") + (ActiveAutoServer is { } active ? " · " + active.DisplayName : "") : SelectedServer?.DisplayName ?? T("Выберите сервер", "Choose a server");
+    /// <summary>Visible servers urltest may use; the core takes the first one until it has measured them.</summary>
+    private bool AutoActive => Settings.AutoServer && DisplayServers.Count(ConfigGenerator.AutoEligible) >= 2;
+    /// <summary>Fastest known first, so a large subscription keeps its best 64 servers.</summary>
+    private List<Server> AutoPool => DisplayServers.Where(ConfigGenerator.AutoEligible).OrderBy(s => s.LatencyMs is >= 0 ? s.LatencyMs : long.MaxValue).ToList();
+    /// <summary>Order-independent identity of the auto pool; a changed pool needs a new core config.</summary>
+    private static string AutoKey(IEnumerable<Server>? servers) => string.Join("\n", (servers ?? []).Where(ConfigGenerator.AutoEligible).Select(ServerRefresh.ConnectionKey).Order(StringComparer.Ordinal));
+    /// <summary>Maps the core's "auto-N" tag back through the list used for the running connection.</summary>
+    private Server? ActiveAutoServer => Connected && spec is { } current && traffic?.ActiveOutbound is { } tag && int.TryParse(tag.AsSpan(5), out var index) && ConfigGenerator.AutoServers(current) is { Count: >= 2 } list && index >= 0 && index < list.Count ? list[index] : null;
+    public bool AutoServerEnabled { get => Settings.AutoServer; set { if (Settings.AutoServer == value) return; Settings.AutoServer = value; Notify(); Notify(nameof(ServerLabel)); Save(); QueueApply(); if (value && !AutoActive) Banner = T("Для автовыбора нужно минимум два сервера VLESS, VMess, Trojan, Shadowsocks, Hysteria2 или TUIC.", "Auto needs at least two VLESS, VMess, Trojan, Shadowsocks, Hysteria2 or TUIC servers."); } }
     private Profile activeProfile;
     public Profile ActiveProfile { get => activeProfile; set { if (value is null || ReferenceEquals(activeProfile, value)) return; DetachProfile(activeProfile); Set(ref activeProfile, value); Data.SelectedProfileId = value.Id; AttachProfile(); RefreshRules(); Notify(nameof(ModeLabel)); Notify(nameof(IsWholePc)); Notify(nameof(EmptyRulesDetail)); Notify(nameof(StatusDetail)); Save(); QueueApply(); } }
     public bool IsWholePc { get => ActiveProfile.DefaultRoute == RouteTarget.Vpn; set { if (value == IsWholePc) return; ActiveProfile.DefaultRoute = value ? RouteTarget.Vpn : RouteTarget.Direct; Notify(); Notify(nameof(ModeLabel)); Notify(nameof(EmptyRulesDetail)); Notify(nameof(StatusDetail)); Save(); QueueApply(); } }
@@ -399,7 +408,9 @@ public sealed partial class MainViewModel : Observable, IDisposable
             if (existing >= 0) ServerRows.Move(existing, i); else ServerRows.Insert(i, rows[i]);
         }
         while (ServerRows.Count > rows.Count) ServerRows.RemoveAt(ServerRows.Count - 1);
-        Notify(nameof(ServerCount)); Notify(nameof(NoServers));
+        Notify(nameof(ServerCount)); Notify(nameof(NoServers)); Notify(nameof(ServerLabel));
+        // Auto mode follows refreshed or hidden subscriptions; latency changes alone don't reconnect.
+        if (Settings.AutoServer && desiredConnected && spec?.AutoServers is { } running && AutoKey(running) != AutoKey(DisplayServers)) QueueApply();
     }
     private void RefreshRules() { VisibleRules.Clear(); var rules = ActiveProfile.Rules.Where(r => r.Name.Contains(RuleSearch, StringComparison.OrdinalIgnoreCase) || r.Description.Contains(RuleSearch, StringComparison.OrdinalIgnoreCase)); if (RuleSortIndex == 0) rules = rules.OrderByDescending(r => r.CreatedAt); foreach (var r in rules) VisibleRules.Add(r); Notify(nameof(RuleCount)); Notify(nameof(NoRules)); }
     private void AttachProfile() { foreach (var r in ActiveProfile.Rules) { r.PropertyChanged -= OnRuleChanged; r.PropertyChanged += OnRuleChanged; } }
@@ -461,7 +472,8 @@ public sealed partial class MainViewModel : Observable, IDisposable
             catch (TimeoutException) { }
             finally { locatingBeforeTunnel = false; }
             token.ThrowIfCancellationRequested();
-            spec = new(SelectedServer, ActiveProfile, Settings, LatencyService.FreePort(), Convert.ToHexString(RandomNumberGenerator.GetBytes(24)), Data.Servers.Where(s => ActiveProfile.Rules.Any(r => r.UseVpn && r.ServerId == s.Id)).ToList());
+            spec = new(SelectedServer, ActiveProfile, Settings, LatencyService.FreePort(), Convert.ToHexString(RandomNumberGenerator.GetBytes(24)), Data.Servers.Where(s => ActiveProfile.Rules.Any(r => r.UseVpn && r.ServerId == s.Id)).ToList(),
+                AutoServers: Settings.AutoServer ? AutoPool : null);
             if (MapLocationEnabled) {
                 int originPort;
                 do { originPort = LatencyService.FreePort(); } while (originPort == spec.ProbePort || originPort == 17890);
@@ -555,7 +567,8 @@ public sealed partial class MainViewModel : Observable, IDisposable
             DownloadHistory = DownloadHistory.TakeLast(119).Append(Math.Max(0, value.DownloadBytesPerSecond * 8 / 1_000_000)).ToArray();
             UploadHistory = UploadHistory.TakeLast(119).Append(Math.Max(0, value.UploadBytesPerSecond * 8 / 1_000_000)).ToArray();
         }
-        traffic = value;
+        var outbound = traffic?.ActiveOutbound; traffic = value;
+        if (outbound != value?.ActiveOutbound) Notify(nameof(ServerLabel));
         foreach (var name in new[] { nameof(DownloadRate), nameof(UploadRate), nameof(DownloadTotal), nameof(UploadTotal), nameof(DownloadHistory), nameof(UploadHistory) }) Notify(name);
     }
     private void NotifyStatus() { foreach (var n in new[] { nameof(Connected), nameof(ConnectionBusy), nameof(ConnectLabel), nameof(StatusLabel), nameof(StatusDetail), nameof(FooterLabel), nameof(FooterMode), nameof(DownloadRate), nameof(UploadRate) }) Notify(n); StatusChanged?.Invoke(); }

@@ -202,6 +202,8 @@ public sealed class Settings
     public TunnelMode TunnelMode { get; set; } = TunnelMode.Tun;
     public bool Animations { get; set; } = true;
     public bool MapLocation { get; set; } = true;
+    /// <summary>sing-box urltest across the visible servers instead of the selected one.</summary>
+    public bool AutoServer { get; set; }
     public bool GlowEffects { get; set; } = true;
     public bool PureBlack { get; set; }
     public string AccentColor { get; set; } = "Blue";
