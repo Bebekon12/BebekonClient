@@ -8,7 +8,7 @@ Version 0.1.9+ defaults to `https://github.com/Bebekon12/BebekonClient/releases/
 
 ## Publishing with GitHub Actions (0.1.24+)
 
-`.github/workflows/release.yml` builds Windows (windows-2025: secure cores, tests, Setup, portable ZIP, signed `update.json`, core sources) and Android (TrustTunnel native library in Docker, libbox, JVM tests, signed universal APK). Branch pushes only build and test. Pushing a tag `vX.Y.Z` that matches `Directory.Build.props` signs both and publishes the release titled `Bebekon VPN · Windows X.Y.Z и Android A.B.C`, with notes from `docs/releases/vX.Y.Z.md`.
+`.github/workflows/release.yml` builds Windows (windows-2025: secure cores, tests, Setup, portable ZIP, signed `update.json`, core sources) and Android (TrustTunnel native library in Docker, libbox, JVM tests, signed universal APK). Other branches only build and test. When `main` carries a `Directory.Build.props` version without a GitHub release (or a matching tag `vX.Y.Z` is pushed), the workflow signs both platforms and publishes the release, creating its tag, titled `Bebekon VPN · Windows X.Y.Z и Android A.B.C`, with notes from `docs/releases/vX.Y.Z.md`.
 
 Signing material lives only in the repository secret `BEBEKON_RELEASE_SECRETS`: Base64 of a JSON object with `updateKeyXml` (RSA-3072 private key; its public part is `resources/updates/public-key.xml`), `androidKeystoreBase64` (PKCS#12, alias `bebekon`) and `androidPassword`. GitHub cannot show a secret again, so keep an offline backup; losing it means another one-time reinstall. Version 0.1.24 introduced these keys: earlier installations do not accept its feed or APK signature and need one manual installation.
 
