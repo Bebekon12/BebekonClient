@@ -37,7 +37,7 @@ object CoreConfig {
                 // Site-only browsers get their direct fallback after every site rule (below).
                 if (rule.kind == RuleKind.APP && rule.values.all { it in policy.siteOnlyBrowsers }) continue
                 val values = if (rule.kind == RuleKind.APP) rule.values.filterNot { it in policy.siteOnlyBrowsers } else if (rule.kind in listOf(RuleKind.GEOSITE, RuleKind.GEOIP)) rule.values.map { val key = (if (rule.kind == RuleKind.GEOSITE) "geosite-" else "geoip-") + it.lowercase(); sets.getOrPut(key) { json("type" to "inline", "tag" to key, "rules" to geo(key).getJSONArray("rules")) }; key } else rule.values
-                rules += json(field to array(values), "outbound" to target)
+                rules += json(field to array(values), "outbound" to target).also { if (!rule.vpn && state.preferences.tlsFragment) it.put("tls_fragment", true) }
                 if (rule.kind in listOf(RuleKind.DOMAIN, RuleKind.KEYWORD, RuleKind.GEOSITE, RuleKind.APP)) dnsRules += json(field to array(values), "server" to if (rule.vpn) "vpn-dns" else "direct-dns")
             }
         }
@@ -45,12 +45,14 @@ object CoreConfig {
         // must not turn an unselected browser into a whole-app VPN rule. Authored site rules
         // above still win, then unrelated traffic from that browser goes directly.
         if (tunnel && policy.siteOnlyBrowsers.isNotEmpty()) {
-            rules += json("package_name" to array(policy.siteOnlyBrowsers), "outbound" to "direct")
+            rules += json("package_name" to array(policy.siteOnlyBrowsers), "outbound" to "direct").also { if (state.preferences.tlsFragment) it.put("tls_fragment", true) }
             dnsRules += json("package_name" to array(policy.siteOnlyBrowsers), "server" to "direct-dns")
         }
         // Pure web-app selection needs a direct fallback even without owner metadata.
         // Native selected apps retain the VPN fallback for Android resolver/isolated traffic.
         val defaultVpn = state.preferences.routing == RoutingMode.ALL || policy.appOnly && policy.nativeApps.isNotEmpty()
+        // Fragmentation only ever applies to direct connections; inside the VPN it would only add delay.
+        if (tunnel && !defaultVpn && state.preferences.tlsFragment) rules += json("outbound" to "direct", "tls_fragment" to true)
         val route = json("rules" to array(rules), "final" to if (defaultVpn) "vpn" else "direct", "auto_detect_interface" to true, "default_domain_resolver" to "direct-dns", "rule_set" to array(sets.values))
         val resolver = state.preferences.dnsResolver
         val dns = json("servers" to array(listOf(

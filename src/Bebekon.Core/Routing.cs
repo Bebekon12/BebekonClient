@@ -136,9 +136,11 @@ public static class ConfigGenerator
             if (rule.Kind is RuleKind.GeoSite or RuleKind.GeoIp)
                 foreach (var value in rule.Values) if (setTags.Add(GeoCatalog.Tag(rule.Kind, value))) sets.Add(GeoCatalog.Inline(rule.Kind, value));
             var tag = !rule.UseVpn ? "direct" : rule.ServerId is null ? "vpn" : serverTags[rule.ServerId];
-            var match = Match(rule); match["action"] = "route"; match["outbound"] = tag; routes.Add(match);
+            var match = Match(rule); match["action"] = "route"; match["outbound"] = tag; if (tag == "direct" && spec.Settings.TlsFragment) match["tls_fragment"] = true; routes.Add(match);
             if (rule.Kind is not (RuleKind.Network or RuleKind.GeoIp)) { var dm = Match(rule); dm["action"] = "route"; dm["server"] = tag == "vpn" ? "vpn-dns" : tag + "-dns"; dnsRules.Add(dm); }
         }
+        // Fragmentation only ever applies to direct connections; inside the VPN it would only add delay.
+        if (!probeOnly && spec.Settings.TlsFragment && spec.Profile.DefaultRoute != RouteTarget.Vpn) routes.Add(new JsonObject { ["action"] = "route", ["outbound"] = "direct", ["tls_fragment"] = true });
         var route = new JsonObject { ["rules"] = routes, ["final"] = spec.Profile.DefaultRoute == RouteTarget.Vpn || probeOnly ? "vpn" : "direct", ["auto_detect_interface"] = true, ["default_domain_resolver"] = "direct-dns" };
         if (sets.Count > 0) route["rule_set"] = sets;
         return new JsonObject {

@@ -204,6 +204,8 @@ public sealed class Settings
     public bool MapLocation { get; set; } = true;
     /// <summary>sing-box urltest across the visible servers instead of the selected one.</summary>
     public bool AutoServer { get; set; }
+    /// <summary>Split the TLS ClientHello of direct (non-VPN) connections, against throttling by SNI.</summary>
+    public bool TlsFragment { get; set; }
     public bool GlowEffects { get; set; } = true;
     public bool PureBlack { get; set; }
     public string AccentColor { get; set; } = "Blue";

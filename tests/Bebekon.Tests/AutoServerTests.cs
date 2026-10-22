@@ -49,3 +49,20 @@ public class AutoServerTests
         Assert.Equal("s70.example.com", (string?)config["outbounds"]!.AsArray().Single(o => (string?)o!["tag"] == "auto-0")!["server"]);
     }
 }
+public class TlsFragmentTests
+{
+    [Fact] public void OnlyDirectConnectionsAreFragmented()
+    {
+        var profile = new Profile { Rules = [new() { Name = "yt", Values = ["youtube.com"], UseVpn = false }, new() { Name = "ai", Values = ["openai.com"] }] };
+        var spec = CoreTests.Spec(profile, settings: new() { TlsFragment = true });
+        var rules = JsonNode.Parse(ConfigGenerator.Generate(spec))!["route"]!["rules"]!.AsArray();
+        Assert.True((bool)rules.Single(r => (string?)r!["domain_suffix"]?[0] == "youtube.com")!["tls_fragment"]!);
+        Assert.Null(rules.Single(r => (string?)r!["domain_suffix"]?[0] == "openai.com")!["tls_fragment"]);
+        var last = rules[^1]!; Assert.Equal("direct", (string?)last["outbound"]); Assert.True((bool)last["tls_fragment"]!);
+        Assert.Null(rules.FirstOrDefault(r => (string?)r!["outbound"] == "vpn" && r!["tls_fragment"] is not null));
+
+        var whole = JsonNode.Parse(ConfigGenerator.Generate(CoreTests.Spec(new() { DefaultRoute = RouteTarget.Vpn, Rules = profile.Rules }, settings: new() { TlsFragment = true })))!["route"]!["rules"]!.AsArray();
+        Assert.Single(whole, r => r!["tls_fragment"] is not null);
+        Assert.DoesNotContain("tls_fragment", ConfigGenerator.Generate(CoreTests.Spec(profile)));
+    }
+}

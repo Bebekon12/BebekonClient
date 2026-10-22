@@ -121,7 +121,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         require(value.mtu in 1280..1500)
         val old = saved.value.preferences; repo.update { it.copy(preferences = value) }
         if (old.ping != value.ping || old.pingTarget != value.pingTarget) withContext(Dispatchers.Main) { pingJobs.values.forEach { it.cancel() }; pingJobs.clear(); repo.pings.value = emptyMap() }
-        if (old.routing != value.routing || old.sitesInAllApps != value.sitesInAllApps || old.allowLan != value.allowLan || old.dnsResolver != value.dnsResolver || old.mtu != value.mtu || old.routingDiagnostics != value.routingDiagnostics || old.ipv6 != value.ipv6 || old.autoServer != value.autoServer) VpnController.reload(getApplication())
+        if (old.routing != value.routing || old.sitesInAllApps != value.sitesInAllApps || old.allowLan != value.allowLan || old.dnsResolver != value.dnsResolver || old.mtu != value.mtu || old.routingDiagnostics != value.routingDiagnostics || old.ipv6 != value.ipv6 || old.autoServer != value.autoServer || old.tlsFragment != value.tlsFragment) VpnController.reload(getApplication())
         if (value.autoServer && !old.autoServer && CoreConfig.autoNodes(saved.value).size < 2) message.value = "Для автовыбора нужно минимум два сервера (TrustTunnel не участвует)"
     }
     fun refreshAll() { saved.value.subscriptions.filter { remoteSubscription(it.source) }.forEach(::refresh) }
