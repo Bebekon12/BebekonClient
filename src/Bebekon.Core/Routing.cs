@@ -70,7 +70,7 @@ public static class ProfileCodec
         catch (Exception e) when (e is JsonException or NotSupportedException or NullReferenceException) { throw new UserError("Повреждённый файл профиля Bebekon."); }
     }
 }
-public sealed record ConnectSpec(Server Server, Profile Profile, Settings Settings, int ProbePort, string ProbePassword, List<Server>? RuleServers = null, int OriginProbePort = 0);
+public sealed record ConnectSpec(Server Server, Profile Profile, Settings Settings, int ProbePort, string ProbePassword, List<Server>? RuleServers = null, int OriginProbePort = 0, List<Server>? AutoServers = null);
 public static class ConfigGenerator
 {
     public const string CoreVersion = "1.14.2";
@@ -85,6 +85,13 @@ public static class ConfigGenerator
         RuleValidation.Validate(spec.Profile);
         var vpn = Vpn(s, "vpn", runtime, trustTunnel);
         var outbounds = new JsonArray { vpn, new JsonObject { ["type"] = "direct", ["tag"] = "direct", ["domain_resolver"] = "direct-dns" } };
+        if (!probeOnly && AutoServers(spec) is { Count: >= 2 } auto)
+        {
+            // "vpn" becomes a urltest group: sing-box measures every server and moves to the
+            // fastest working one, also after a server or network failure.
+            outbounds[0] = new JsonObject { ["type"] = "urltest", ["tag"] = "vpn", ["outbounds"] = Strings(auto.Select((_, i) => "auto-" + i)), ["url"] = "https://www.gstatic.com/generate_204", ["interval"] = "3m", ["tolerance"] = 50, ["idle_timeout"] = "30m" };
+            for (var i = 0; i < auto.Count; i++) outbounds.Add(ProtocolConfig.Outbound(auto[i], "auto-" + i));
+        }
         // Direct DNS uses the uplink's own resolver (router / phone hotspot / ISP). Public DoH is
         // throttled on many mobile networks and delayed even the VPN server's address lookup.
         var dnsServers = new JsonArray { new JsonObject { ["type"] = "local", ["tag"] = "direct-dns" }, Dns("vpn-dns", "vpn") };
@@ -129,9 +136,11 @@ public static class ConfigGenerator
             if (rule.Kind is RuleKind.GeoSite or RuleKind.GeoIp)
                 foreach (var value in rule.Values) if (setTags.Add(GeoCatalog.Tag(rule.Kind, value))) sets.Add(GeoCatalog.Inline(rule.Kind, value));
             var tag = !rule.UseVpn ? "direct" : rule.ServerId is null ? "vpn" : serverTags[rule.ServerId];
-            var match = Match(rule); match["action"] = "route"; match["outbound"] = tag; routes.Add(match);
+            var match = Match(rule); match["action"] = "route"; match["outbound"] = tag; if (tag == "direct" && spec.Settings.TlsFragment) match["tls_fragment"] = true; routes.Add(match);
             if (rule.Kind is not (RuleKind.Network or RuleKind.GeoIp)) { var dm = Match(rule); dm["action"] = "route"; dm["server"] = tag == "vpn" ? "vpn-dns" : tag + "-dns"; dnsRules.Add(dm); }
         }
+        // Fragmentation only ever applies to direct connections; inside the VPN it would only add delay.
+        if (!probeOnly && spec.Settings.TlsFragment && spec.Profile.DefaultRoute != RouteTarget.Vpn) routes.Add(new JsonObject { ["action"] = "route", ["outbound"] = "direct", ["tls_fragment"] = true });
         var route = new JsonObject { ["rules"] = routes, ["final"] = spec.Profile.DefaultRoute == RouteTarget.Vpn || probeOnly ? "vpn" : "direct", ["auto_detect_interface"] = true, ["default_domain_resolver"] = "direct-dns" };
         if (sets.Count > 0) route["rule_set"] = sets;
         return new JsonObject {
@@ -140,6 +149,14 @@ public static class ConfigGenerator
             ["inbounds"] = inbounds, ["outbounds"] = outbounds, ["route"] = route
         }.ToJsonString(Json.Options);
     }
+    /// <summary>
+    /// Native sing-box servers only: XHTTP and TrustTunnel need per-server companion processes.
+    /// The selected server goes first: urltest uses it until the first measurement finishes.
+    /// At most 64 are measured, in the caller's order (the app passes the fastest known first).
+    /// </summary>
+    public static List<Server> AutoServers(ConnectSpec spec) => spec.Settings.AutoServer && spec.AutoServers is { } servers
+        ? servers.Prepend(spec.Server).Where(AutoEligible).DistinctBy(n => n.Id).Take(64).ToList() : [];
+    public static bool AutoEligible(Server n) => n.Supported && n.Type != "trusttunnel" && n.Transport != "xhttp";
     private static JsonObject Dns(string tag, string detour) => new() { ["type"] = "https", ["tag"] = tag, ["server"] = "1.1.1.1", ["detour"] = detour, ["tls"] = new JsonObject { ["server_name"] = "cloudflare-dns.com" } };
     private static JsonObject Vpn(Server s, string tag, XhttpRuntime? runtime, TrustTunnelRuntime? trustTunnel)
     {

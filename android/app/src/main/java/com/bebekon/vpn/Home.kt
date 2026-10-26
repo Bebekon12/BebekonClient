@@ -45,18 +45,30 @@ private val SignalRed = Color(0xFFFF687A)
         val rowHeight = (maxHeight * .103f).coerceIn(64.dp, 74.dp)
         val peek = rowHeight * 4 + 44.dp
         val node = saved.selectedNode
+        // Parses every server's config; recompute only when the state changes, not every second.
+        val auto = remember(saved) { node != null && CoreConfig.autoNodes(saved).size >= 2 }
         BottomSheetScaffold(sheetPeekHeight = peek, sheetContainerColor = MaterialTheme.colorScheme.surface,
             sheetTonalElevation = 0.dp, sheetShadowElevation = 4.dp,
             sheetShape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
             sheetDragHandle = { Box(Modifier.padding(top = 8.dp, bottom = 8.dp).size(44.dp, 4.dp).clip(CircleShape).background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .65f))) },
             containerColor = MaterialTheme.colorScheme.background, sheetContent = {
                 LazyColumn(Modifier.fillMaxWidth(), contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // Warn before the provider cuts the connection (expiry or traffic limit).
+                    val warning = saved.subscriptions.firstOrNull { sub -> sub.nodes.any { it.id == node?.id } }?.usage?.warning().orEmpty()
+                    if (warning.isNotEmpty()) item {
+                        DashboardCard(Modifier.fillMaxWidth().clickable(onClick = subscriptions)) {
+                            Icon(Icons.Outlined.WarningAmber, null, tint = MaterialTheme.colorScheme.error)
+                            Text(warning, Modifier.weight(1f).padding(horizontal = 12.dp, vertical = 12.dp), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.error)
+                            Icon(Icons.Outlined.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
                     item {
                         DashboardCard(Modifier.fillMaxWidth().height(rowHeight).clickable(onClick = servers)) {
                             Flag(node?.displayCountry(resolvedCountries).orEmpty(), Modifier.size(42.dp, 30.dp))
                             Column(Modifier.weight(1f).fillMaxHeight().padding(horizontal = 12.dp), verticalArrangement = Arrangement.Center) {
-                                Text(node?.name?.let(::displayName) ?: "Выбрать сервер", fontSize = 17.sp, lineHeight = 20.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                if (node != null) PingText(pings[node.id] ?: PingResult(), { model.ping(node) })
+                                Text(if (auto) "Авто" + session.autoServer.takeIf { session.phase == Phase.ON && it.isNotEmpty() }?.let { " · " + displayName(it) }.orEmpty() else node?.name?.let(::displayName) ?: "Выбрать сервер", fontSize = 17.sp, lineHeight = 20.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                if (auto) Text("Самый быстрый работающий сервер", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                else if (node != null) PingText(pings[node.id] ?: PingResult(), { model.ping(node) })
                                 else Text("Добавьте вашу подписку", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                             Icon(Icons.Outlined.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -98,7 +110,7 @@ private val SignalRed = Color(0xFFFF687A)
                             }
                         }
                     }
-                    item { Row(Modifier.fillMaxWidth().padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) { Text("Все серверы", fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)); TextButton({ model.pingAll() }) { Icon(Icons.Outlined.Speed, null, Modifier.size(17.dp)); Text("Пинг", Modifier.padding(start = 5.dp)) } } }
+                    item { Row(Modifier.fillMaxWidth().padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) { Text("Все серверы", fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)); if (saved.visibleNodes.size >= 2) AutoChip(saved, model); TextButton({ model.pingAll() }) { Icon(Icons.Outlined.Speed, null, Modifier.size(17.dp)); Text("Пинг", Modifier.padding(start = 5.dp)) } } }
                     if (saved.nodes.isEmpty()) item { Button(subscriptions, Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) { Text("Добавить подписку") } }
                     items(nodesByPing(saved.visibleNodes, pings), key = { "home-" + it.id }) { server -> ServerRow(server, server.id == saved.selected, server.id in saved.favorites, pings[server.id] ?: PingResult(), { model.select(server) }, { model.favorite(server) }, { model.ping(server) }, server.displayCountry(resolvedCountries)) }
                 }

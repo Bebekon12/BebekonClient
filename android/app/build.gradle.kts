@@ -6,8 +6,8 @@ android {
         applicationId = "com.bebekon.vpn"
         minSdk = 29
         targetSdk = 36
-        versionCode = 12
-        versionName = "0.1.11"
+        versionCode = 13
+        versionName = "0.1.12"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64") }
     }

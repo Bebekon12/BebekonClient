@@ -7,7 +7,7 @@
 [Setup]
 AppId={{31857247-067C-4DC1-BA47-44F01A87B70D}
 AppName=Bebekon VPN
-AppVersion=0.1.24
+AppVersion=0.1.25
 AppPublisher=Bebekon
 DefaultDirName={autopf}\Bebekon VPN
 DefaultGroupName=Bebekon VPN
@@ -40,6 +40,12 @@ Source: "..\scripts\stop-service.ps1"; Flags: dontcopy
 [Icons]
 Name: "{group}\Bebekon VPN"; Filename: "{app}\Bebekon.App.exe"
 Name: "{autodesktop}\Bebekon VPN"; Filename: "{app}\Bebekon.App.exe"; Tasks: desktopicon
+[Registry]
+; bebekon:// "Add to Bebekon" links only prefill the subscription field; see ImportLink.
+Root: HKA; Subkey: "Software\Classes\bebekon"; ValueType: string; ValueName: ""; ValueData: "URL:Bebekon VPN"; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Classes\bebekon"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""
+Root: HKA; Subkey: "Software\Classes\bebekon\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\Bebekon.App.exe,0"
+Root: HKA; Subkey: "Software\Classes\bebekon\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\Bebekon.App.exe"" ""%1"""
 [Run]
 Filename: "{app}\Bebekon.App.exe"; Description: "Открыть Bebekon VPN"; Flags: nowait postinstall skipifsilent runasoriginaluser; Check: NotUpdate
 Filename: "{app}\Bebekon.App.exe"; Flags: nowait runascurrentuser; Check: RestartElevated

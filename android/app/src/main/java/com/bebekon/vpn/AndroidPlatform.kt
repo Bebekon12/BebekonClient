@@ -70,6 +70,10 @@ class AndroidPlatform(private val context: Context, private val vpn: BebekonVpnS
     private val monitorThread by monitorLoop
     private var underlying: Network? = null
     private var reported = ""
+    private var reportedInterface = ""
+    private var reportedIdentity = ""
+    /** Called (on the monitor thread) when the same interface reconnected or changed address; see update(). */
+    var onSameInterfaceChange: (() -> Unit)? = null
     /** Reports Android's own default physical network; a real change makes sing-box drop stale connections. */
     @Synchronized private fun update(listener: InterfaceUpdateListener, preferred: Network?) {
         val network = preferred?.takeIf { PhysicalNetwork.usable(connectivity, it) } ?: PhysicalNetwork.current(connectivity)
@@ -83,6 +87,16 @@ class AndroidPlatform(private val context: Context, private val vpn: BebekonVpnS
             reported = key
             if (index < 0) listener.updateDefaultInterface("", -1, false, false) else listener.updateDefaultInterface(name, index, metered, false)
         }
+        // sing-box ignores a report with the same interface name and index. Yet mobile data that
+        // reconnects after sleep gets a new address on the same rmnet interface, and Wi-Fi can
+        // reconnect as a new network on the same wlan0: every old socket, including the DNS-over-
+        // HTTPS connection, is dead then. Reset explicitly instead of waiting for a manual reconnect.
+        val iface = if (index < 0) "" else "$name/$index"
+        // IPv4 only: rotating IPv6 privacy addresses keep the old ones valid for hours.
+        val identity = if (index < 0) "" else "${network?.networkHandle}/${link?.linkAddresses?.map { it.address }?.filterIsInstance<java.net.Inet4Address>()?.map { it.hostAddress }?.sorted()}"
+        val sameInterfaceChanged = iface.isNotEmpty() && iface == reportedInterface && identity != reportedIdentity
+        reportedInterface = iface; reportedIdentity = identity
+        if (sameInterfaceChanged) onSameInterfaceChange?.invoke()
         val current = network.takeIf { index >= 0 }
         if (vpn != null && current != underlying) { underlying = current; vpn.setUnderlyingNetworks(current?.let { arrayOf(it) }) }
     }
@@ -95,7 +109,7 @@ class AndroidPlatform(private val context: Context, private val vpn: BebekonVpnS
             override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) { if (chosen == null || chosen == network) update(listener, network) }
         }
         monitors[listener] = callback
-        synchronized(this) { reported = "" }
+        synchronized(this) { reported = ""; reportedInterface = ""; reportedIdentity = "" }
         PhysicalNetwork.listen(connectivity, callback, Handler(monitorThread.looper))
         update(listener, null)
     }

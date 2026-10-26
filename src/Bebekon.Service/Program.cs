@@ -31,6 +31,7 @@ internal sealed class VpnService : ServiceBase
     private readonly SemaphoreSlim gate = new(1);
     private readonly CancellationTokenSource lifetime = new();
     private CoreSession? core;
+    private KillSwitch? killSwitch;
     private CoreTraffic? traffic;
     private ConnectSpec? last;
     private volatile ConnectionState state;
@@ -99,10 +100,10 @@ internal sealed class VpnService : ServiceBase
                     switch (request.Operation)
                     {
                         case "GetStatus": break;
-                        case "StopCore": StopCore(); break;
+                        case "StopCore": StopCore(request.KeepBlocking); break;
                         case "Shutdown": if (console) throw new UserError("Console helper must be stopped with Ctrl+C."); StopCore(); break;
                         case "StartCore": if (request.Spec is null) throw new UserError("Не указан сервер."); await StartCoreAsync(request.Spec, timeout.Token); break;
-                        case "RestartCore": var spec = request.Spec ?? last ?? throw new UserError("Сначала выберите сервер."); StopCore(); await StartCoreAsync(spec, timeout.Token); break;
+                        case "RestartCore": var spec = request.Spec ?? last ?? throw new UserError("Сначала выберите сервер."); StopCore(keepBlocking: true); await StartCoreAsync(spec, timeout.Token); break;
                         case "ValidateConfig": if (request.Spec is null) throw new UserError("Не указан сервер."); await CoreSession.ValidateAsync(request.Spec, CoreExe, root, timeout.Token); break;
                         case "GetLogs": var lines = Directory.GetFiles(root, "*.log").SelectMany(File.ReadLines).TakeLast(120); result = new(true, Status(), string.Join(Environment.NewLine, lines)); await PipeProtocol.WriteAsync(pipe, result, timeout.Token); continue;
                         default: throw new UserError("Неизвестная команда службы.");
@@ -128,14 +129,25 @@ internal sealed class VpnService : ServiceBase
     {
         if (core?.Running == true) throw new UserError("VPN уже подключён.");
         state = ConnectionState.Connecting; error = null; core?.Dispose();
+        // Engaged before the core starts and kept through reconnects; StopCore from a user
+        // disconnect releases it. If enabling fails, connect without it rather than not at all.
+        if (spec.Settings.KillSwitch && spec.Settings.TunnelMode == TunnelMode.Tun)
+        {
+            if (killSwitch is null)
+                try { killSwitch = KillSwitch.Enable(new[] { "sing-box.exe", "xray.exe", "trusttunnel_client.exe" }.Select(name => Path.Combine(AppContext.BaseDirectory, "core", name))); log.Write("Leak protection enabled."); }
+                catch (Exception e) when (e is System.ComponentModel.Win32Exception or DllNotFoundException or EntryPointNotFoundException) { log.Write("Leak protection unavailable: " + e.Message); }
+        }
+        else ReleaseKillSwitch();
         traffic?.Dispose(); traffic = new CoreTraffic();
         var path = Path.Combine(root, "sing-box.json"); core = new(CoreExe, coreLog);
         var launchedCore = core;
         core.Exited += () => { if (ReferenceEquals(core, launchedCore) && state is ConnectionState.Connected or ConnectionState.Connecting) { state = ConnectionState.Error; error = "Ядро VPN завершилось. Подключитесь заново."; connectedAt = null; log.Write("Core exited unexpectedly."); File.Delete(path); } };
         await core.StartAsync(spec, root, false, ct, traffic.AddToConfig); traffic.Start(); last = spec; connectedAt = DateTimeOffset.UtcNow; state = ConnectionState.Connected;
     }
-    private void StopCore()
+    private void ReleaseKillSwitch() { if (killSwitch is null) return; killSwitch.Dispose(); killSwitch = null; log.Write("Leak protection disabled."); }
+    private void StopCore(bool keepBlocking = false)
     {
+        if (!keepBlocking) ReleaseKillSwitch();
         state = ConnectionState.Disconnecting; traffic?.Dispose(); traffic = null; core?.Dispose(); core = null; state = ConnectionState.Disconnected; connectedAt = null; error = null;
         File.Delete(Path.Combine(root, "sing-box.json")); File.Delete(Path.Combine(root, "xray.json")); log.Write("Core stopped; runtime config removed.");
     }

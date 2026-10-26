@@ -41,6 +41,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         } }
         viewModelScope.launch { while (isActive) { delay(30_000); origin.refresh(); refreshMapDestination(saved.value, session.value) } }
         viewModelScope.launch { origin.countries.collect { live -> rememberCountries(live) } }
+        viewModelScope.launch(Dispatchers.IO) { AutoRefresh.runDue(getApplication()) }
         // Older Xray imports lost profile remarks. Refresh them once per launch; identity stays unchanged.
         saved.value.subscriptions.filter { sub -> sub.source.startsWith("https://") && sub.nodes.any { it.country.isBlank() && it.name.lowercase() in setOf("proxy", "vpn", "out", "outbound") } }.forEach(::refresh)
     }
@@ -76,19 +77,43 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (saved.value.selectedNode == null && session.value.active) VpnController.stop(getApplication())
     }
     fun refresh(sub: Subscription) = task {
-        val before = saved.value.selectedNode
-        val new = repo.load(sub.source, sub.name).copy(id = sub.id); repo.add(new)
-        val after = saved.value.selectedNode
-        if (before != null && after == null) VpnController.stop(getApplication())
-        else if (before?.outbound != after?.outbound) VpnController.reload(getApplication())
-        message.value = if (before != null && after == null) "Подписка обновлена. Прежний сервер удалён провайдером — выберите сервер" else "Подписка обновлена"
+        val removed = AutoRefresh.refresh(getApplication(), sub)
+        message.value = if (removed) "Подписка обновлена. Прежний сервер удалён провайдером — выберите сервер" else "Подписка обновлена"
+    }
+    fun exportBackup(uri: android.net.Uri) = task {
+        getApplication<Application>().contentResolver.openOutputStream(uri, "wt")?.use { it.write(Backup.export(saved.value).toByteArray()) } ?: error("Не удалось записать файл")
+        message.value = "Резервная копия сохранена. В ней ссылки подписок — храните файл в надёжном месте"
+    }
+    /** Re-downloads backed-up subscriptions and adds rules that are not present yet; nothing is removed. */
+    fun importBackup(uri: android.net.Uri) = task {
+        val text = getApplication<Application>().contentResolver.openInputStream(uri)?.use { it.readLimited(4 * 1024 * 1024).toString(Charsets.UTF_8) } ?: error("Не удалось прочитать файл")
+        val data = Backup.parse(text)
+        var added = 0; var failed = data.skipped
+        for (s in data.subscriptions) runCatching {
+            if (s.manualOutbound.isNotEmpty()) {
+                val config = org.json.JSONObject(s.manualOutbound)
+                val node = Node(digest(config.toString()).take(24), s.name, config.toString(), SubscriptionParser.country(s.name))
+                TrustTunnelProfile.validate(node); require(ConnectionSafety.reason(config).isEmpty())
+                if (saved.value.nodes.none { it.id == node.id }) repo.update { it.copy(subscriptions = it.subscriptions + Subscription(name = s.name, source = "manual:" + java.util.UUID.randomUUID(), nodes = listOf(node), hidden = s.hidden), selected = it.selected ?: node.id) }
+            } else repo.add(repo.load(s.source, s.name).copy(hidden = s.hidden))
+        }.onSuccess { added++ }.onFailure { failed++ }
+        var rules = 0
+        repo.update { state ->
+            val signatures = state.rules.map { "${it.kind}|${it.vpn}|${it.values.joinToString()}" }.toSet()
+            val additions = data.rules.filter { "${it.kind}|${it.vpn}|${it.values.joinToString()}" !in signatures }.also { rules = it.size }
+            state.copy(rules = state.rules + additions, preferences = data.preferences ?: state.preferences)
+        }
+        VpnController.reload(getApplication())
+        message.value = "Восстановлено подписок: $added, правил: $rules" + if (failed > 0) " · не удалось: $failed" else ""
     }
     fun removeSubscription(id: String) = task {
         repo.update { s -> val remaining = s.subscriptions.filterNot { it.id == id }; s.copy(subscriptions = remaining, selected = s.selected?.takeIf { key -> remaining.any { sub -> sub.nodes.any { it.id == key } } }) }
         if (saved.value.selectedNode == null && session.value.active) VpnController.stop(getApplication())
     }
     fun toggleSubscriptionVisibility(id: String) = task {
+        val pool = CoreConfig.autoKey(saved.value)
         repo.update { state -> state.copy(subscriptions = state.subscriptions.map { if (it.id == id) it.copy(hidden = !it.hidden) else it }) }
+        if (pool != CoreConfig.autoKey(saved.value)) VpnController.reload(getApplication())
     }
     fun select(node: Node) { if (node.unsupported.isNotEmpty()) { message.value = node.unsupported; return }; task { repo.update { it.copy(selected = node.id) }; VpnController.reload(getApplication()) } }
     fun favorite(node: Node) = task { repo.update { it.copy(favorites = if (node.id in it.favorites) it.favorites - node.id else it.favorites + node.id) } }
@@ -96,10 +121,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         require(value.mtu in 1280..1500)
         val old = saved.value.preferences; repo.update { it.copy(preferences = value) }
         if (old.ping != value.ping || old.pingTarget != value.pingTarget) withContext(Dispatchers.Main) { pingJobs.values.forEach { it.cancel() }; pingJobs.clear(); repo.pings.value = emptyMap() }
-        if (old.routing != value.routing || old.sitesInAllApps != value.sitesInAllApps || old.allowLan != value.allowLan || old.dnsResolver != value.dnsResolver || old.mtu != value.mtu || old.routingDiagnostics != value.routingDiagnostics || old.ipv6 != value.ipv6) VpnController.reload(getApplication())
+        if (old.routing != value.routing || old.sitesInAllApps != value.sitesInAllApps || old.allowLan != value.allowLan || old.dnsResolver != value.dnsResolver || old.mtu != value.mtu || old.routingDiagnostics != value.routingDiagnostics || old.ipv6 != value.ipv6 || old.autoServer != value.autoServer || old.tlsFragment != value.tlsFragment) VpnController.reload(getApplication())
+        if (value.autoServer && !old.autoServer && CoreConfig.autoNodes(saved.value).size < 2) message.value = "Для автовыбора нужно минимум два сервера (TrustTunnel не участвует)"
     }
-    private fun remoteSubscription(source: String): Boolean = source.startsWith("https://") ||
-        (source.startsWith("tt://", true) && runCatching { TrustTunnelProfile.link(source).second != null }.getOrDefault(false))
     fun refreshAll() { saved.value.subscriptions.filter { remoteSubscription(it.source) }.forEach(::refresh) }
     override fun onCleared() { origin.close(); super.onCleared() }
     fun saveAppRules(apps: List<InstalledApp>, actions: Map<String, Boolean>) = task {
@@ -157,5 +181,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         NativeCore.probe(getApplication(), probeState(node, saved.value.preferences), "GET", url).let { GeoReply(it.statusCode, it.body) }
     } catch (e: Exception) { e.message?.removePrefix("probe HTTP ")?.toIntOrNull()?.let { GeoReply(it) } ?: throw e }
     private fun probeState(node: Node, preferences: Preferences) = SavedState(subscriptions = listOf(Subscription(name = "probe", source = "", nodes = listOf(node))), selected = node.id, preferences = preferences)
-    fun receive(intent: Intent?) { val text = when (intent?.action) { Intent.ACTION_SEND -> intent.getStringExtra(Intent.EXTRA_TEXT); Intent.ACTION_VIEW -> intent.dataString; else -> null }; if (!text.isNullOrBlank()) importText.value = text }
+    fun receive(intent: Intent?) { val text = when (intent?.action) { Intent.ACTION_SEND -> intent.getStringExtra(Intent.EXTRA_TEXT); Intent.ACTION_VIEW -> intent.dataString; else -> null }
+        if (text.isNullOrBlank()) return
+        val link = ImportLink.decode(text)
+        if (link == null) message.value = "Ссылка Bebekon повреждена или ведёт не на подписку" else importText.value = link
+    }
 }

@@ -53,7 +53,18 @@ public sealed partial class MainViewModel : Observable, IDisposable
     public Visibility NavTextVisibility => SidebarCollapsed ? Visibility.Collapsed : Visibility.Visible;
     private Server? selectedServer;
     public Server? SelectedServer { get => selectedServer; set { var changed = selectedServer?.Id != value?.Id || (selectedServer is not null && value is not null && ServerRefresh.ConnectionKey(selectedServer) != ServerRefresh.ConnectionKey(value)); if (Set(ref selectedServer, value)) { Data.SelectedServerId = value?.Id; Notify(nameof(ServerLabel)); Notify(nameof(SelectedCountry)); Save(); if (changed) { ResetMapDestination(); QueueApply(); } } } }
-    public string ServerLabel => SelectedServer?.DisplayName ?? T("Выберите сервер", "Choose a server");
+    public string ServerLabel => AutoActive ? T("Авто", "Auto") + (ActiveAutoServer is { } active ? " · " + active.DisplayName : "") : SelectedServer?.DisplayName ?? T("Выберите сервер", "Choose a server");
+    /// <summary>Visible servers urltest may use; the core takes the first one until it has measured them.</summary>
+    private bool AutoActive => Settings.AutoServer && DisplayServers.Count(ConfigGenerator.AutoEligible) >= 2;
+    /// <summary>Fastest known first, so a large subscription keeps its best 64 servers.</summary>
+    private List<Server> AutoPool => DisplayServers.Where(ConfigGenerator.AutoEligible).OrderBy(s => s.LatencyMs is >= 0 ? s.LatencyMs : long.MaxValue).ToList();
+    /// <summary>Order-independent identity of the auto pool; a changed pool needs a new core config.</summary>
+    private static string AutoKey(IEnumerable<Server>? servers) => string.Join("\n", (servers ?? []).Where(ConfigGenerator.AutoEligible).Select(ServerRefresh.ConnectionKey).Order(StringComparer.Ordinal));
+    /// <summary>Maps the core's "auto-N" tag back through the list used for the running connection.</summary>
+    private Server? ActiveAutoServer => Connected && spec is { } current && traffic?.ActiveOutbound is { } tag && int.TryParse(tag.AsSpan(5), out var index) && ConfigGenerator.AutoServers(current) is { Count: >= 2 } list && index >= 0 && index < list.Count ? list[index] : null;
+    public bool KillSwitchEnabled { get => Settings.KillSwitch; set { if (Settings.KillSwitch == value) return; Settings.KillSwitch = value; Notify(); Save(); QueueApply(); } }
+    public bool TlsFragmentEnabled { get => Settings.TlsFragment; set { if (Settings.TlsFragment == value) return; Settings.TlsFragment = value; Notify(); Save(); QueueApply(); } }
+    public bool AutoServerEnabled { get => Settings.AutoServer; set { if (Settings.AutoServer == value) return; Settings.AutoServer = value; Notify(); Notify(nameof(ServerLabel)); Save(); QueueApply(); if (value && !AutoActive) Banner = T("Для автовыбора нужно минимум два сервера VLESS, VMess, Trojan, Shadowsocks, Hysteria2 или TUIC.", "Auto needs at least two VLESS, VMess, Trojan, Shadowsocks, Hysteria2 or TUIC servers."); } }
     private Profile activeProfile;
     public Profile ActiveProfile { get => activeProfile; set { if (value is null || ReferenceEquals(activeProfile, value)) return; DetachProfile(activeProfile); Set(ref activeProfile, value); Data.SelectedProfileId = value.Id; AttachProfile(); RefreshRules(); Notify(nameof(ModeLabel)); Notify(nameof(IsWholePc)); Notify(nameof(EmptyRulesDetail)); Notify(nameof(StatusDetail)); Save(); QueueApply(); } }
     public bool IsWholePc { get => ActiveProfile.DefaultRoute == RouteTarget.Vpn; set { if (value == IsWholePc) return; ActiveProfile.DefaultRoute = value ? RouteTarget.Vpn : RouteTarget.Direct; Notify(); Notify(nameof(ModeLabel)); Notify(nameof(EmptyRulesDetail)); Notify(nameof(StatusDetail)); Save(); QueueApply(); } }
@@ -127,6 +138,9 @@ public sealed partial class MainViewModel : Observable, IDisposable
     public ICommand ChangeRoutingMode { get; }
     public ICommand CancelPing { get; }
     public ICommand RefreshSubscriptions { get; }
+    public ICommand OpenProviderLink { get; }
+    public ICommand ExportBackup { get; }
+    public ICommand ImportBackup { get; }
     public ICommand AddSubscription { get; }
     public ICommand AddTrustTunnel { get; }
     public ICommand ToggleSubscriptionVisibility { get; }
@@ -189,7 +203,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
         RefreshSubscriptions = Async(async _ => { foreach (var sub in Data.Subscriptions.ToArray()) await RefreshSubAsync(sub); });
         AddTrustTunnel = new Command(_ => { var sub = Dialogs.ManualTrustTunnel(); if (sub is null) return; var nodes = VlessParser.ParseSubscription(sub.Source); Data.Subscriptions.Add(sub); ReplaceServers(sub, nodes); Save(); Go("Servers"); });
         ToggleSubscriptionVisibility = new Command(p => { if (p is not Subscription sub) return; sub.Hidden = !sub.Hidden; Save(); RefreshServers(); });
-        AddSubscription = Async(async _ => { var sub = Dialogs.Subscription(null); if (sub is null) return; var servers = await SubscriptionLoader.LoadAsync(sub.Source, lifetime.Token); Data.Subscriptions.Add(sub); ReplaceServers(sub, servers); Save(); Go("Servers"); });
+        AddSubscription = Async(async _ => { var sub = Dialogs.Subscription(null); if (sub is null) return; var (servers, info) = await SubscriptionLoader.LoadWithInfoAsync(sub.Source, lifetime.Token); sub.Apply(info); Data.Subscriptions.Add(sub); ReplaceServers(sub, servers); Save(); Go("Servers"); });
         ImportQuickSubscription = Async(async _ =>
         {
             Importing = true;
@@ -197,13 +211,44 @@ public sealed partial class MainViewModel : Observable, IDisposable
             {
                 var source = QuickSource.Trim();
                 var sub = new Subscription { Source = source, Name = Dialogs.SuggestSubscriptionName(source) };
-                var nodes = await SubscriptionLoader.LoadAsync(source, lifetime.Token);
+                var (nodes, info) = await SubscriptionLoader.LoadWithInfoAsync(source, lifetime.Token);
+                sub.Apply(info); if (info.Title.Length > 0) sub.Name = info.Title;
                 Data.Subscriptions.Add(sub); ReplaceServers(sub, nodes); Save(); QuickSource = ""; Go("Servers");
             }
             finally { Importing = false; }
         }, () => !Importing && !string.IsNullOrWhiteSpace(QuickSource));
         EditSubscription = Async(async p => { var old = (Subscription)p!; var sub = Dialogs.Subscription(old); if (sub is null) return; var servers = await SubscriptionLoader.LoadAsync(sub.Source, lifetime.Token); old.Name = sub.Name; old.Source = sub.Source; ReplaceServers(old, servers); Save(); Notify(nameof(NoSubscriptions)); });
         RefreshSubscription = Async(p => RefreshSubAsync((Subscription)p!));
+        ExportBackup = new Command(_ =>
+        {
+            var dialog = new Microsoft.Win32.SaveFileDialog { Filter = "Bebekon backup (*.json)|*.json", FileName = "bebekon-backup-" + DateTime.Now.ToString("yyyyMMdd") + ".json" };
+            if (dialog.ShowDialog() != true) return;
+            File.WriteAllText(dialog.FileName, BackupCodec.Export(Data, ActiveProfile));
+            Banner = T("Резервная копия сохранена. В ней ссылки подписок — храните файл в надёжном месте.", "Backup saved. It contains subscription links; keep the file safe.");
+        });
+        ImportBackup = Async(async _ =>
+        {
+            var dialog = new Microsoft.Win32.OpenFileDialog { Filter = "Bebekon backup (*.json)|*.json|All files|*.*" };
+            if (dialog.ShowDialog() != true) return;
+            var data = BackupCodec.Import(await File.ReadAllTextAsync(dialog.FileName, lifetime.Token));
+            int added = 0, failed = data.Skipped;
+            // Subscriptions download current servers; nothing already present is replaced or removed.
+            foreach (var item in data.Subscriptions.Where(i => Data.Subscriptions.All(s => s.Source != i.Source)))
+            {
+                try { var (servers, info) = await SubscriptionLoader.LoadWithInfoAsync(item.Source, lifetime.Token); var sub = new Subscription { Name = item.Name, Source = item.Source, Hidden = item.Hidden }; sub.Apply(info); Data.Subscriptions.Add(sub); ReplaceServers(sub, servers); added++; }
+                catch (Exception e) when (e is UserError or HttpRequestException or OperationCanceledException && !lifetime.IsCancellationRequested) { failed++; }
+            }
+            static string Signature(RoutingRule r) => $"{r.Kind}|{r.UseVpn}|{string.Join('\n', r.Values).ToLowerInvariant()}";
+            var existing = ActiveProfile.Rules.Select(Signature).ToHashSet();
+            var rules = data.Rules.Where(r => existing.Add(Signature(r))).ToList();
+            foreach (var rule in rules) ActiveProfile.Rules.Add(rule);
+            if (data.Settings is { } settings && settings.Mtu is >= 1280 and <= 9000)
+                foreach (var property in typeof(Settings).GetProperties().Where(p => p.CanWrite && p.Name != nameof(Settings.DesignVersion))) property.SetValue(Settings, property.GetValue(settings));
+            Save(); if (rules.Count > 0) RulesChanged(); else QueueApply();
+            Banner = T($"Восстановлено подписок: {added}, правил: {rules.Count}", $"Restored subscriptions: {added}, rules: {rules.Count}") + (failed > 0 ? T($" · не удалось: {failed}", $" · failed: {failed}") : "");
+        });
+        // Provider links are validated as https when stored (ProviderInfo.SafeLink).
+        OpenProviderLink = new Command(p => { if (ProviderInfo.SafeLink(p as string) is { Length: > 0 } link) Process.Start(new ProcessStartInfo(link) { UseShellExecute = true }); });
         DeleteSubscription = Async(async p => { var sub = (Subscription)p!; if (!Dialogs.Confirm(T("Удалить подписку?", "Delete subscription?"), sub.Name)) return; if (Connected && SelectedServer?.SubscriptionId == sub.Id) await DisconnectAsync(); Data.Subscriptions.Remove(sub); foreach (var s in Data.Servers.Where(s => s.SubscriptionId == sub.Id).ToArray()) Data.Servers.Remove(s); if (!Data.Servers.Contains(SelectedServer!)) SelectedServer = Data.Servers.FirstOrDefault(); Save(); RefreshServers(); Notify(nameof(NoSubscriptions)); });
         AddRule = new Command(_ => { var rule = Dialogs.Rule(null, Data.Servers); if (rule is not null) { ActiveProfile.Rules.Add(rule); RulesChanged(); } });
         EditRule = new Command(p => { var rule = (RoutingRule)p!; var edit = Dialogs.Rule(rule, Data.Servers); if (edit is null) return; var i = ActiveProfile.Rules.IndexOf(rule); rule.PropertyChanged -= OnRuleChanged; ActiveProfile.Rules[i] = edit; RulesChanged(); });
@@ -238,7 +283,30 @@ public sealed partial class MainViewModel : Observable, IDisposable
         try { var response = await service.SendAsync(new("GetStatus")); ApplyStatus(response.Status); if (Connected) { await DisconnectAsync(); await ConnectAsync(); } }
         catch { SystemProxy.Restore(); }
         _ = RefreshMapOriginAsync();
+        WarnSubscription();
+        _ = AutoRefreshAsync();
         if (Settings.AutoConnect && !Connected && SelectedServer is not null) await AutoConnectAsync(systemStartup);
+    }
+    private readonly Dictionary<string, DateTimeOffset> refreshAttempts = [];
+    /// <summary>Providers rotate servers; keep subscriptions current. A failure keeps the old servers and retries after an hour.</summary>
+    private async Task AutoRefreshAsync()
+    {
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(15), lifetime.Token);
+            while (!lifetime.IsCancellationRequested)
+            {
+                var now = DateTimeOffset.Now;
+                foreach (var sub in Data.Subscriptions.Where(s => s.RefreshDue(now) && (!refreshAttempts.TryGetValue(s.Id, out var last) || now - last >= TimeSpan.FromHours(1))).ToArray())
+                {
+                    refreshAttempts[sub.Id] = now;
+                    try { await RefreshSubAsync(sub); log.Write("Subscription refreshed automatically."); }
+                    catch (Exception e) when (e is not OperationCanceledException || !lifetime.IsCancellationRequested) { log.Write("Automatic subscription refresh failed: " + e.GetType().Name); }
+                }
+                await Task.Delay(TimeSpan.FromMinutes(30), lifetime.Token);
+            }
+        }
+        catch (OperationCanceledException) { }
     }
     private async Task AutoConnectAsync(bool systemStartup)
     {
@@ -258,6 +326,13 @@ public sealed partial class MainViewModel : Observable, IDisposable
             catch (Exception e) when (e is not UserError && attempt + 1 < (systemStartup ? 2 : 1)) { }
             catch (Exception e) { Report(e); return; }
         }
+    }
+    /// <summary>Prefills a provider's bebekon:// link; adding it still takes the user's click.</summary>
+    public void OfferImport(string text)
+    {
+        if (ImportLink.Decode(text) is not { } link) { Banner = T("Ссылка Bebekon повреждена или ведёт не на подписку.", "The Bebekon link is damaged or does not point to a subscription."); return; }
+        QuickSource = link; Go("Subscriptions");
+        Banner = T("Проверьте ссылку от провайдера и нажмите «Добавить».", "Check the provider's link and press Add.");
     }
     public void Go(string name)
     {
@@ -314,7 +389,9 @@ public sealed partial class MainViewModel : Observable, IDisposable
         catch (OperationCanceledException) { }
         finally { pingSortPending = false; }
     }
-    private async Task RefreshSubAsync(Subscription sub) { var servers = await SubscriptionLoader.LoadAsync(sub.Source, lifetime.Token); ReplaceServers(sub, servers); Save(); }
+    private async Task RefreshSubAsync(Subscription sub) { var (servers, info) = await SubscriptionLoader.LoadWithInfoAsync(sub.Source, lifetime.Token); sub.Apply(info); ReplaceServers(sub, servers); Save(); WarnSubscription(); }
+    /// <summary>Warn before the provider cuts the selected server off (expiry or traffic limit).</summary>
+    private void WarnSubscription() { if (Data.Subscriptions.FirstOrDefault(s => s.Id == SelectedServer?.SubscriptionId) is { HasWarning: true } sub) Banner = sub.Name + ": " + sub.Warning; }
     internal void ReplaceServers(Subscription sub, List<Server> incoming)
     {
         var oldId = SelectedServer?.Id;
@@ -340,7 +417,9 @@ public sealed partial class MainViewModel : Observable, IDisposable
             if (existing >= 0) ServerRows.Move(existing, i); else ServerRows.Insert(i, rows[i]);
         }
         while (ServerRows.Count > rows.Count) ServerRows.RemoveAt(ServerRows.Count - 1);
-        Notify(nameof(ServerCount)); Notify(nameof(NoServers));
+        Notify(nameof(ServerCount)); Notify(nameof(NoServers)); Notify(nameof(ServerLabel));
+        // Auto mode follows refreshed or hidden subscriptions; latency changes alone don't reconnect.
+        if (Settings.AutoServer && desiredConnected && spec?.AutoServers is { } running && AutoKey(running) != AutoKey(DisplayServers)) QueueApply();
     }
     private void RefreshRules() { VisibleRules.Clear(); var rules = ActiveProfile.Rules.Where(r => r.Name.Contains(RuleSearch, StringComparison.OrdinalIgnoreCase) || r.Description.Contains(RuleSearch, StringComparison.OrdinalIgnoreCase)); if (RuleSortIndex == 0) rules = rules.OrderByDescending(r => r.CreatedAt); foreach (var r in rules) VisibleRules.Add(r); Notify(nameof(RuleCount)); Notify(nameof(NoRules)); }
     private void AttachProfile() { foreach (var r in ActiveProfile.Rules) { r.PropertyChanged -= OnRuleChanged; r.PropertyChanged += OnRuleChanged; } }
@@ -368,7 +447,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
             {
                 token.ThrowIfCancellationRequested();
                 if (!desiredConnected || appliedConfigurationVersion == configurationVersion) return;
-                await StopConnectionCoreAsync();
+                await StopConnectionCoreAsync(reconnecting: true);
                 // Keep the gate across stop/start; later edits are captured by the new snapshot.
                 if (desiredConnected) await ConnectCoreAsync();
             }
@@ -376,7 +455,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
         }
         catch (OperationCanceledException) { } catch (Exception e) { Report(e); }
     }
-    private async Task ToggleSafelyAsync() { try { if (desiredConnected || Connected) await DisconnectAsync(); else await ConnectAsync(); } catch (Exception e) { Report(e); } }
+    private async Task ToggleSafelyAsync() { try { if (Blocking) await ConnectAsync(); else if (desiredConnected || Connected) await DisconnectAsync(); else await ConnectAsync(); } catch (Exception e) { Report(e); } }
     public async Task ConnectAsync()
     {
         desiredConnected = true;
@@ -402,7 +481,8 @@ public sealed partial class MainViewModel : Observable, IDisposable
             catch (TimeoutException) { }
             finally { locatingBeforeTunnel = false; }
             token.ThrowIfCancellationRequested();
-            spec = new(SelectedServer, ActiveProfile, Settings, LatencyService.FreePort(), Convert.ToHexString(RandomNumberGenerator.GetBytes(24)), Data.Servers.Where(s => ActiveProfile.Rules.Any(r => r.UseVpn && r.ServerId == s.Id)).ToList());
+            spec = new(SelectedServer, ActiveProfile, Settings, LatencyService.FreePort(), Convert.ToHexString(RandomNumberGenerator.GetBytes(24)), Data.Servers.Where(s => ActiveProfile.Rules.Any(r => r.UseVpn && r.ServerId == s.Id)).ToList(),
+                AutoServers: Settings.AutoServer ? AutoPool : null);
             if (MapLocationEnabled) {
                 int originPort;
                 do { originPort = LatencyService.FreePort(); } while (originPort == spec.ProbePort || originPort == 17890);
@@ -469,12 +549,13 @@ public sealed partial class MainViewModel : Observable, IDisposable
         catch { State = ConnectionState.Error; throw; }
         finally { connectionGate.Release(); }
     }
-    private async Task StopConnectionCoreAsync()
+    /// <param name="reconnecting">Leak protection keeps blocking until the following connect.</param>
+    private async Task StopConnectionCoreAsync(bool reconnecting = false)
     {
         monitorId++; networkDelay?.Cancel(); connectionAttempt?.Cancel(); State = ConnectionState.Disconnecting;
         try
         {
-            var reply = await service.SendAsync(new("StopCore"), true, lifetime.Token);
+            var reply = await service.SendAsync(new("StopCore", KeepBlocking: reconnecting), true, lifetime.Token);
             if (!reply.Ok) throw new UserError(reply.Message ?? "Не удалось остановить VPN.");
             ApplyStatus(reply.Status);
         }
@@ -483,9 +564,12 @@ public sealed partial class MainViewModel : Observable, IDisposable
     private async Task MonitorAsync()
     {
         var id = ++monitorId;
-        try { while (id == monitorId && Connected && !lifetime.IsCancellationRequested) { await Task.Delay(1000, lifetime.Token); if (id != monitorId || !Connected) break; var response = await service.SendAsync(new("GetStatus"), ct: lifetime.Token); if (id != monitorId) break; ApplyStatus(response.Status); _ = RefreshMapOriginAsync(); _ = RefreshMapDestinationAsync(); if (started is { } time) Session = (DateTimeOffset.UtcNow - time).ToString(@"hh\:mm\:ss"); if (!Connected && testProbe is null) SystemProxy.Restore(); } }
+        try { while (id == monitorId && Monitoring && !lifetime.IsCancellationRequested) { await Task.Delay(1000, lifetime.Token); if (id != monitorId || !Monitoring) break; var response = await service.SendAsync(new("GetStatus"), ct: lifetime.Token); if (id != monitorId) break; var wasConnected = Connected; ApplyStatus(response.Status); if (wasConnected && Blocking) Banner = T("Ядро VPN остановилось, защита от утечек держит интернет вне VPN закрытым. Нажмите кнопку подключения — VPN переподключится (если не выйдет, блокировка снимется).", "The VPN core stopped and leak protection keeps internet outside the VPN closed. Press the connect button to reconnect (if that fails, the block is released)."); _ = RefreshMapOriginAsync(); _ = RefreshMapDestinationAsync(); if (started is { } time) Session = (DateTimeOffset.UtcNow - time).ToString(@"hh\:mm\:ss"); if (!Connected && testProbe is null) SystemProxy.Restore(); } }
         catch (OperationCanceledException) { } catch (Exception e) { if (id == monitorId) { if (testProbe is null) SystemProxy.Restore(); State = ConnectionState.Error; SetTraffic(null); Report(e); } }
     }
+    /// <summary>The core stopped while leak protection holds traffic; keep the service (and its block) alive.</summary>
+    private bool Blocking => desiredConnected && Settings.KillSwitch && Settings.TunnelMode == TunnelMode.Tun && State == ConnectionState.Error;
+    private bool Monitoring => Connected || Blocking;
     private void ApplyStatus(ServiceStatus s) { State = s.State; started = s.ConnectedAt; SetTraffic(s.State == ConnectionState.Connected ? s.Traffic : null); if (s.Error is not null) Banner = s.Error; }
     private void SetTraffic(TrafficSnapshot? value)
     {
@@ -496,7 +580,8 @@ public sealed partial class MainViewModel : Observable, IDisposable
             DownloadHistory = DownloadHistory.TakeLast(119).Append(Math.Max(0, value.DownloadBytesPerSecond * 8 / 1_000_000)).ToArray();
             UploadHistory = UploadHistory.TakeLast(119).Append(Math.Max(0, value.UploadBytesPerSecond * 8 / 1_000_000)).ToArray();
         }
-        traffic = value;
+        var outbound = traffic?.ActiveOutbound; traffic = value;
+        if (outbound != value?.ActiveOutbound) Notify(nameof(ServerLabel));
         foreach (var name in new[] { nameof(DownloadRate), nameof(UploadRate), nameof(DownloadTotal), nameof(UploadTotal), nameof(DownloadHistory), nameof(UploadHistory) }) Notify(name);
     }
     private void NotifyStatus() { foreach (var n in new[] { nameof(Connected), nameof(ConnectionBusy), nameof(ConnectLabel), nameof(StatusLabel), nameof(StatusDetail), nameof(FooterLabel), nameof(FooterMode), nameof(DownloadRate), nameof(UploadRate) }) Notify(n); StatusChanged?.Invoke(); }
@@ -543,7 +628,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
                 }
             }
             await connectionGate.WaitAsync(token);
-            try { if (generation == monitorId && desiredConnected && Connected) { await StopConnectionCoreAsync(); if (desiredConnected) await ConnectCoreAsync(); } }
+            try { if (generation == monitorId && desiredConnected && Connected) { await StopConnectionCoreAsync(reconnecting: true); if (desiredConnected) await ConnectCoreAsync(); } }
             finally { connectionGate.Release(); }
         }
         catch (OperationCanceledException) { }

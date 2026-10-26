@@ -4,6 +4,8 @@ cd /work
 export CONAN_HOME=/work/conan2-cache
 export ANDROID_NDK_HOME=/work/android-ndk-r30
 export TT_SOURCE=/work/TrustTunnelClient
+# /work may come from a CI cache owned by the host runner user; trust it inside this container.
+git config --global --add safe.directory '*'
 if [ ! -d "$ANDROID_NDK_HOME" ]; then
   curl --fail --location --retry 3 -o ndk.zip https://dl.google.com/android/repository/android-ndk-r30-linux.zip
   echo '5107f898313790e449e87eee2183d9a20602dee9  ndk.zip' | sha1sum --check -
