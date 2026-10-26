@@ -93,17 +93,54 @@ class BebekonVpnService : VpnService(), CommandServerHandler {
     private var downTotal = TrafficTotals()
     private var upTotal = TrafficTotals()
     @Volatile private var desired = false
+    @Volatile private var screenOffAt = 0L
+    @Volatile private var lastTrafficAt = 0L
+    private var wakeCheck: Job? = null
     // Same as sing-box's own resume handling on desktop: connections kept through Doze often have
     // expired NAT or server state, so wake the core and reset them instead of letting apps hang.
+    // Deep Doze is only one way to sleep: a phone that moves in a pocket stays in light Doze and
+    // OEM battery savers freeze networking without any idle broadcast, so screen-on is checked too.
     private val idle = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
-            val sleeping = getSystemService(PowerManager::class.java).isDeviceIdleMode
-            scope.launch { server?.let { if (sleeping) it.pause() else { it.wake(); it.resetNetwork() } } }
+            val now = android.os.SystemClock.elapsedRealtime()
+            when (intent.action) {
+                Intent.ACTION_SCREEN_OFF -> screenOffAt = now
+                Intent.ACTION_SCREEN_ON -> {
+                    val offFor = if (screenOffAt == 0L) 0L else now - screenOffAt
+                    screenOffAt = 0L
+                    if (desired && VpnController.session.value.phase == Phase.ON && SleepRecovery.slept(offFor)) recoverAfterSleep(SleepRecovery.shouldReset(offFor, now - lastTrafficAt))
+                }
+                else -> {
+                    val sleeping = getSystemService(PowerManager::class.java).isDeviceIdleMode
+                    scope.launch { server?.let { if (sleeping) it.pause() else { it.wake(); it.resetNetwork() } } }
+                }
+            }
+        }
+    }
+    /**
+     * After the screen was off: an idle tunnel gets fresh connections (stale pooled ones, such as
+     * the DoH connection behind every DNS answer, otherwise hang until a manual reconnect). A tunnel
+     * that kept streaming in the background is left alone. Either way it is then checked through
+     * the tunnel itself and reconnected if it still does not answer.
+     */
+    private fun recoverAfterSleep(reset: Boolean) {
+        if (reset) scope.launch { server?.let { it.wake(); it.resetNetwork(); repo.log("Экран включён после сна: соединения VPN пересозданы") } }
+        wakeCheck?.cancel()
+        wakeCheck = background.launch {
+            for (attempt in 0 until 2) {
+                delay(if (attempt == 0) 4_000 else 3_000)
+                if (!desired || VpnController.session.value.phase != Phase.ON || PhysicalNetwork.current(this@BebekonVpnService) == null) return@launch
+                if (TunnelCheck.works(health)) return@launch
+            }
+            if (desired && repo.state.value.preferences.autoReconnect) {
+                repo.log("После сна VPN не отвечает — переподключение")
+                withContext(Dispatchers.Main) { VpnController.reload(this@BebekonVpnService) }
+            }
         }
     }
     override fun onCreate() {
         super.onCreate(); getSystemService(NotificationManager::class.java).createNotificationChannel(NotificationChannel("vpn", "Подключение VPN", NotificationManager.IMPORTANCE_LOW).apply { setShowBadge(false) })
-        val filter = IntentFilter(PowerManager.ACTION_DEVICE_IDLE_MODE_CHANGED)
+        val filter = IntentFilter(PowerManager.ACTION_DEVICE_IDLE_MODE_CHANGED).apply { addAction(Intent.ACTION_SCREEN_OFF); addAction(Intent.ACTION_SCREEN_ON) }
         if (Build.VERSION.SDK_INT >= 33) registerReceiver(idle, filter, RECEIVER_NOT_EXPORTED) else registerReceiver(idle, filter)
     }
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -146,7 +183,10 @@ class BebekonVpnService : VpnService(), CommandServerHandler {
             val config = CoreConfig.build(saved, repo::geo, policy = policy, vpnOverride = override, health = health); Libbox.checkConfig(config)
             validConfig = true
             VpnController.publish(this) { if (reload) it.copy(phase = Phase.RECONNECTING, message = "Применение правил…") else it.copy(phase = Phase.STARTING, server = if (CoreConfig.autoNodes(saved).size >= 2 && override == null) "Авто" else node.name) }
-            if (server == null) { platform = AndroidPlatform(this, this); server = CommandServer(this, platform).also { it.start() } }
+            if (server == null) {
+                platform = AndroidPlatform(this, this).apply { onSameInterfaceChange = { scope.launch { server?.resetNetwork(); repo.log("Сеть переподключилась: соединения VPN пересозданы") } } }
+                server = CommandServer(this, platform).also { it.start() }
+            }
             platform!!.tunnelState = saved
             platform!!.tunnelPolicy = policy
             // The serialized executor owns all native service changes; refresh never selects another node.
@@ -160,7 +200,7 @@ class BebekonVpnService : VpnService(), CommandServerHandler {
             client = CommandClient(object : CommandClientHandler {
                 override fun connected() = Unit
                 override fun disconnected(message: String?) = Unit
-                override fun writeStatus(message: StatusMessage) { if (desired && generation.get() == statusVersion) VpnController.publish(this@BebekonVpnService) { it.copy(down = message.downlink, up = message.uplink, totalDown = downTotal.update(message.downlinkTotal), totalUp = upTotal.update(message.uplinkTotal)) } }
+                override fun writeStatus(message: StatusMessage) { if (message.downlink > 0) lastTrafficAt = android.os.SystemClock.elapsedRealtime(); if (desired && generation.get() == statusVersion) VpnController.publish(this@BebekonVpnService) { it.copy(down = message.downlink, up = message.uplink, totalDown = downTotal.update(message.downlinkTotal), totalUp = upTotal.update(message.uplinkTotal)) } }
                 override fun setDefaultLogLevel(level: Int) = Unit
                 override fun clearLogs() = Unit
                 override fun writeLogs(messageList: LogIterator?) {
