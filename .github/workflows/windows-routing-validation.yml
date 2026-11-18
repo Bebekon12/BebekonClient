@@ -1,0 +1,47 @@
+name: Windows routing validation
+
+on:
+  push:
+    branches: [codex/windows-routing-validation]
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  wfp:
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Verify WFP in the disposable Windows runner
+        shell: pwsh
+        env:
+          BEBEKON_WFP_TEST_VM: '1'
+        run: |
+          dotnet build src/Bebekon.Core/Bebekon.Core.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          netsh wfp set options netevents=on
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dotnet test tests/Bebekon.Tests/Bebekon.Tests.csproj -c Release -p:BuildProjectReferences=false --filter 'Category=WfpKernel' --logger 'trx;LogFileName=wfp.trx' --results-directory artifacts/wfp
+          $testExit = $LASTEXITCODE
+          if ($testExit -ne 0 -and (Test-Path -LiteralPath artifacts/wfp/wfp.trx)) {
+            $trx = [xml](Get-Content -LiteralPath artifacts/wfp/wfp.trx -Raw)
+            $trx.TestRun.Results.UnitTestResult | Where-Object outcome -eq 'Failed' | ForEach-Object {
+              $message = ([string]$_.Output.ErrorInfo.Message).Replace('%', '%25').Replace([string][char]13, '%0D').Replace([string][char]10, '%0A')
+              Write-Output "::error::$message"
+            }
+          }
+          exit $testExit
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wfp-results
+          path: artifacts/wfp/*.trx
+          if-no-files-found: ignore

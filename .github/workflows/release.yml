@@ -135,7 +135,9 @@ jobs:
       - name: Build, test and package
         shell: pwsh
         run: |
-          $notes = 'VPN на Android сразу работает после сна телефона. Автовыбор сервера, трафик и срок подписки, автообновление подписок, резервная копия, ссылки «Добавить в Bebekon», обход замедления сайтов без VPN и защита от утечек.'
+          $version = ([xml](Get-Content Directory.Build.props -Raw)).Project.PropertyGroup.Version
+          $notesPath = "docs/releases/v$version.md"
+          $notes = if (Test-Path -LiteralPath $notesPath) { Get-Content -LiteralPath $notesPath -Raw -Encoding UTF8 } else { 'Обновление Bebekon VPN.' }
           if ($env:RELEASE -eq 'true') { ./build.ps1 -PublishFolder artifacts/release-updates -ReleaseNotes $notes }
           else { ./build.ps1 -PublishFolder artifacts/release-updates -ReleaseNotes $notes -SkipUpdateSigning }
       - name: Core sources
@@ -158,9 +160,14 @@ jobs:
           path: out/
           if-no-files-found: error
 
+  wfp:
+    if: needs.plan.outputs.release == 'true'
+    needs: [plan]
+    uses: ./.github/workflows/windows-routing-validation.yml
+
   release:
     if: needs.plan.outputs.release == 'true'
-    needs: [plan, android, windows]
+    needs: [plan, android, windows, wfp]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -168,8 +175,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
+          name: windows
           path: assets
-          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: android
+          path: assets
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
