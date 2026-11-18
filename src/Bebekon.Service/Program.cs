@@ -124,12 +124,17 @@ internal sealed class VpnService : ServiceBase
                 {
                     lastCommand = DateTimeOffset.UtcNow;
                     WfpTestResult[]? test = null;
+                    WfpBlockEvent[]? blockEvents = null;
                     switch (request.Operation)
                     {
                         case "GetStatus": break;
                         case "StopCore": StopCore(request.KeepBlocking); break;
                         case "ClearProtection": StopCore(); KillSwitch.ClearPersistent(); break;
                         case "TestProtection": test = await KillSwitch.TestLocalFilteringAsync(timeout.Token); break;
+                        case "ProtectionEvents": blockEvents = KillSwitch.RecentPolicyBlocks(killSwitch); break;
+                        case "ApplyStoredProtection":
+                            await ApplyStoredProtectionAsync(request.Protection ?? throw new UserError("Не указана политика WFP."), timeout.Token);
+                            break;
                         case "Shutdown": if (console) throw new UserError("Console helper must be stopped with Ctrl+C."); StopCore(); break;
                         case "StartCore": if (request.Spec is null) throw new UserError("Не указан сервер."); await StartCoreAsync(request.Spec, timeout.Token); break;
                         case "RestartCore": var spec = request.Spec ?? last ?? throw new UserError("Сначала выберите сервер."); await StartCoreAsync(spec, timeout.Token, restart: true); break;
@@ -137,7 +142,7 @@ internal sealed class VpnService : ServiceBase
                         case "GetLogs": var lines = Directory.GetFiles(root, "*.log").SelectMany(File.ReadLines).TakeLast(120); result = new(true, Status(), string.Join(Environment.NewLine, lines)); await PipeProtocol.WriteAsync(pipe, result, timeout.Token); continue;
                         default: throw new UserError("Неизвестная команда службы.");
                     }
-                    result = new(true, Status(), WfpTest: test);
+                    result = new(true, Status(), WfpTest: test, BlockEvents: blockEvents);
                 }
                 catch (Exception e)
                 {
@@ -187,13 +192,15 @@ internal sealed class VpnService : ServiceBase
         var transports = KillSwitch.TrustedTransports(Path.Combine(AppContext.BaseDirectory, "core"));
         try
         {
+            if (tunnelReady && !KillSwitch.TunnelInterfacePresent())
+                throw new UserError("Windows не подтвердила интерфейс Bebekon для защиты WFP.");
             if (persistent)
             {
                 if (KillSwitch.ApplyPersistent(spec, transports, tunnelReady) == 0)
                     throw new UserError("Windows не применила фильтры защиты.");
                 return;
             }
-            var updated = KillSwitch.Enable(transports, spec.NetBird, requireTunnelInterface: true);
+            var updated = KillSwitch.Enable(transports, spec.NetBird, requireTunnelInterface: true, permitTunnel: tunnelReady);
             try
             {
                 if (updated.InstalledBlockCount() != 4) throw new UserError("Windows не применила фильтры защиты.");
@@ -208,6 +215,16 @@ internal sealed class VpnService : ServiceBase
             log.Write("WFP protection failed: " + e.GetType().Name);
             throw new UserError("Не удалось применить защиту WFP. Проверьте службу Base Filtering Engine и права службы VPN.");
         }
+    }
+    private async Task ApplyStoredProtectionAsync(StoredProtectionSpec spec, CancellationToken ct)
+    {
+        if (console || core?.Running == true) throw new UserError("Эта команда доступна установленной службе при отключённом Bebekon VPN.");
+        RuleValidation.Validate(spec.Profile);
+        if (!spec.Global && !spec.Profile.HasProtectedRules) throw new UserError("Сначала выберите правила защиты или сохраняемый Kill Switch.");
+        var netBird = await NetBirdRouting.DiscoverAsync(spec.NetBirdPeer, ct);
+        if (KillSwitch.ApplyPersistent(spec, netBird, KillSwitch.TrustedTransports(Path.Combine(AppContext.BaseDirectory, "core"))) == 0)
+            throw new UserError("Windows не применила фильтры защиты.");
+        ReleaseKillSwitch();
     }
     private void ReleaseKillSwitch() { if (killSwitch is null) return; killSwitch.Dispose(); killSwitch = null; log.Write("Leak protection disabled."); }
     private void StopCore(bool keepBlocking = false)

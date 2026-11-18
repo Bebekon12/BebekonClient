@@ -24,8 +24,15 @@ public sealed partial class KillSwitch
         => ApplyPersistent(PolicyProvider, spec, trustedTransports, tunnelReady);
 
     internal static int ApplyPersistent(Guid providerKey, ConnectSpec spec, IEnumerable<string> trustedTransports, bool tunnelReady)
+        => ApplyPersistent(providerKey, spec.Profile, spec.Settings.KillSwitch, spec.NetBird, trustedTransports, tunnelReady);
+
+    public static int ApplyPersistent(StoredProtectionSpec spec, NetBirdRouting? netBird, IEnumerable<string> trustedTransports)
+        => ApplyPersistent(PolicyProvider, spec.Profile, spec.Global, netBird, trustedTransports, tunnelReady: false);
+
+    private static int ApplyPersistent(Guid providerKey, Profile profile, bool global, NetBirdRouting? netBirdRouting,
+        IEnumerable<string> trustedTransports, bool tunnelReady)
     {
-        RuleValidation.Validate(spec.Profile);
+        RuleValidation.Validate(profile);
         using var memory = new NativeMemory();
         var engine = OpenEngine(memory, dynamic: false);
         var blocked = new List<ulong>();
@@ -41,18 +48,19 @@ public sealed partial class KillSwitch
                     AddPolicyProvider(memory, engine, providerKey);
 
                 var transports = ReadAppConditions(memory, trustedTransports);
-                if (spec.Settings.KillSwitch)
+                if (global)
                 {
-                    var global = AddSublayer(memory, engine, provider);
-                    AddGlobalFilters(memory, engine, global, provider, transports, spec.NetBird, true, blocked);
+                    var sublayer = AddSublayer(memory, engine, provider);
+                    AddGlobalFilters(memory, engine, sublayer, provider, transports, netBirdRouting, true, tunnelReady, blocked);
                 }
                 var vpn = tunnelReady ? FindInterface(memory, "Bebekon") : null;
-                var netBird = FindInterface(memory, spec.NetBird?.InterfaceName);
-                foreach (var rule in spec.Profile.ActiveRules.Where(rule => rule.SystemProtection))
+                var netBird = FindInterface(memory, netBirdRouting?.InterfaceName);
+                foreach (var rule in profile.ActiveRules.Where(rule => rule.SystemProtection))
                 {
-                    var allowed = rule.Target == RouteTarget.Vpn ? vpn : rule.Target == RouteTarget.NetBird ? netBird : null;
+                    var corporateInterface = rule.Target == RouteTarget.NetBird ? netBird : null;
+                    var bebekonInterface = rule.Target == RouteTarget.Vpn || corporateInterface is not null ? vpn : null;
                     var sublayer = AddSublayer(memory, engine, provider);
-                    AddRuleFilters(memory, engine, sublayer, provider, rule, allowed, transports, blocked);
+                    AddRuleFilters(memory, engine, sublayer, provider, rule, bebekonInterface, corporateInterface, transports, blocked);
                 }
             });
             var installed = blocked.Count(id => IsEnabledBlock(engine, id));
@@ -101,7 +109,7 @@ public sealed partial class KillSwitch
     }
 
     private static void AddRuleFilters(NativeMemory memory, IntPtr engine, Guid sublayer, IntPtr provider, RoutingRule rule,
-        Condition? allowedInterface, Condition[] trustedTransports, List<ulong> blocked)
+        Condition? tunnelInterface, Condition? corporateInterface, Condition[] trustedTransports, List<ulong> blocked)
     {
         foreach (var v4 in new[] { true, false })
         {
@@ -119,15 +127,13 @@ public sealed partial class KillSwitch
                 var conditions = new List<Condition> { match };
                 if (rule.Port is { } port) conditions.Add(new(RemotePort, MatchEqual, TypeUInt16, port));
                 if (rule.Transport is { } protocol) conditions.Add(new(IpProtocol, MatchEqual, TypeUInt8, protocol == RuleTransport.Tcp ? 6 : 17));
-                if (allowedInterface is { } adapter)
+                if (tunnelInterface is { } adapter)
                 {
-                    if (rule.Target == RouteTarget.Vpn)
-                    {
-                        var source = v4 ? V4(memory, LocalAddress, TunnelV4) : V6(memory, LocalAddress, TunnelV6);
-                        AddFilter(memory, engine, sublayer, layer, 14, ActionPermit, "Protected rule through Bebekon", [.. conditions, adapter, source], provider);
-                    }
-                    else AddFilter(memory, engine, sublayer, layer, 14, ActionPermit, "Protected rule through NetBird", [.. conditions, adapter], provider);
+                    var source = v4 ? V4(memory, LocalAddress, TunnelV4) : V6(memory, LocalAddress, TunnelV6);
+                    AddFilter(memory, engine, sublayer, layer, 14, ActionPermit, "Protected rule through Bebekon TUN", [.. conditions, adapter, source], provider);
                 }
+                if (corporateInterface is { } corporate)
+                    AddFilter(memory, engine, sublayer, layer, 14, ActionPermit, "Protected rule through NetBird", [.. conditions, corporate], provider);
                 blocked.Add(AddFilter(memory, engine, sublayer, layer, 0, ActionBlock, "Protected routing rule", conditions, provider));
             }
             if (rule.Kind == RuleKind.Network)

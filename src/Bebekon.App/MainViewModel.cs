@@ -113,7 +113,9 @@ public sealed partial class MainViewModel : Observable, IDisposable
     public string RuleSearch { get => ruleSearch; set { if (Set(ref ruleSearch, value)) RefreshRules(); } }
     private int ruleSortIndex;
     public int RuleSortIndex { get => ruleSortIndex; set { if (Set(ref ruleSortIndex, value)) { RefreshRules(); Notify(nameof(RulesOrderHint)); } } }
-    public string RulesOrderHint => RuleSortIndex == 0 ? T("Сначала новые. Для изменения порядка выполнения выберите «По приоритету».", "Newest first. Choose ‘By priority’ to change execution order.") : T("Правила сверху имеют приоритет. Перетащите строку, чтобы изменить порядок.", "Top rules have priority. Drag a row to change execution order.");
+    public string RulesOrderHint => RuleSortIndex == 0 ? T("Сначала новые. Для изменения порядка выберите «По приоритету».", "Newest first. Choose ‘By priority’ to change rule order.") :
+        T("Сначала системная защита, затем обычные правила. Перетащите строки, чтобы изменить порядок внутри группы.",
+            "System protection takes precedence. Drag rows to change the order within each group.");
     private int sortIndex;
     public int SortIndex { get => sortIndex; set { if (Set(ref sortIndex, value)) RefreshServers(); } }
     private int latencyIndex = 1;

@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.ComponentModel;
 using System.Net;
 using System.Net.Sockets;
@@ -7,6 +8,7 @@ namespace Bebekon.Core;
 
 public enum WfpTestOutcome { Passed, Failed, Unverified }
 public sealed record WfpTestResult(string AddressFamily, RuleTransport Transport, WfpTestOutcome Outcome, ulong? FilterId, bool Restored, string? Detail);
+public sealed record WfpBlockEvent(DateTimeOffset Timestamp, string? Address, int? Port, byte? Protocol, ulong FilterId, string Reason);
 
 public sealed partial class KillSwitch
 {
@@ -133,21 +135,105 @@ public sealed partial class KillSwitch
 
     private static bool ReadDrop(IntPtr engine, ulong id, long started, int sourcePort, int targetPort, byte protocol)
     {
+        var matched = false;
+        ReadBlockEvents(engine, started, (_, data, filterId) =>
+        {
+            const int tupleFlags = 0x01 | 0x08 | 0x10; // IP protocol and both ports
+            if (filterId == id && (data.Flags & tupleFlags) == tupleFlags &&
+                data.Protocol == protocol && data.LocalPort == sourcePort && data.RemotePort == targetPort)
+                matched = true;
+        });
+        return matched;
+    }
+
+    internal static bool ObservePersistentDrop(Guid providerKey, long started, int sourcePort, int targetPort, byte protocol)
+    {
+        using var memory = new NativeMemory();
+        var engine = OpenEngine(memory, dynamic: false);
+        try
+        {
+            var provider = memory.Alloc(16);
+            WriteGuid(provider, providerKey);
+            var ids = new List<ulong>();
+            ReadProviderFilters(memory, engine, provider, filter =>
+            {
+                if (IsEnabledBlock(filter)) ids.Add(unchecked((ulong)Marshal.ReadInt64(filter + 176)));
+            });
+            return ids.Any(id => ReadDrop(engine, id, started, sourcePort, targetPort, protocol));
+        }
+        finally { FwpmEngineClose0(engine); }
+    }
+
+    public static WfpBlockEvent[] RecentPolicyBlocks(KillSwitch? dynamicPolicy)
+    {
+        using var memory = new NativeMemory();
+        var engine = OpenEngine(memory, dynamic: false);
+        try
+        {
+            var names = new Dictionary<ulong, string>();
+            void RememberFilter(IntPtr filter)
+            {
+                if (IsEnabledBlock(filter))
+                    names[unchecked((ulong)Marshal.ReadInt64(filter + 176))] =
+                        Marshal.PtrToStringUni(Marshal.ReadIntPtr(filter + 16)) ?? "Bebekon WFP";
+            }
+
+            if (ProviderExists(engine, PolicyProvider))
+            {
+                var provider = memory.Alloc(16);
+                WriteGuid(provider, PolicyProvider);
+                ReadProviderFilters(memory, engine, provider, RememberFilter);
+            }
+            foreach (var id in dynamicPolicy?.blockIds ?? [])
+            {
+                var status = FwpmFilterGetById0(engine, id, out var filter);
+                if (status == FilterNotFound) continue;
+                Check(status, "FwpmFilterGetById0");
+                try { RememberFilter(filter); }
+                finally { FwpmFreeMemory0(ref filter); }
+            }
+
+            if (names.Count == 0) return [];
+            var entries = new List<WfpBlockEvent>();
+            ReadBlockEvents(engine, DateTime.UtcNow.AddMinutes(-10).ToFileTimeUtc(), (item, data, filterId) =>
+            {
+                if (!names.TryGetValue(filterId, out var reason)) return;
+                entries.Add(new(DateTime.FromFileTimeUtc(data.TimeStamp), RemoteAddressText(item, data),
+                    (data.Flags & 0x10) != 0 ? data.RemotePort : null,
+                    (data.Flags & 0x01) != 0 ? data.Protocol : null, filterId, reason));
+            });
+            return entries.OrderByDescending(entry => entry.Timestamp).Take(24).ToArray();
+        }
+        finally { FwpmEngineClose0(engine); }
+    }
+
+    private static string? RemoteAddressText(IntPtr item, ClassifyEvent data)
+    {
+        if ((data.Flags & 0x104) != 0x104) return null;
+        if (data.Version == 0)
+        {
+            Span<byte> bytes = stackalloc byte[4];
+            BinaryPrimitives.WriteUInt32BigEndian(bytes, unchecked((uint)Marshal.ReadInt32(item + 36)));
+            return new IPAddress(bytes).ToString();
+        }
+        if (data.Version != 1) return null;
+        var address = new byte[16];
+        Marshal.Copy(item + 36, address, 0, address.Length);
+        return new IPAddress(address).ToString();
+    }
+
+    private static void ReadBlockEvents(IntPtr engine, long started, Action<IntPtr, ClassifyEvent, ulong> visit)
+    {
         using var memory = new NativeMemory();
         var template = memory.Alloc(32);
         Marshal.WriteInt64(template, started);
         Marshal.WriteInt64(template + 8, DateTime.UtcNow.ToFileTimeUtc());
-        var matched = false;
         ReadObjects(engine, template, FwpmNetEventCreateEnumHandle0, FwpmNetEventEnum0, FwpmNetEventDestroyEnumHandle0, item =>
         {
-            const int tupleFlags = 0x01 | 0x08 | 0x10; // IP protocol and both ports
             var data = Marshal.PtrToStructure<ClassifyEvent>(item);
-            if (data.Type == 3 && data.Detail != IntPtr.Zero && (data.Flags & tupleFlags) == tupleFlags &&
-                data.TimeStamp >= started && data.Protocol == protocol && data.LocalPort == sourcePort &&
-                data.RemotePort == targetPort && unchecked((ulong)Marshal.ReadInt64(data.Detail)) == id)
-                matched = true;
+            if (data.Type == 3 && data.Detail != IntPtr.Zero && data.TimeStamp >= started)
+                visit(item, data, unchecked((ulong)Marshal.ReadInt64(data.Detail)));
         });
-        return matched;
     }
 
     // FWPM_NET_EVENT0 on x64, with FWPM_NET_EVENT_HEADER0 at offset zero.
@@ -156,6 +242,7 @@ public sealed partial class KillSwitch
     {
         [FieldOffset(0)] public long TimeStamp;
         [FieldOffset(8)] public int Flags;
+        [FieldOffset(12)] public int Version;
         [FieldOffset(16)] public byte Protocol;
         [FieldOffset(52)] public ushort LocalPort;
         [FieldOffset(54)] public ushort RemotePort;

@@ -43,7 +43,8 @@ public sealed partial class KillSwitch : IDisposable
         this.blockIds = blockIds;
     }
 
-    public static KillSwitch Enable(IEnumerable<string> trustedExecutables, NetBirdRouting? netBird = null, bool requireTunnelInterface = false)
+    public static KillSwitch Enable(IEnumerable<string> trustedExecutables, NetBirdRouting? netBird = null,
+        bool requireTunnelInterface = false, bool permitTunnel = true)
     {
         using var memory = new NativeMemory();
         var engine = OpenEngine(memory, dynamic: true);
@@ -54,7 +55,7 @@ public sealed partial class KillSwitch : IDisposable
             {
                 var apps = ReadAppConditions(memory, trustedExecutables);
                 var sublayer = AddSublayer(memory, engine, IntPtr.Zero);
-                AddGlobalFilters(memory, engine, sublayer, IntPtr.Zero, apps, netBird, requireTunnelInterface, blocked);
+                AddGlobalFilters(memory, engine, sublayer, IntPtr.Zero, apps, netBird, requireTunnelInterface, permitTunnel, blocked);
             });
             return new KillSwitch(engine, [.. blocked]);
         }
@@ -62,6 +63,7 @@ public sealed partial class KillSwitch : IDisposable
     }
 
     public int InstalledBlockCount() => engine == IntPtr.Zero ? 0 : blockIds.Count(id => IsEnabledBlock(engine, id));
+    public static bool TunnelInterfacePresent() => ConvertInterfaceAliasToLuid("Bebekon", out var luid) == 0 && luid != 0;
 
     private static IntPtr OpenEngine(NativeMemory memory, bool dynamic)
     {
@@ -104,7 +106,7 @@ public sealed partial class KillSwitch : IDisposable
         executables.Where(File.Exists).Distinct(StringComparer.OrdinalIgnoreCase).Select(memory.App).ToArray();
 
     private static void AddGlobalFilters(NativeMemory memory, IntPtr engine, Guid sublayer, IntPtr provider,
-        Condition[] apps, NetBirdRouting? netBird, bool requireTunnelInterface, List<ulong> blocked)
+        Condition[] apps, NetBirdRouting? netBird, bool requireTunnelInterface, bool permitTunnel, List<ulong> blocked)
     {
         var bird = FindInterface(memory, netBird?.InterfaceName);
         var tunnel = FindInterface(memory, "Bebekon");
@@ -113,7 +115,7 @@ public sealed partial class KillSwitch : IDisposable
             var layer = v4 ? ConnectV4 : ConnectV6;
             foreach (var app in apps) AddFilter(memory, engine, sublayer, layer, 15, ActionPermit, "VPN transports", [app], provider);
             AddFilter(memory, engine, sublayer, layer, 14, ActionPermit, "Loopback", [new(Flags, MatchFlagsAllSet, TypeUInt32, FlagIsLoopback)], provider);
-            if (!requireTunnelInterface || tunnel is not null)
+            if (permitTunnel && (!requireTunnelInterface || tunnel is not null))
             {
                 var source = v4 ? V4(memory, LocalAddress, TunnelV4) : V6(memory, LocalAddress, TunnelV6);
                 AddFilter(memory, engine, sublayer, layer, 13, ActionPermit, "Bebekon tunnel",

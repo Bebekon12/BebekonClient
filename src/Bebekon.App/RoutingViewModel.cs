@@ -34,13 +34,14 @@ public sealed partial class MainViewModel
         }
     }
 
-    private string netBirdSummary = "—", netBirdInterfaceInfo = "—", windowsNetwork = "—", uplink = "—", wfpResult = "";
+    private string netBirdSummary = "—", netBirdInterfaceInfo = "—", windowsNetwork = "—", uplink = "—", wfpResult = "", wfpEvents = "";
     private string? netBirdInterface;
     public string NetBirdSummary { get => netBirdSummary; private set => Set(ref netBirdSummary, value); }
     public string NetBirdInterfaceInfo { get => netBirdInterfaceInfo; private set => Set(ref netBirdInterfaceInfo, value); }
     public string WindowsNetwork { get => windowsNetwork; private set => Set(ref windowsNetwork, value); }
     public string Uplink { get => uplink; private set => Set(ref uplink, value); }
     public string WfpResult { get => wfpResult; private set => Set(ref wfpResult, value); }
+    public string WfpEvents { get => wfpEvents; private set => Set(ref wfpEvents, value); }
     public int ProtectedRuleCount => ActiveProfile.ActiveRules.Count(rule => rule.SystemProtection);
     public ICommand RefreshConnections { get; private set; } = null!;
     public ICommand ChangeNetBird { get; private set; } = null!;
@@ -48,6 +49,7 @@ public sealed partial class MainViewModel
     public ICommand RefreshProtection { get; private set; } = null!;
     public ICommand TestWfp { get; private set; } = null!;
     public ICommand ClearProtection { get; private set; } = null!;
+    public ICommand ApplyStoredProtection { get; private set; } = null!;
 
     private void InitializeRoutingCommands()
     {
@@ -60,6 +62,21 @@ public sealed partial class MainViewModel
         CheckRoute = new Command(_ => Dialogs.RouteCheck(this));
         RefreshProtection = Async(_ => ReadProtectionAsync(lifetime.Token));
         TestWfp = Async(async _ => WfpResult = await TestWfpAsync(lifetime.Token));
+        ApplyStoredProtection = Async(async _ =>
+        {
+            await connectionGate.WaitAsync(lifetime.Token);
+            try
+            {
+                if (Connected || ConnectionBusy) return;
+                await EnsureServiceAsync();
+                var netBird = await NetBirdClient.GetStatusAsync(lifetime.Token);
+                var policy = new StoredProtectionSpec(ActiveProfile, Settings.KillSwitch && Settings.PersistentKillSwitch, netBird.PeerAddress);
+                var reply = await service.SendAsync(new("ApplyStoredProtection", Protection: policy), true, lifetime.Token);
+                Protection = reply.Status.Protection;
+                if (!reply.Ok) throw new UserError(reply.Message ?? T("Не удалось применить защиту WFP.", "Could not apply WFP protection."));
+            }
+            finally { connectionGate.Release(); }
+        }, () => !Connected && !ConnectionBusy && (ActiveProfile.HasProtectedRules || Settings.KillSwitch && Settings.PersistentKillSwitch));
         ClearProtection = Async(async _ =>
         {
             if (!Dialogs.Confirm(T("Снять текущую защиту WFP?", "Clear active WFP protection?"),
@@ -135,8 +152,18 @@ public sealed partial class MainViewModel
     private async Task ReadProtectionAsync(CancellationToken ct)
     {
         if (testProbe is null && !ServiceInstaller.IsInstalled) return;
-        var response = await service.SendAsync(new("GetStatus"), true, ct);
-        if (response.Ok) Protection = response.Status.Protection;
+        var response = await service.SendAsync(new("ProtectionEvents"), true, ct);
+        Protection = response.Status.Protection;
+        WfpEvents = !response.Ok ? T("Журнал WFP недоступен.", "The WFP event log is unavailable.") :
+            response.BlockEvents is not { Length: > 0 } ? T("За последние 10 минут нет событий активных фильтров.", "No events from active filters in the last 10 minutes.") :
+            string.Join(Environment.NewLine, response.BlockEvents.Select(entry =>
+            {
+                var protocol = entry.Protocol switch { 6 => "TCP", 17 => "UDP", { } number => number.ToString(), _ => "" };
+                var destination = entry.Address ?? "—";
+                if (entry.Address is { } ip && entry.Port is { } port)
+                    destination = ip.Contains(':') ? $"[{ip}]:{port}" : $"{ip}:{port}";
+                return $"{entry.Timestamp.ToLocalTime():HH:mm:ss} · {protocol} {destination} · #{entry.FilterId} · {entry.Reason}";
+            }));
     }
 
     internal async Task<string> TestWfpAsync(CancellationToken ct)

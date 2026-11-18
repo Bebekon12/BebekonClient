@@ -70,12 +70,22 @@ public sealed class LatencyService(string executable)
     }
     public static int FreePort()
     {
-        // Windows reserves different ranges for TCP and UDP. Mixed/SOCKS bridges need both.
-        for (var attempt = 0; attempt < 256; attempt++)
+        // Windows reserves different ranges for TCP and UDP. If kernel-assigned TCP
+        // ports all overlap a UDP reservation, sample the full registered port range.
+        for (var attempt = 0; attempt < 128; attempt++)
         {
-            using var udp = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0)); var port = ((IPEndPoint)udp.Client.LocalEndPoint!).Port;
-            using var tcp = new TcpListener(IPAddress.Loopback, port);
-            try { tcp.Start(); return port; } catch (SocketException) { }
+            var port = attempt < 16 ? 0 : RandomNumberGenerator.GetInt32(1024, 65536);
+            using var tcp = new TcpListener(IPAddress.Loopback, port) { ExclusiveAddressUse = true };
+            using var udp = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp) { ExclusiveAddressUse = true };
+            try
+            {
+                tcp.Start();
+                var endpoint = (IPEndPoint)tcp.LocalEndpoint;
+                if (endpoint.Port == 17890) continue;
+                udp.Bind(endpoint);
+                return endpoint.Port;
+            }
+            catch (SocketException) { }
         }
         throw new UserError("Не удалось найти свободный локальный порт VPN.");
     }

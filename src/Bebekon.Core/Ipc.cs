@@ -6,11 +6,12 @@ using System.Text.Json;
 namespace Bebekon.Core;
 
 /// <param name="KeepBlocking">StopCore for a reconnect: leak protection stays on until the next StartCore.</param>
-public sealed record ServiceRequest(string Operation, ConnectSpec? Spec = null, bool KeepBlocking = false);
+public sealed record StoredProtectionSpec(Profile Profile, bool Global, string? NetBirdPeer);
+public sealed record ServiceRequest(string Operation, ConnectSpec? Spec = null, bool KeepBlocking = false, StoredProtectionSpec? Protection = null);
 public sealed record ProtectionStatus(int Filters, int PersistentFilters, string? Error = null);
 public sealed record ServiceStatus(ConnectionState State, string? Error = null, DateTimeOffset? ConnectedAt = null, int? CorePid = null,
     TrafficSnapshot? Traffic = null, ProtectionStatus? Protection = null, string? NetBirdInterface = null);
-public sealed record ServiceResponse(bool Ok, ServiceStatus Status, string? Message = null, WfpTestResult[]? WfpTest = null);
+public sealed record ServiceResponse(bool Ok, ServiceStatus Status, string? Message = null, WfpTestResult[]? WfpTest = null, WfpBlockEvent[]? BlockEvents = null);
 public static class PipeProtocol
 {
     public const string ServiceName = "BebekonVPN";

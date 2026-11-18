@@ -93,6 +93,7 @@ internal sealed class NetBirdConfig
     private readonly NetBirdRouting? routing;
     private readonly Dictionary<string, string> tags = new(StringComparer.Ordinal);
     public string? DefaultTag { get; }
+    public string? AddressTag { get; }
 
     public NetBirdConfig(NetBirdRouting? routing, JsonArray outbounds, JsonArray dnsServers)
     {
@@ -114,6 +115,18 @@ internal sealed class NetBirdConfig
             });
         }
         if (defaultResolver is not null) DefaultTag = tags[defaultResolver];
+        AddressTag = DefaultTag ?? tags.Values.FirstOrDefault();
+        if (AddressTag is null)
+        {
+            // IP-only rules can use a verified adapter before split DNS is ready.
+            AddressTag = "netbird-ip";
+            outbounds.Add(new JsonObject
+            {
+                ["type"] = "direct", ["tag"] = AddressTag, ["bind_interface"] = routing.InterfaceName,
+                ["domain_resolver"] = "netbird-ip-hosts"
+            });
+            dnsServers.Add(new JsonObject { ["type"] = "hosts", ["tag"] = "netbird-ip-hosts", ["predefined"] = new JsonObject() });
+        }
     }
 
     public string? ForDomain(string domain, string? unavailableTag)

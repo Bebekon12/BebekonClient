@@ -187,7 +187,7 @@ public static class ConfigGenerator
             var tag = rule.Target switch
             {
                 RouteTarget.Vpn => VpnRuleTag(rule, serverTags, outbounds, dnsServers),
-                RouteTarget.NetBird => netBird.DefaultTag ?? UnavailableTag(rule),
+                RouteTarget.NetBird => (rule.Kind is RuleKind.Network or RuleKind.GeoIp ? netBird.AddressTag : netBird.DefaultTag) ?? UnavailableTag(rule),
                 _ => RouteTag(rule.Target, netBird)
             };
             routes.Add(RouteAction(Match(rule, forTraffic: true), tag, spec.Settings.TlsFragment));

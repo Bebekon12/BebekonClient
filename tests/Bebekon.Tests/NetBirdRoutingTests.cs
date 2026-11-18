@@ -74,6 +74,13 @@ public class NetBirdRoutingTests
             await File.WriteAllTextAsync(path, raw);
             using var core = new CoreProcess(coreExe, new(root, "core"));
             await core.ValidateAsync(path, default);
+
+            var address = new RoutingRule { Name = "IP only", Kind = RuleKind.Network, Values = ["100.100.0.55"], Destination = RouteTarget.NetBird };
+            var noDns = spec with { Profile = new() { Rules = [address] }, NetBird = new("NetBird test", 12, null, null, []) };
+            var ipConfig = ConfigGenerator.Generate(noDns);
+            Assert.Equal("netbird-ip", (string?)JsonNode.Parse(ipConfig)!["route"]!["rules"]![4]!["outbound"]);
+            await File.WriteAllTextAsync(path, ipConfig);
+            await core.ValidateAsync(path, default);
         }
         finally { Directory.Delete(root, true); }
     }
