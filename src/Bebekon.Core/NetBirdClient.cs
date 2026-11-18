@@ -10,6 +10,7 @@ namespace Bebekon.Core;
 public sealed record NetBirdStatus(bool Installed, string State, string? PeerAddress, string? Version, string[] Networks)
 {
     public bool Connected => PeerAddress is not null;
+    public string[] ControlHosts { get; init; } = [];
 }
 
 /// <summary>Runs the registered NetBird CLI as the interactive user.</summary>
@@ -59,10 +60,30 @@ public static class NetBirdClient
             ? list.EnumerateArray().Where(item => item.ValueKind == JsonValueKind.String)
                 .Select(item => item.GetString()!).Where(value => value.Length <= 253 && !value.Any(char.IsControl)).Take(512).ToArray()
             : [];
-        return new(true, state, peer, version, networks);
+        return new(true, state, peer, version, networks)
+        {
+            ControlHosts = NormalizeControlHosts(new[] { "management", "signal" }.Select(service => ReadControlHost(root, service)))
+        };
     }
 
-    internal static string? FindExecutable()
+    private static string? ReadControlHost(JsonElement root, string service)
+    {
+        if (!root.TryGetProperty(service, out var item) || item.ValueKind != JsonValueKind.Object ||
+            !item.TryGetProperty("url", out var endpoint) || endpoint.ValueKind != JsonValueKind.String ||
+            !Uri.TryCreate(endpoint.GetString(), UriKind.Absolute, out var uri) ||
+            uri.Scheme is not ("https" or "http") || !string.IsNullOrEmpty(uri.UserInfo))
+            return null;
+        return uri.IdnHost;
+    }
+
+    internal static string[] NormalizeControlHosts(IEnumerable<string?>? hosts) =>
+        (hosts ?? []).Take(2).OfType<string>().Select(host => host.Trim().TrimEnd('.').ToLowerInvariant())
+            .Where(host => host.Length is > 0 and <= 253 &&
+                host.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '.') &&
+                Uri.CheckHostName(host) == UriHostNameType.Dns)
+            .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+
+    public static string? FindExecutable()
     {
         if (!OperatingSystem.IsWindows()) return null;
         try

@@ -495,11 +495,11 @@ public sealed partial class MainViewModel : Observable, IDisposable
             catch (TimeoutException) { }
             finally { locatingBeforeTunnel = false; }
             token.ThrowIfCancellationRequested();
-            var trackNetBird = ActiveProfile.UsesNetBird || Settings.KillSwitch || ActiveProfile.HasProtectedRules;
-            var netBird = trackNetBird && testProbe is null ? await NetBirdClient.GetStatusAsync(token) : null;
+            var netBird = testProbe is null ? await NetBirdClient.GetStatusAsync(token) : null;
             var ruleServerIds = ActiveProfile.VpnServerIds.ToHashSet(StringComparer.Ordinal);
             spec = new(SelectedServer, ActiveProfile, Settings, LatencyService.FreePort(), Convert.ToHexString(RandomNumberGenerator.GetBytes(24)), Data.Servers.Where(s => ruleServerIds.Contains(s.Id)).ToList(),
-                AutoServers: Settings.AutoServer ? AutoPool : null, NetBirdPeer: netBird?.PeerAddress);
+                AutoServers: Settings.AutoServer ? AutoPool : null, NetBirdPeer: netBird?.PeerAddress,
+                NetBirdControlHosts: netBird?.ControlHosts);
             if (MapLocationEnabled && spec.AllowsOriginLookup) {
                 int originPort;
                 do { originPort = LatencyService.FreePort(); } while (originPort == spec.ProbePort || originPort == 17890);
@@ -581,12 +581,18 @@ public sealed partial class MainViewModel : Observable, IDisposable
             {
                 var active = spec;
                 var affectsPolicy = Connected && active is not null &&
-                    (active.Profile.UsesNetBird || active.Settings.KillSwitch || active.Profile.HasProtectedRules);
+                    (active.Settings.TunnelMode == TunnelMode.Tun || active.Profile.UsesNetBird);
                 if (!affectsPolicy && PageName is not ("Home" or "Connections")) continue;
                 var actual = await NetBirdClient.GetStatusAsync(lifetime.Token);
                 ShowNetBird(actual);
-                if (!affectsPolicy || !ReferenceEquals(active, spec) || !Connected) continue;
-                if (active!.NetBirdPeer != actual.PeerAddress) { QueueApply(); continue; }
+                if (!affectsPolicy || !ReferenceEquals(active, spec) || !Connected ||
+                    actual.State is "Unavailable" or "Unknown") continue;
+                if (active!.NetBirdPeer != actual.PeerAddress ||
+                    !(active.NetBirdControlHosts ?? []).SequenceEqual(actual.ControlHosts, StringComparer.OrdinalIgnoreCase))
+                {
+                    QueueApply();
+                    continue;
+                }
                 NetBirdRouting? routing;
                 try { routing = await NetBirdRouting.DiscoverAsync(actual.PeerAddress, lifetime.Token); }
                 catch (NetworkInformationException) { continue; }

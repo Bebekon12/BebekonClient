@@ -3,6 +3,7 @@ using System.Net;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 
 namespace Bebekon.Core;
 
@@ -126,9 +127,10 @@ public static class ProfileCodec
         catch (Exception e) when (e is JsonException or NotSupportedException or NullReferenceException) { throw new UserError("Повреждённый файл профиля Bebekon."); }
     }
 }
-public sealed record ConnectSpec(Server Server, Profile Profile, Settings Settings, int ProbePort, string ProbePassword, List<Server>? RuleServers = null, int OriginProbePort = 0, List<Server>? AutoServers = null, string? NetBirdPeer = null)
+public sealed record ConnectSpec(Server Server, Profile Profile, Settings Settings, int ProbePort, string ProbePassword, List<Server>? RuleServers = null, int OriginProbePort = 0, List<Server>? AutoServers = null, string? NetBirdPeer = null, string[]? NetBirdControlHosts = null)
 {
     [JsonIgnore] public NetBirdRouting? NetBird { get; init; }
+    [JsonIgnore] public string? NetBirdExecutable { get; init; }
     [JsonIgnore] public bool AllowsOriginLookup => !Profile.HasProtectedRules && !(Settings.KillSwitch && Settings.TunnelMode == TunnelMode.Tun);
 
     internal IEnumerable<Server> ResolveRuleServers()
@@ -171,6 +173,8 @@ public static class ConfigGenerator
         // throttled on many mobile networks and delayed even the VPN server's address lookup.
         var dnsServers = new JsonArray { new JsonObject { ["type"] = "local", ["tag"] = "direct-dns" }, Dns("vpn-dns", "vpn") };
         var netBirdRouting = !probeOnly ? spec.NetBird : null;
+        var netBirdDaemon = !probeOnly && spec.Settings.TunnelMode == TunnelMode.Tun ? spec.NetBirdExecutable : null;
+        var netBirdControlHosts = netBirdDaemon is null ? [] : NetBirdClient.NormalizeControlHosts(spec.NetBirdControlHosts);
         var netBird = new NetBirdConfig(spec.Profile.UsesNetBird ? netBirdRouting : null, outbounds, dnsServers);
         var serverTags = new Dictionary<string, string> { [s.Id] = "vpn" };
         if (!probeOnly)
@@ -193,9 +197,25 @@ public static class ConfigGenerator
             new JsonObject { ["action"] = "sniff", ["sniffer"] = Strings(["http", "tls", "quic", "dns"]), ["timeout"] = "300ms" },
             new JsonObject { ["protocol"] = "dns", ["action"] = "hijack-dns" }
         };
+        if (netBirdDaemon is not null)
+        {
+            // Keep the registered daemon's transport on the uplink. Ordinary traffic to
+            // the same hosts still follows the profile.
+            routes.Insert(2, new JsonObject
+            {
+                ["inbound"] = Strings(["tun-in"]),
+                ["process_path_regex"] = Strings(["(?i)^" + Regex.Escape(netBirdDaemon) + "$"]),
+                ["action"] = "route", ["outbound"] = "direct"
+            });
+        }
         if (runtime is not null) { inbounds.Add(new JsonObject { ["type"] = "mixed", ["tag"] = "xray-direct", ["listen"] = "127.0.0.1", ["listen_port"] = runtime.Direct.Port, ["users"] = new JsonArray { new JsonObject { ["username"] = "bebekon", ["password"] = runtime.Direct.Password } } }); routes.Insert(0, new JsonObject { ["inbound"] = Strings(["xray-direct"]), ["action"] = "route", ["outbound"] = "direct" }); }
         trustTunnel?.AddRelays(inbounds, routes);
         var dnsRules = new JsonArray(); var sets = new JsonArray(); var setTags = new HashSet<string>();
+        if (netBirdControlHosts.Length != 0)
+        {
+            // Resolving the control plane must work before the corporate adapter exists.
+            dnsRules.Add(DnsAction(new JsonObject { ["domain"] = Strings(netBirdControlHosts) }, "direct"));
+        }
         var fallbackTags = new Dictionary<string, string>(StringComparer.Ordinal);
         if (!probeOnly && spec.Settings.MapLocation && spec.AllowsOriginLookup && spec.OriginProbePort != 0) {
             // A private authenticated channel only for our opt-in HTTPS location lookup.

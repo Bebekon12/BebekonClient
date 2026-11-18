@@ -219,8 +219,13 @@ internal sealed class VpnService : ServiceBase
     private static async Task<ConnectSpec> ResolveNetBirdAsync(ConnectSpec spec, CancellationToken ct)
     {
         RuleValidation.Validate(spec.Profile);
-        if (spec.NetBirdPeer is null || !(spec.Profile.UsesNetBird || spec.Settings.KillSwitch || spec.Profile.HasProtectedRules)) return spec;
-        return spec with { NetBird = await NetBirdRouting.DiscoverAsync(spec.NetBirdPeer, ct) };
+        var executable = NetBirdClient.FindExecutable();
+        if (executable is null) return spec;
+        return spec with
+        {
+            NetBirdExecutable = executable,
+            NetBird = await NetBirdRouting.DiscoverAsync(spec.NetBirdPeer, ct)
+        };
     }
     private async Task StartCoreAsync(ConnectSpec spec, CancellationToken ct, bool restart = false)
     {

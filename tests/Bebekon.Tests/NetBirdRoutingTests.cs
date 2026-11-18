@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Sockets;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using Bebekon.Core;
 using Xunit;
@@ -86,6 +87,109 @@ public class NetBirdRoutingTests
         Assert.Equal(expected, status.PeerAddress);
         Assert.Equal(expected is not null, status.Connected);
         Assert.Equal(new[] { "10.25.0.0/16" }, status.Networks);
+    }
+
+    [Fact]
+    public async Task NetBirdControlPlaneCanBootstrapWhenCorporateDnsIsUnavailable()
+    {
+        var status = NetBirdClient.ParseStatus("""
+            {
+                "daemonStatus": "LoginFailed",
+                "management": { "url": "https://Management.Corp.Example:443/api?source=test", "connected": false },
+                "signal": { "url": "https://signal.corp.example:443", "connected": false }
+            }
+            """);
+        Assert.False(status.Connected);
+        Assert.Equal(new[] { "management.corp.example", "signal.corp.example" }, status.ControlHosts);
+
+        const string executable = @"C:\Program Files\NetBird\NetBird.exe";
+        var profile = new Profile
+        {
+            DefaultRoute = RouteTarget.Direct,
+            Rules = [new() { Name = "Corporate", Values = ["corp.example"], Destination = RouteTarget.NetBird }]
+        };
+        var spec = CoreTests.Spec(profile) with { NetBirdExecutable = executable, NetBirdControlHosts = status.ControlHosts };
+        var raw = ConfigGenerator.Generate(spec);
+        var cfg = JsonNode.Parse(raw)!;
+        Assert.Equal("hijack", (string?)cfg["inbounds"]![1]!["dns_mode"]);
+        Assert.True((bool)cfg["inbounds"]![1]!["strict_route"]!);
+        var dns = cfg["dns"]!["rules"]!.AsArray();
+        Assert.Equal("management.corp.example", (string?)dns[0]!["domain"]![0]);
+        Assert.Equal("signal.corp.example", (string?)dns[0]!["domain"]![1]);
+        Assert.Equal("direct-dns", (string?)dns[0]!["server"]);
+        Assert.Equal("REFUSED", (string?)dns[1]!["rcode"]);
+
+        var routes = cfg["route"]!["rules"]!.AsArray();
+        var daemon = routes[2]!;
+        Assert.Equal("tun-in", (string?)daemon["inbound"]![0]);
+        Assert.Equal("direct", (string?)daemon["outbound"]);
+        var pattern = (string)daemon["process_path_regex"]![0]!;
+        Assert.Matches(pattern, executable.ToLowerInvariant());
+        Assert.DoesNotMatch(pattern, @"C:\Other\NetBird.exe");
+        Assert.Equal("reject", (string?)routes.Last()!["action"]);
+
+        var withoutRegisteredDaemon = JsonNode.Parse(ConfigGenerator.Generate(spec with { NetBirdExecutable = null }))!;
+        Assert.Equal("hijack", (string?)withoutRegisteredDaemon["inbounds"]![1]!["dns_mode"]);
+        Assert.Equal("REFUSED", (string?)withoutRegisteredDaemon["dns"]!["rules"]![0]!["rcode"]);
+        var onlyProbe = JsonNode.Parse(ConfigGenerator.Generate(spec, probeOnly: true))!;
+        Assert.Empty(onlyProbe["dns"]!["rules"]!.AsArray());
+        Assert.Null(JsonSerializer.SerializeToNode(spec, Json.Options)!["netBirdExecutable"]);
+
+        var coreExe = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "core", "sing-box.exe"));
+        var root = Path.Combine(Path.GetTempPath(), "BebekonTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var path = Path.Combine(root, "config.json");
+            await File.WriteAllTextAsync(path, raw);
+            using var core = new CoreProcess(coreExe, new(root, "core"));
+            await core.ValidateAsync(path, default);
+
+            // Exercise the real DNS rules through an isolated listener, with no system TUN.
+            var port = LatencyService.FreePort();
+            cfg["inbounds"] = new JsonArray(new JsonObject
+            {
+                ["type"] = "direct", ["tag"] = "test-dns", ["listen"] = "127.0.0.1", ["listen_port"] = port
+            });
+            cfg["route"]!["rules"]!.AsArray().Insert(0, new JsonObject
+            {
+                ["inbound"] = new JsonArray("test-dns"), ["action"] = "hijack-dns"
+            });
+            cfg["dns"]!["servers"]![0] = new JsonObject
+            {
+                ["type"] = "hosts", ["tag"] = "direct-dns",
+                ["predefined"] = new JsonObject { ["management.corp.example"] = new JsonArray("192.0.2.40") }
+            };
+            await File.WriteAllTextAsync(path, cfg.ToJsonString());
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            await core.StartAsync(path, deadline.Token);
+            using var client = new UdpClient();
+            client.Connect(IPAddress.Loopback, port);
+
+            var management = NetBirdProbe.CreateQuery("management.corp.example", 1);
+            await client.SendAsync(management, deadline.Token);
+            var reply = await client.ReceiveAsync(deadline.Token);
+            Assert.Equal(IPAddress.Parse("192.0.2.40"), Assert.Single(NetBirdProbe.ReadAnswer(reply.Buffer, management, 1)));
+
+            var privateHost = NetBirdProbe.CreateQuery("git.corp.example", 1);
+            await client.SendAsync(privateHost, deadline.Token);
+            var denied = await client.ReceiveAsync(deadline.Token);
+            Assert.Equal(5, denied.Buffer[3] & 0xf); // REFUSED
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [Fact]
+    public void ConfirmedNetBirdAdapterKeepsNativeDnsEvenWithoutExplicitCorporateRules()
+    {
+        var spec = CoreTests.Spec() with
+        {
+            NetBird = new("NetBird", 27, null, null, []),
+            NetBirdExecutable = @"C:\Program Files\NetBird\netbird.exe"
+        };
+        Assert.False(spec.Profile.UsesNetBird);
+        var cfg = JsonNode.Parse(ConfigGenerator.Generate(spec))!;
+        Assert.Equal("native", (string?)cfg["inbounds"]![1]!["dns_mode"]);
     }
 
     [Fact]
