@@ -219,6 +219,7 @@ internal sealed class VpnService : ServiceBase
     private static async Task<ConnectSpec> ResolveNetBirdAsync(ConnectSpec spec, CancellationToken ct)
     {
         RuleValidation.Validate(spec.Profile);
+        if (!spec.UseNetBirdIntegration) return spec;
         var executable = NetBirdClient.FindExecutable();
         if (executable is null) return spec;
         return spec with
@@ -250,7 +251,7 @@ internal sealed class VpnService : ServiceBase
     }
     private void ApplyProtection(ConnectSpec spec, bool persistent, bool tunnelReady)
     {
-        var transports = KillSwitch.TrustedTransports(Path.Combine(AppContext.BaseDirectory, "core"));
+        var transports = KillSwitch.TrustedTransports(Path.Combine(AppContext.BaseDirectory, "core"), spec.UseNetBirdIntegration);
         try
         {
             if (tunnelReady && !KillSwitch.TunnelInterfacePresent())
@@ -282,8 +283,8 @@ internal sealed class VpnService : ServiceBase
         if (console || core?.Running == true) throw new UserError("Эта команда доступна установленной службе при отключённом Bebekon VPN.");
         RuleValidation.Validate(spec.Profile);
         if (!spec.Global && !spec.Profile.HasProtectedRules) throw new UserError("Сначала выберите правила защиты или сохраняемый Kill Switch.");
-        var netBird = await NetBirdRouting.DiscoverAsync(spec.NetBirdPeer, ct);
-        if (KillSwitch.ApplyPersistent(spec, netBird, KillSwitch.TrustedTransports(Path.Combine(AppContext.BaseDirectory, "core"))) == 0)
+        var netBird = spec.NetBirdEnabled ? await NetBirdRouting.DiscoverAsync(spec.NetBirdPeer, ct) : null;
+        if (KillSwitch.ApplyPersistent(spec, netBird, KillSwitch.TrustedTransports(Path.Combine(AppContext.BaseDirectory, "core"), spec.NetBirdEnabled)) == 0)
             throw new UserError("Windows не применила фильтры защиты.");
         ReleaseKillSwitch();
     }

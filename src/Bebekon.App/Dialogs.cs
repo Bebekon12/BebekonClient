@@ -142,10 +142,10 @@ public static class Dialogs
         return w.ShowDialog() == true ? selected : null;
     }
 
-    public static RoutingRule? Rule(RoutingRule? old, IEnumerable<Server>? servers = null, Action<RoutingRule>? checkRoute = null)
+    public static RoutingRule? Rule(RoutingRule? old, IEnumerable<Server>? servers = null, Action<RoutingRule>? checkRoute = null, bool netBirdEnabled = true)
     {
         var w = Shell(I18n.T(old is null ? "Новое правило" : "Изменить правило", old is null ? "New rule" : "Edit rule"), out var body);
-        var editor = new RuleEditor(old, servers ?? []); body.Children.Add(editor);
+        var editor = new RuleEditor(old, servers ?? [], netBirdEnabled); body.Children.Add(editor);
         var error = new TextBlock { TextWrapping = TextWrapping.Wrap, FontSize = 12, Margin = new(0, 8, 0, 0) };
         error.SetResourceReference(TextBlock.ForegroundProperty, "Danger"); body.Children.Add(error);
         if (checkRoute is not null)

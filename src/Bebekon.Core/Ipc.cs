@@ -6,7 +6,7 @@ using System.Text.Json;
 namespace Bebekon.Core;
 
 /// <param name="KeepBlocking">StopCore for a reconnect: leak protection stays on until the next StartCore.</param>
-public sealed record StoredProtectionSpec(Profile Profile, bool Global, string? NetBirdPeer);
+public sealed record StoredProtectionSpec(Profile Profile, bool Global, string? NetBirdPeer, bool NetBirdEnabled = true);
 public sealed record ServiceRequest(string Operation, ConnectSpec? Spec = null, bool KeepBlocking = false,
     StoredProtectionSpec? Protection = null, RoutingRule? TestRule = null);
 public sealed record ProtectionStatus(int Filters, int PersistentFilters, string? Error = null);

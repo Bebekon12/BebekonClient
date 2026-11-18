@@ -247,6 +247,8 @@ public sealed class Subscription : Observable
 }
 public sealed class Settings
 {
+    public List<string>? EnabledIntegrations { get; set; }
+    [JsonIgnore] public bool NetBirdEnabled => EnabledIntegrations?.Contains("netbird", StringComparer.OrdinalIgnoreCase) == true;
     public int DesignVersion { get; set; }
     public LatencyMode LatencyMode { get; set; } = LatencyMode.HttpsGet;
     public bool CheckForUpdates { get; set; } = true;

@@ -52,6 +52,16 @@ internal static class SmokeHarness
     public static async Task RunAsync(MainWindow window, MainViewModel vm)
     {
         await Task.Delay(400); var report = new List<string> { "Startup selects TUN after a saved proxy session." };
+        var address = new AddressButton { Address = "192.0.2.10" };
+        var fields = ((StackPanel)address.Content).Children.OfType<TextBlock>().Single();
+        if (fields.Text.Contains(address.Address) || Equals(address.ToolTip, address.Address)) throw new InvalidOperationException("IP must start hidden.");
+        var peer = new System.Windows.Automation.Peers.ButtonAutomationPeer(address);
+        ((System.Windows.Automation.Provider.IInvokeProvider)peer).Invoke();
+        await Task.Yield();
+        await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
+        if (fields.Text != address.Address) throw new InvalidOperationException("Activating the eye must reveal the current address.");
+        address.Address = "192.0.2.11";
+        if (fields.Text == address.Address || Equals(address.ToolTip, address.Address)) throw new InvalidOperationException("A new IP must be hidden again.");
         CheckTrayMenu(window, vm, report);
         await CheckCaptionButtonsAsync(window, vm, report);
         await CheckWindowRestorationAsync(window, vm, report);

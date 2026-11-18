@@ -67,7 +67,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
     public bool TlsFragmentEnabled { get => Settings.TlsFragment; set { if (Settings.TlsFragment == value) return; Settings.TlsFragment = value; Notify(); Save(); QueueApply(); } }
     public bool AutoServerEnabled { get => Settings.AutoServer; set { if (Settings.AutoServer == value) return; Settings.AutoServer = value; Notify(); Notify(nameof(ServerLabel)); Save(); QueueApply(); if (value && !AutoActive) Banner = T("Для автовыбора нужно минимум два сервера VLESS, VMess, Trojan, Shadowsocks, Hysteria2 или TUIC.", "Auto needs at least two VLESS, VMess, Trojan, Shadowsocks, Hysteria2 or TUIC servers."); } }
     private Profile activeProfile;
-    public Profile ActiveProfile { get => activeProfile; set { if (value is null || ReferenceEquals(activeProfile, value)) return; DetachProfile(activeProfile); Set(ref activeProfile, value); Data.SelectedProfileId = value.Id; AttachProfile(); RefreshRules(); Notify(nameof(ModeLabel)); Notify(nameof(IsWholePc)); Notify(nameof(DefaultDirection)); Notify(nameof(ProtectedRuleCount)); Notify(nameof(EmptyRulesDetail)); Notify(nameof(StatusDetail)); Save(); QueueApply(); } }
+    public Profile ActiveProfile { get => activeProfile; set { if (value is null || ReferenceEquals(activeProfile, value)) return; DetachProfile(activeProfile); Set(ref activeProfile, value); Data.SelectedProfileId = value.Id; AttachProfile(); RefreshRules(); Notify(nameof(ModeLabel)); Notify(nameof(IsWholePc)); Notify(nameof(DefaultDirection)); Notify(nameof(RouteChoices)); Notify(nameof(ProtectedRuleCount)); Notify(nameof(EmptyRulesDetail)); Notify(nameof(StatusDetail)); Save(); QueueApply(); } }
     public bool IsWholePc { get => ActiveProfile.DefaultRoute == RouteTarget.Vpn; set { if (value) DefaultDirection = RouteTarget.Vpn; else if (IsWholePc) DefaultDirection = RouteTarget.Direct; } }
     public string ModeLabel => IsWholePc ? T("Весь ПК", "Entire PC") : T("По правилам", "By rules");
     private ConnectionState state;
@@ -179,6 +179,11 @@ public sealed partial class MainViewModel : Observable, IDisposable
     {
         service = client; testProbe = probe; testLatency = latencyProbe;
         store = storage ?? new(); Data = store.Load();
+        if (Settings.EnabledIntegrations is null)
+        {
+            MigrateIntegrations();
+            store.Save(Data);
+        }
         latencyIndex = Enum.IsDefined(Settings.LatencyMode) ? (int)Settings.LatencyMode : 1;
         if (Settings.DesignVersion < 1) { Settings.AccentColor = "Blue"; Settings.DesignVersion = 1; store.Save(Data); }
         Settings.TunnelMode = TunnelMode.Tun;
@@ -255,14 +260,16 @@ public sealed partial class MainViewModel : Observable, IDisposable
             }
             if (data.Settings is { } settings && settings.Mtu is >= 1280 and <= 9000)
                 foreach (var property in typeof(Settings).GetProperties().Where(p => p.CanWrite && p.Name != nameof(Settings.DesignVersion))) property.SetValue(Settings, property.GetValue(settings));
+            MigrateIntegrations();
+            Notify(nameof(NetBirdEnabled)); Notify(nameof(RouteChoices)); Notify(nameof(EmptyRulesDetail));
             Save(); if (rules.Count > 0) RulesChanged(); else QueueApply();
             Banner = T($"Восстановлено подписок: {added}, правил: {rules.Count}", $"Restored subscriptions: {added}, rules: {rules.Count}") + (failed > 0 ? T($" · не удалось: {failed}", $" · failed: {failed}") : "");
         });
         // Provider links are validated as https when stored (ProviderInfo.SafeLink).
         OpenProviderLink = new Command(p => { if (ProviderInfo.SafeLink(p as string) is { Length: > 0 } link) Process.Start(new ProcessStartInfo(link) { UseShellExecute = true }); });
         DeleteSubscription = Async(async p => { var sub = (Subscription)p!; if (!Dialogs.Confirm(T("Удалить подписку?", "Delete subscription?"), sub.Name)) return; if (Connected && SelectedServer?.SubscriptionId == sub.Id) await DisconnectAsync(); Data.Subscriptions.Remove(sub); foreach (var s in Data.Servers.Where(s => s.SubscriptionId == sub.Id).ToArray()) Data.Servers.Remove(s); if (!Data.Servers.Contains(SelectedServer!)) SelectedServer = Data.Servers.FirstOrDefault(); Save(); RefreshServers(); Notify(nameof(NoSubscriptions)); });
-        AddRule = new Command(_ => { var rule = Dialogs.Rule(null, Data.Servers, draft => Dialogs.RouteCheck(this, draft)); if (rule is not null) { ActiveProfile.Rules.Add(rule); RulesChanged(); } });
-        EditRule = new Command(p => { var rule = (RoutingRule)p!; var edit = Dialogs.Rule(rule, Data.Servers, draft => Dialogs.RouteCheck(this, draft)); if (edit is null) return; var i = ActiveProfile.Rules.IndexOf(rule); rule.PropertyChanged -= OnRuleChanged; ActiveProfile.Rules[i] = edit; RulesChanged(); });
+        AddRule = new Command(_ => { var rule = Dialogs.Rule(null, Data.Servers, draft => Dialogs.RouteCheck(this, draft), NetBirdEnabled); if (rule is not null) { ActiveProfile.Rules.Add(rule); RulesChanged(); } });
+        EditRule = new Command(p => { var rule = (RoutingRule)p!; var edit = Dialogs.Rule(rule, Data.Servers, draft => Dialogs.RouteCheck(this, draft), NetBirdEnabled); if (edit is null) return; var i = ActiveProfile.Rules.IndexOf(rule); rule.PropertyChanged -= OnRuleChanged; ActiveProfile.Rules[i] = edit; RulesChanged(); });
         DeleteRule = new Command(p => { var rule = (RoutingRule)p!; rule.PropertyChanged -= OnRuleChanged; ActiveProfile.Rules.Remove(rule); RulesChanged(); });
         AddPreset = new Command(_ => { var preset = Dialogs.Preset(Presets); if (preset is null) return; var count = PresetCatalog.Apply(preset, ActiveProfile); RulesChanged(); Banner = count == 0 ? T("Этот набор уже добавлен.", "This preset has already been added.") : T($"Добавлено правил: {count}.", $"Added {count} rules."); });
         AddApplication = Async(async _ => { var app = await Dialogs.ApplicationAsync(); if (app is null) return; ActiveProfile.Rules.Add(new() { CreatedAt = DateTimeOffset.UtcNow, Kind = RuleKind.Application, Name = app.Name, Values = [app.Path] }); RulesChanged(); });
@@ -495,7 +502,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
             catch (TimeoutException) { }
             finally { locatingBeforeTunnel = false; }
             token.ThrowIfCancellationRequested();
-            var netBird = testProbe is null ? await NetBirdClient.GetStatusAsync(token) : null;
+            var netBird = NetBirdEnabled && testProbe is null ? await NetBirdClient.GetStatusAsync(token) : null;
             var ruleServerIds = ActiveProfile.VpnServerIds.ToHashSet(StringComparer.Ordinal);
             spec = new(SelectedServer, ActiveProfile, Settings, LatencyService.FreePort(), Convert.ToHexString(RandomNumberGenerator.GetBytes(24)), Data.Servers.Where(s => ruleServerIds.Contains(s.Id)).ToList(),
                 AutoServers: Settings.AutoServer ? AutoPool : null, NetBirdPeer: netBird?.PeerAddress,
@@ -579,11 +586,13 @@ public sealed partial class MainViewModel : Observable, IDisposable
             using var timer = new PeriodicTimer(TimeSpan.FromSeconds(10));
             while (await timer.WaitForNextTickAsync(lifetime.Token))
             {
+                if (!NetBirdEnabled) continue;
                 var active = spec;
                 var affectsPolicy = Connected && active is not null &&
                     (active.Settings.TunnelMode == TunnelMode.Tun || active.Profile.UsesNetBird);
                 if (!affectsPolicy && PageName is not ("Home" or "Connections")) continue;
                 var actual = await NetBirdClient.GetStatusAsync(lifetime.Token);
+                if (!NetBirdEnabled) continue;
                 ShowNetBird(actual);
                 if (!affectsPolicy || !ReferenceEquals(active, spec) || !Connected ||
                     actual.State is "Unavailable" or "Unknown") continue;
@@ -666,7 +675,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
     private bool Blocking => Protection?.Filters > 0 && State == ConnectionState.Error;
     private bool Monitoring => Connected || Blocking;
     private ProtectionStatus? protection;
-    public ProtectionStatus? Protection { get => protection; private set { if (Set(ref protection, value)) Notify(nameof(StatusDetail)); } }
+    public ProtectionStatus? Protection { get => protection; private set { if (Set(ref protection, value)) { Notify(nameof(StatusDetail)); Notify(nameof(ProtectionSummary)); } } }
     private void ApplyStatus(ServiceStatus s) { Protection = s.Protection; State = s.State; started = s.ConnectedAt; SetTraffic(s.State == ConnectionState.Connected ? s.Traffic : null); if (s.Error is not null) Banner = s.Error; }
     private void SetTraffic(TrafficSnapshot? value)
     {
@@ -688,6 +697,9 @@ public sealed partial class MainViewModel : Observable, IDisposable
         // The tunnel started, but the HTTPS check through it failed.
         HttpRequestException => T("Сервер не пропускает трафик. Выберите другой сервер; если не помогает — включите «Совместимость» в настройках.", "The server does not pass traffic. Choose another server; if that does not help, enable Compatibility in settings."),
         _ => T("Не удалось выполнить действие. Проверьте подключение и параметры.", "Action failed. Check your connection and settings.") }; }
+    private void MigrateIntegrations() => Settings.EnabledIntegrations ??= Data.Profiles.Any(profile =>
+        profile.DefaultRoute == RouteTarget.NetBird || profile.Rules.Any(rule => rule.Target == RouteTarget.NetBird)) ? ["netbird"] : [];
+
     private void Save() { try { store.Save(Data); } catch (Exception e) { Report(e); } }
     private static void OpenFolder(string dir) { Directory.CreateDirectory(dir); Process.Start(new ProcessStartInfo("explorer.exe") { ArgumentList = { dir }, UseShellExecute = true }); }
     private void OnPower(object sender, PowerModeChangedEventArgs e) { if (e.Mode == PowerModes.Resume) ScheduleNetworkCheck(true); }

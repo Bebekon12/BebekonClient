@@ -130,6 +130,9 @@ public static class ProfileCodec
 public sealed record ConnectSpec(Server Server, Profile Profile, Settings Settings, int ProbePort, string ProbePassword, List<Server>? RuleServers = null, int OriginProbePort = 0, List<Server>? AutoServers = null, string? NetBirdPeer = null, string[]? NetBirdControlHosts = null)
 {
     [JsonIgnore] public NetBirdRouting? NetBird { get; init; }
+    [JsonIgnore] public bool UseNetBirdIntegration => Settings.EnabledIntegrations is null
+        ? Profile.UsesNetBird || NetBirdPeer is not null || NetBird is not null || NetBirdExecutable is not null
+        : Settings.NetBirdEnabled;
     [JsonIgnore] public string? NetBirdExecutable { get; init; }
     [JsonIgnore] public bool AllowsOriginLookup => !Profile.HasProtectedRules && !(Settings.KillSwitch && Settings.TunnelMode == TunnelMode.Tun);
 
@@ -172,8 +175,8 @@ public static class ConfigGenerator
         // Direct DNS uses the uplink's own resolver (router / phone hotspot / ISP). Public DoH is
         // throttled on many mobile networks and delayed even the VPN server's address lookup.
         var dnsServers = new JsonArray { new JsonObject { ["type"] = "local", ["tag"] = "direct-dns" }, Dns("vpn-dns", "vpn") };
-        var netBirdRouting = !probeOnly ? spec.NetBird : null;
-        var netBirdDaemon = !probeOnly && spec.Settings.TunnelMode == TunnelMode.Tun ? spec.NetBirdExecutable : null;
+        var netBirdRouting = !probeOnly && spec.UseNetBirdIntegration ? spec.NetBird : null;
+        var netBirdDaemon = !probeOnly && spec.UseNetBirdIntegration && spec.Settings.TunnelMode == TunnelMode.Tun ? spec.NetBirdExecutable : null;
         var netBirdControlHosts = netBirdDaemon is null ? [] : NetBirdClient.NormalizeControlHosts(spec.NetBirdControlHosts);
         var netBird = new NetBirdConfig(spec.Profile.UsesNetBird ? netBirdRouting : null, outbounds, dnsServers);
         var serverTags = new Dictionary<string, string> { [s.Id] = "vpn" };
@@ -231,7 +234,7 @@ public static class ConfigGenerator
                 foreach (var value in rule.Values) if (setTags.Add(GeoCatalog.Tag(rule.Kind, value))) sets.Add(GeoCatalog.Inline(rule.Kind, value));
             if (rule.Target == RouteTarget.NetBird && rule.Kind == RuleKind.Site)
             {
-                foreach (var group in rule.Values.GroupBy(domain => netBird.ForDomain(domain, UnavailableTag(rule))))
+                foreach (var group in rule.Values.GroupBy(domain => netBird.ForDomain(domain, spec.UseNetBirdIntegration ? UnavailableTag(rule) : null)))
                 {
                     routes.Add(RouteAction(Match(rule, group, forTraffic: true), group.Key, spec.Settings.TlsFragment));
                     dnsRules.Add(DnsAction(Match(rule, group), group.Key));
@@ -241,7 +244,7 @@ public static class ConfigGenerator
             var tag = rule.Target switch
             {
                 RouteTarget.Vpn => VpnRuleTag(rule, serverTags, outbounds, dnsServers, fallbackTags),
-                RouteTarget.NetBird => (rule.Kind is RuleKind.Network or RuleKind.GeoIp ? netBird.AddressTag : netBird.DefaultTag) ?? UnavailableTag(rule),
+                RouteTarget.NetBird => (rule.Kind is RuleKind.Network or RuleKind.GeoIp ? netBird.AddressTag : netBird.DefaultTag) ?? (spec.UseNetBirdIntegration ? UnavailableTag(rule) : null),
                 _ => RouteTag(rule.Target, netBird)
             };
             routes.Add(RouteAction(Match(rule, forTraffic: true), tag, spec.Settings.TlsFragment));

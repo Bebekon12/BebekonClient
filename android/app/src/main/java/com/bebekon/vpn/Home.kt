@@ -40,7 +40,7 @@ private val SignalRed = Color(0xFFFF687A)
     val history by VpnController.trafficHistory.collectAsState()
     val pings by model.repo.pings.collectAsState()
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(session.started) { while (true) { now = System.currentTimeMillis(); delay(1000) } }
+    LaunchedEffect(session.active, session.started) { while (session.active) { now = System.currentTimeMillis(); delay(1000) } }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val rowHeight = (maxHeight * .103f).coerceIn(64.dp, 74.dp)
         val peek = rowHeight * 4 + 44.dp
@@ -95,7 +95,10 @@ private val SignalRed = Color(0xFFFF687A)
                         DashboardCard(Modifier.fillMaxWidth().height(rowHeight)) {
                             DashboardValue(Modifier.weight(1f), Icons.Outlined.Schedule, "Сессия", if (session.started > 0 && session.active) "%02d:%02d".format((now - session.started) / 60000, (now - session.started) / 1000 % 60) else "—")
                             DashboardDivider()
-                            DashboardValue(Modifier.weight(1f), Icons.Outlined.Language, "Публичный IP", session.publicIp.ifEmpty { "—" }, 12.sp)
+                            var showIp by remember(session.started, session.publicIp) { mutableStateOf(false) }
+                            DashboardValue(Modifier.weight(1f).clickable(enabled = session.publicIp.isNotEmpty(), role = Role.Button, onClickLabel = if (showIp) "Скрыть IP" else "Показать IP") { showIp = !showIp },
+                                if (showIp) Icons.Outlined.Visibility else Icons.Outlined.VisibilityOff, "Публичный IP",
+                                if (session.publicIp.isEmpty()) "—" else if (showIp) session.publicIp else "••••", 12.sp)
                         }
                     }
                     item {

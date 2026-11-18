@@ -14,11 +14,11 @@ public sealed partial class KillSwitch
     private const uint FilterNotFound = 0x80320003;
     private const uint ProviderNotFound = 0x80320005;
 
-    public static string[] TrustedTransports(string coreDirectory)
+    public static string[] TrustedTransports(string coreDirectory, bool useNetBird)
     {
         IEnumerable<string> paths = new[] { "sing-box.exe", "xray.exe", "trusttunnel_client.exe" }
             .Select(name => Path.Combine(coreDirectory, name));
-        if (NetBirdClient.FindExecutable() is { } netBirdExecutable) paths = paths.Append(netBirdExecutable);
+        if (useNetBird && NetBirdClient.FindExecutable() is { } netBirdExecutable) paths = paths.Append(netBirdExecutable);
         return paths.ToArray();
     }
 
@@ -26,10 +26,10 @@ public sealed partial class KillSwitch
         => ApplyPersistent(PolicyProvider, spec, trustedTransports, tunnelReady);
 
     internal static int ApplyPersistent(Guid providerKey, ConnectSpec spec, IEnumerable<string> trustedTransports, bool tunnelReady)
-        => ApplyPersistent(providerKey, spec.Profile, spec.Settings.KillSwitch, spec.NetBird, trustedTransports, tunnelReady);
+        => ApplyPersistent(providerKey, spec.Profile, spec.Settings.KillSwitch, spec.UseNetBirdIntegration ? spec.NetBird : null, trustedTransports, tunnelReady);
 
     public static int ApplyPersistent(StoredProtectionSpec spec, NetBirdRouting? netBird, IEnumerable<string> trustedTransports)
-        => ApplyPersistent(PolicyProvider, spec.Profile, spec.Global, netBird, trustedTransports, tunnelReady: false);
+        => ApplyPersistent(PolicyProvider, spec.Profile, spec.Global, spec.NetBirdEnabled ? netBird : null, trustedTransports, tunnelReady: false);
 
     private static int ApplyPersistent(Guid providerKey, Profile profile, bool global, NetBirdRouting? netBirdRouting,
         IEnumerable<string> trustedTransports, bool tunnelReady)

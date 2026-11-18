@@ -7,7 +7,31 @@ namespace Bebekon.App;
 
 public sealed partial class MainViewModel
 {
-    public IReadOnlyList<RouteChoice> RouteChoices => RouteChoice.Options;
+    public IReadOnlyList<RouteChoice> RouteChoices => RouteChoice.Options.Where(option =>
+        NetBirdEnabled || option.Target != RouteTarget.NetBird || DefaultDirection == RouteTarget.NetBird).ToArray();
+    public bool NetBirdEnabled
+    {
+        get => Settings.NetBirdEnabled;
+        set
+        {
+            if (value == NetBirdEnabled) return;
+            Settings.EnabledIntegrations ??= [];
+            Settings.EnabledIntegrations.RemoveAll(id => string.Equals(id, "netbird", StringComparison.OrdinalIgnoreCase));
+            if (value) Settings.EnabledIntegrations.Add("netbird");
+            netBirdConnected = false;
+            netBirdInstalled = false;
+            NetBirdSummary = "—";
+            NetBirdPeer = null;
+            NetBirdInterfaceInfo = "—";
+            Notify(); Notify(nameof(RouteChoices)); Notify(nameof(NetBirdAction));
+            Save(); QueueApply();
+            if (liveEnvironment) RefreshConnections.Execute(null);
+        }
+    }
+    private bool netBirdConnected, netBirdInstalled;
+    public string NetBirdAction => netBirdConnected ? T("Отключить NetBird", "Disconnect NetBird") : T("Подключить NetBird", "Connect NetBird");
+    private string? netBirdPeer;
+    public string? NetBirdPeer { get => netBirdPeer; private set => Set(ref netBirdPeer, value); }
     public RouteTarget DefaultDirection
     {
         get => ActiveProfile.DefaultRoute;
@@ -15,7 +39,7 @@ public sealed partial class MainViewModel
         {
             if (value == ActiveProfile.DefaultRoute || !Enum.IsDefined(value)) return;
             ActiveProfile.DefaultRoute = value;
-            Notify(nameof(DefaultDirection)); Notify(nameof(IsWholePc)); Notify(nameof(ModeLabel));
+            Notify(nameof(DefaultDirection)); Notify(nameof(RouteChoices)); Notify(nameof(IsWholePc)); Notify(nameof(ModeLabel));
             Notify(nameof(EmptyRulesDetail)); Notify(nameof(StatusDetail));
             Save(); QueueApply();
         }
@@ -41,6 +65,13 @@ public sealed partial class MainViewModel
     public string Uplink { get => uplink; private set => Set(ref uplink, value); }
     public string WfpResult { get => wfpResult; private set => Set(ref wfpResult, value); }
     public string WfpEvents { get => wfpEvents; private set => Set(ref wfpEvents, value); }
+    public string ProtectionSummary => Protection switch
+    {
+        null => T("Обновите состояние, чтобы проверить защиту Windows.", "Refresh the status to check Windows protection."),
+        { Error: not null } => T("Служба не смогла подтвердить защиту Windows.", "The helper could not verify Windows protection."),
+        { Filters: > 0 } => T("Windows применяет правила блокировки соединений.", "Windows is enforcing connection filters."),
+        _ => T("Системная блокировка сейчас выключена.", "System blocking is currently off.")
+    };
     public int ProtectedRuleCount => ActiveProfile.ActiveRules.Count(rule => rule.SystemProtection);
     public ICommand RefreshConnections { get; private set; } = null!;
     public ICommand ChangeNetBird { get; private set; } = null!;
@@ -55,9 +86,10 @@ public sealed partial class MainViewModel
         RefreshConnections = Async(_ => ReadConnectionsAsync(lifetime.Token));
         ChangeNetBird = Async(async value =>
         {
-            await NetBirdClient.SetConnectedAsync(string.Equals(value as string, "Up", StringComparison.Ordinal), lifetime.Token);
+            if (!NetBirdEnabled) return;
+            await NetBirdClient.SetConnectedAsync(!netBirdConnected, lifetime.Token);
             await ReadConnectionsAsync(lifetime.Token);
-        });
+        }, () => NetBirdEnabled && netBirdInstalled);
         CheckRoute = new Command(_ => Dialogs.RouteCheck(this));
         RefreshProtection = Async(_ => ReadProtectionAsync(lifetime.Token));
         TestWfp = Async(async _ => WfpResult = await TestWfpAsync(lifetime.Token));
@@ -68,8 +100,8 @@ public sealed partial class MainViewModel
             {
                 if (Connected || ConnectionBusy) return;
                 await EnsureServiceAsync();
-                var netBird = await NetBirdClient.GetStatusAsync(lifetime.Token);
-                var policy = new StoredProtectionSpec(ActiveProfile, Settings.KillSwitch && Settings.PersistentKillSwitch, netBird.PeerAddress);
+                var netBird = NetBirdEnabled ? await NetBirdClient.GetStatusAsync(lifetime.Token) : null;
+                var policy = new StoredProtectionSpec(ActiveProfile, Settings.KillSwitch && Settings.PersistentKillSwitch, netBird?.PeerAddress, NetBirdEnabled);
                 var reply = await service.SendAsync(new("ApplyStoredProtection", Protection: policy), true, lifetime.Token);
                 Protection = reply.Status.Protection;
                 if (!reply.Ok) throw new UserError(reply.Message ?? T("Не удалось применить защиту WFP.", "Could not apply WFP protection."));
@@ -93,20 +125,21 @@ public sealed partial class MainViewModel
                 if (testProbe is null) SystemProxy.Restore();
             }
             finally { connectionGate.Release(); }
-        });
+        }, () => Protection is { Filters: > 0 } or { Error: not null });
     }
 
     private async Task ReadConnectionsAsync(CancellationToken ct)
     {
-        var status = await NetBirdClient.GetStatusAsync(ct);
-        ShowNetBird(status);
-        var routing = await NetBirdRouting.DiscoverAsync(status.PeerAddress, ct);
+        var status = NetBirdEnabled ? await NetBirdClient.GetStatusAsync(ct) : null;
+        if (NetBirdEnabled && status is not null) ShowNetBird(status);
+        var routing = NetBirdEnabled && status is not null ? await NetBirdRouting.DiscoverAsync(status.PeerAddress, ct) : null;
+        if (!NetBirdEnabled) routing = null;
         netBirdInterface = routing?.InterfaceName;
         NetBirdInterfaceInfo = routing is null ? T("Интерфейс NetBird не найден.", "NetBird interface was not found.") :
             string.Join(Environment.NewLine,
                 routing.InterfaceName,
                 T("DNS · ", "DNS · ") + string.Join(", ", routing.Zones.Select(zone => zone.Resolver).Append(routing.DefaultResolver).OfType<string>().Distinct().DefaultIfEmpty("—")),
-                T("Сети · ", "Networks · ") + string.Join(", ", status.Networks.DefaultIfEmpty("—")));
+                T("Сети · ", "Networks · ") + string.Join(", ", (status?.Networks ?? []).DefaultIfEmpty("—")));
 
         var adapters = NetworkInterface.GetAllNetworkInterfaces().Where(adapter => adapter.OperationalStatus == OperationalStatus.Up &&
             adapter.NetworkInterfaceType is not NetworkInterfaceType.Loopback).ToArray();
@@ -127,7 +160,11 @@ public sealed partial class MainViewModel
 
     private void ShowNetBird(NetBirdStatus status)
     {
-        NetBirdSummary = status.Connected ? T("Подключён", "Connected") + " · " + status.PeerAddress :
+        netBirdConnected = status.Connected;
+        netBirdInstalled = status.Installed;
+        NetBirdPeer = status.PeerAddress;
+        Notify(nameof(NetBirdAction));
+        NetBirdSummary = status.Connected ? T("Подключён", "Connected") :
             !status.Installed ? T("Не установлен", "Not installed") :
             status.State switch
             {
@@ -208,6 +245,8 @@ public sealed partial class MainViewModel
         var profile = Connected && current is not null ? current.Profile : ActiveProfile;
         var target = query with { Port = query.Port ?? 443, Transport = RuleTransport.Tcp };
         var decision = RoutingPolicy.Analyze(profile, target);
+        if (decision.Direction == RouteTarget.NetBird && !NetBirdEnabled)
+            return T("Интеграция NetBird выключена. Политика блокирует этот маршрут.", "NetBird integration is off. The policy blocks this route.");
         if (decision.Direction == RouteTarget.NetBird && !decision.DependsOnConnectionDetails)
             return await VerifyNetBirdAsync(target, ct);
         if (!Connected || current is null || decision.Direction != RouteTarget.Vpn || decision.Rule?.FallbackServerIds is { Count: > 0 } ||

@@ -60,6 +60,24 @@ public class RoutingDirectionTests
     }
 
     [Fact]
+    public void DisabledNetBirdRejectsSavedCorporateRuleEvenWithDirectFallbackAndCachedInterface()
+    {
+        var rule = new RoutingRule { Name = "Office", Values = ["corp.example"], Destination = RouteTarget.NetBird,
+            UnavailableRoute = RouteTarget.Direct };
+        var spec = CoreTests.Spec(new() { Rules = [rule] }) with {
+            NetBird = new("wt0", 9, null, null, [new("corp.example", true, "100.64.0.1")])
+        };
+        spec.Settings.EnabledIntegrations = [];
+        Assert.False(spec.UseNetBirdIntegration);
+        var config = JsonNode.Parse(ConfigGenerator.Generate(spec))!;
+        var route = config["route"]!["rules"]!.AsArray().Single(n => n?["domain_suffix"]?[0]?.ToString() == "corp.example");
+        var dns = config["dns"]!["rules"]!.AsArray().Single(n => n?["domain_suffix"]?[0]?.ToString() == "corp.example");
+        Assert.Equal("reject", (string?)route!["action"]);
+        Assert.Equal("REFUSED", (string?)dns!["rcode"]);
+        Assert.DoesNotContain("wt0", config.ToJsonString());
+    }
+
+    [Fact]
     public void ProtocolAndPortApplyToTrafficAndPreviewInProfileOrder()
     {
         var profile = new Profile { Rules = [

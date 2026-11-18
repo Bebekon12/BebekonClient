@@ -39,8 +39,9 @@ internal sealed class RuleEditor : StackPanel
     private readonly Dictionary<RouteTarget, CheckBox> allowed = [];
     private RouteTarget Direction => direction.SelectedValue is RouteTarget target ? target : RouteTarget.Vpn;
 
-    public RuleEditor(RoutingRule? old, IEnumerable<Server> servers)
+    public RuleEditor(RoutingRule? old, IEnumerable<Server> servers, bool netBirdEnabled = true)
     {
+        direction.ItemsSource = RouteChoice.Options.Where(option => netBirdEnabled || option.Target != RouteTarget.NetBird || old?.Target == RouteTarget.NetBird).ToArray();
         original = old; Kind = old?.Kind ?? RuleKind.Application;
         explanation.SetResourceReference(TextBlock.ForegroundProperty, "Muted");
         Children.Add(Label(I18n.T("Тип правила", "Rule type")));
@@ -95,7 +96,7 @@ internal sealed class RuleEditor : StackPanel
         advanced.Children.Add(directFallback);
         advanced.Children.Add(Label(I18n.T("Разрешённые направления", "Allowed connections")));
         var choicesRow = new WrapPanel();
-        foreach (var choice in RouteChoice.Options.Where(option => option.Target != RouteTarget.Block))
+        foreach (var choice in RouteChoice.Options.Where(option => option.Target != RouteTarget.Block && (netBirdEnabled || option.Target != RouteTarget.NetBird || old?.Target == RouteTarget.NetBird)))
         {
             var enabled = new CheckBox { Content = choice.Label, IsChecked = old?.Allows(choice.Target) ?? true, Margin = new(0, 0, 16, 0) };
             enabled.Checked += (_, _) => UpdateDirection();
@@ -113,7 +114,7 @@ internal sealed class RuleEditor : StackPanel
         networkRow.Children.Add(port);
         advanced.Children.Add(networkRow);
         Children.Add(new Expander { Header = I18n.T("Резерв и ограничения", "Fallback and restrictions"),
-            Content = advanced, Margin = new(0, 10, 0, 0), Foreground = (Brush)Application.Current.Resources["Text"] });
+            Style = (Style)Application.Current.Resources["DetailsPanel"], Content = advanced, Margin = new(0, 10, 0, 0), Foreground = (Brush)Application.Current.Resources["Text"] });
         protection.Content = I18n.T("Системная защита WFP", "WFP system protection");
         protection.ToolTip = I18n.T("Windows защищает IP/CIDR или весь трафик указанных приложений.", "Windows protects an IP/CIDR or all traffic from the selected executables.");
         protection.IsChecked = old?.SystemProtection == true;

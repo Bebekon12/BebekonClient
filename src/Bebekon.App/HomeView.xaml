@@ -46,12 +46,12 @@
   <Border Style="{StaticResource CardStyle}" Padding="14,10" Margin="0,14,0,0">
    <DockPanel>
     <Button DockPanel.Dock="Right" Content="{DynamicResource Connections}" Command="{Binding Navigate}" CommandParameter="Connections" VerticalAlignment="Center"/>
-    <UniformGrid Columns="3">
+    <UniformGrid Rows="1">
      <StackPanel Margin="0,0,8,0">
       <TextBlock Text="Bebekon VPN" FontWeight="SemiBold" Foreground="{DynamicResource Accent}"/>
       <TextBlock Text="{Binding StatusLabel}" Style="{StaticResource Subtitle}" TextTrimming="CharacterEllipsis" Margin="0,4,0,0"/>
      </StackPanel>
-     <StackPanel Margin="0,0,8,0">
+     <StackPanel Margin="0,0,8,0" Visibility="{Binding NetBirdEnabled, Converter={StaticResource BoolVisibility}}">
       <TextBlock Text="NetBird" FontWeight="SemiBold" Foreground="#BEA7FF"/>
       <TextBlock Text="{Binding NetBirdSummary}" Style="{StaticResource Subtitle}" TextTrimming="CharacterEllipsis" Margin="0,4,0,0"/>
      </StackPanel>
@@ -69,9 +69,9 @@
     <Border Grid.Column="2" BorderBrush="{DynamicResource Border}" BorderThickness="1,0,0,0" Padding="14,0"><StackPanel><StackPanel Orientation="Horizontal"><local:IconView Icon="Clock" Width="14" Height="14" Foreground="{DynamicResource Accent}" Margin="0,0,6,0"/><TextBlock Text="{DynamicResource Session}" Style="{StaticResource Subtitle}" FontSize="11"/></StackPanel><TextBlock Text="{Binding Session}" FontSize="20" FontWeight="SemiBold" Margin="0,9,0,0"/></StackPanel></Border>
     <Border Grid.Column="3" BorderBrush="{DynamicResource Border}" BorderThickness="1,0,0,0" Padding="14,0,0,0"><StackPanel>
      <TextBlock Text="{Binding PublicIpLabel}" Style="{StaticResource Subtitle}" FontSize="10" TextTrimming="CharacterEllipsis" ToolTip="{Binding PublicIpLabel}"/>
-     <TextBlock Text="{Binding VpnIp}" FontFamily="Cascadia Mono" FontSize="13" FontWeight="SemiBold" Margin="0,5,0,9" TextTrimming="CharacterEllipsis" ToolTip="{Binding VpnIp}"/>
+     <local:AddressButton Address="{Binding VpnIp}" HorizontalAlignment="Left" Margin="0,2,0,2"/>
      <TextBlock Text="{Binding LocalIpLabel}" Style="{StaticResource Subtitle}" FontSize="10"/>
-     <TextBlock Text="{Binding LocalIp}" FontFamily="Cascadia Mono" FontSize="12" Margin="0,5,0,0" TextTrimming="CharacterEllipsis" ToolTip="{Binding LocalIpDetail}"/>
+     <local:AddressButton Address="{Binding LocalIp}" HorizontalAlignment="Left" Margin="0,2,0,2"/>
     </StackPanel></Border>
    </Grid>
   </Border>

@@ -4,6 +4,21 @@ public static class I18n
     public static bool English { get; private set; }
     public static string T(string ru, string en) => English ? en : ru;
     private static readonly (string Key, string Ru, string En)[] Labels = [
+        ("ConnectionsIntro","Выберите путь для трафика в правилах. Здесь можно проверить доступные подключения.","Choose routes in Rules. Check available connections here."),
+        ("DirectConnectionHelp","Выход через провайдера для правил с маршрутом Direct.","Provider connection used by Direct rules."),
+        ("CorporateConnection","Корпоративная сеть · NetBird","Corporate network · NetBird"),
+        ("CorporateAddress","Адрес в рабочей сети","Work network address"),
+        ("GlobalGuard","Блокировать интернет при обрыве VPN","Block internet if VPN drops"),
+        ("GlobalGuardHelp","В режиме TUN Windows блокирует внешний трафик вне разрешённых подключений.","In TUN mode Windows blocks external traffic outside permitted connections."),
+        ("PersistentGuardHelp","Оставлять блокировку активной после остановки службы и перезапуска Windows.","Keep the block active after the helper stops and Windows restarts."),
+        ("SpecificGuardHelp","Чтобы защитить отдельное приложение или подсеть, включите системную защиту в редакторе его правила.","Enable system protection in a rule to protect an individual application or subnet."),
+        ("GuardDiagnostics","Проверка и управление блокировкой","Test and manage protection"),
+        ("RuleOn","Включено","Enabled"),
+        ("RuleOff","Выключено","Disabled"),
+        ("ProfileNameLabel","Профиль","Profile"),
+        ("Unmatched","Остальной трафик","Other traffic"),
+        ("NetBirdIntegration","Дополнительные клиенты · NetBird","Additional clients · NetBird"),
+        ("NetBirdIntegrationHelp","Добавить корпоративную сеть в маршруты и показывать её статус. При выключении правила NetBird блокируют соединения.","Add the corporate network to route choices and show its status. Disabled NetBird routes block connections."),
         ("Connections","Подключения","Connections"),("Protection","Защита","Protection"),("CheckRouteNow","Проверить маршрут","Check route"),
         ("DefaultDirection","Маршрут по умолчанию","Default route"),("RuleEnabled","Активность правила","Rule activity"),
         ("NetBirdUp","Подключить NetBird","Connect NetBird"),("NetBirdDown","Отключить NetBird","Disconnect NetBird"),

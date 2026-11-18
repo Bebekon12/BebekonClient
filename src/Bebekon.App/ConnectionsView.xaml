@@ -1,47 +1,27 @@
-<UserControl x:Class="Bebekon.App.ConnectionsView"
-    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
- <ScrollViewer VerticalScrollBarVisibility="Auto">
-  <StackPanel>
-   <TextBlock Text="{DynamicResource Connections}" Style="{StaticResource Heading}" Margin="0,0,0,16"/>
-   <Border Style="{StaticResource CardStyle}" Padding="16" Margin="0,0,0,10">
-    <DockPanel>
-     <Button DockPanel.Dock="Right" Content="{Binding ConnectLabel}" Command="{Binding ToggleConnect}" VerticalAlignment="Center"/>
-     <StackPanel>
-      <TextBlock Text="Bebekon VPN" FontSize="16" FontWeight="SemiBold" Foreground="{DynamicResource Accent}"/>
-      <TextBlock Text="{Binding StatusLabel}" Style="{StaticResource Subtitle}" Margin="0,4,0,0"/>
-      <TextBlock Text="{Binding VpnIp}" Style="{StaticResource Subtitle}" Margin="0,4,0,0"/>
-     </StackPanel>
-    </DockPanel>
-   </Border>
-   <Border Style="{StaticResource CardStyle}" Padding="16" Margin="0,0,0,10">
-    <StackPanel>
-     <TextBlock Text="NetBird" FontSize="16" FontWeight="SemiBold" Foreground="#BEA7FF"/>
-     <TextBlock Text="{Binding NetBirdSummary}" Style="{StaticResource Subtitle}" Margin="0,4,0,0"/>
-     <TextBlock Text="{Binding NetBirdInterfaceInfo}" Style="{StaticResource Subtitle}" TextWrapping="Wrap" Margin="0,8,0,0"/>
-     <WrapPanel Margin="0,10,0,0">
-      <Button Content="{DynamicResource NetBirdUp}" Command="{Binding ChangeNetBird}" CommandParameter="Up" Margin="0,0,8,0"/>
-      <Button Content="{DynamicResource NetBirdDown}" Command="{Binding ChangeNetBird}" CommandParameter="Down"/>
-     </WrapPanel>
-    </StackPanel>
-   </Border>
-   <Border Style="{StaticResource CardStyle}" Padding="16" Margin="0,0,0,10">
-    <StackPanel>
-     <TextBlock Text="Direct" FontSize="16" FontWeight="SemiBold"/>
-     <TextBlock Text="{DynamicResource DirectInterface}" Style="{StaticResource Subtitle}" Margin="0,4,0,0"/>
-     <TextBlock Text="{Binding Uplink}" Margin="0,4,0,0"/>
-    </StackPanel>
-   </Border>
-   <Border Style="{StaticResource CardStyle}" Padding="16">
-    <StackPanel>
-     <TextBlock Text="{DynamicResource NetworkSnapshot}" FontWeight="SemiBold" FontSize="16"/>
-     <TextBlock Text="{Binding WindowsNetwork}" Style="{StaticResource Subtitle}" TextWrapping="Wrap" Margin="0,8,0,0"/>
-     <WrapPanel Margin="0,10,0,0">
-      <Button Content="{DynamicResource Update}" Command="{Binding RefreshConnections}" Margin="0,0,8,0"/>
-      <Button Content="{DynamicResource CheckRouteNow}" Command="{Binding CheckRoute}"/>
-     </WrapPanel>
-    </StackPanel>
-   </Border>
-  </StackPanel>
- </ScrollViewer>
+<UserControl x:Class="Bebekon.App.ConnectionsView" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="clr-namespace:Bebekon.App">
+ <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"><StackPanel Margin="0,0,6,12">
+  <TextBlock Text="{DynamicResource Connections}" Style="{StaticResource Heading}"/>
+  <TextBlock Text="{DynamicResource ConnectionsIntro}" Style="{StaticResource Subtitle}" Margin="0,4,0,16" TextWrapping="Wrap"/>
+  <Border Style="{StaticResource CardStyle}" Padding="18" Margin="0,0,0,10"><DockPanel>
+   <Button DockPanel.Dock="Right" Command="{Binding ToggleConnect}" Content="{Binding ConnectLabel}" VerticalAlignment="Center" Margin="10,0,0,0"/>
+   <StackPanel><TextBlock Text="Bebekon VPN" FontSize="17" FontWeight="SemiBold" Foreground="{DynamicResource Accent}"/>
+    <TextBlock Text="{Binding StatusLabel}" Margin="0,4,0,8"/>
+    <WrapPanel><TextBlock Text="{Binding PublicIpLabel}" Style="{StaticResource Subtitle}" VerticalAlignment="Center" Margin="0,0,8,0"/><local:AddressButton Address="{Binding VpnIp}"/></WrapPanel>
+   </StackPanel>
+  </DockPanel></Border>
+  <local:SettingRow Icon="Network" Title="{DynamicResource DirectInterface}" Description="{DynamicResource DirectConnectionHelp}"><TextBlock Text="{Binding Uplink}" MaxWidth="180" TextTrimming="CharacterEllipsis"/></local:SettingRow>
+  <Border Style="{StaticResource CardStyle}" Visibility="{Binding NetBirdEnabled, Converter={StaticResource BoolVisibility}}" Padding="18" Margin="0,0,0,10"><DockPanel>
+   <Button DockPanel.Dock="Right" Content="{Binding NetBirdAction}" Command="{Binding ChangeNetBird}" VerticalAlignment="Center" Margin="10,0,0,0"/>
+   <StackPanel><TextBlock Text="{DynamicResource CorporateConnection}" FontWeight="SemiBold" FontSize="16"/>
+    <TextBlock Text="{Binding NetBirdSummary}" Margin="0,4,0,6"/>
+    <WrapPanel><TextBlock Text="{DynamicResource CorporateAddress}" Style="{StaticResource Subtitle}" VerticalAlignment="Center" Margin="0,0,8,0"/><local:AddressButton Address="{Binding NetBirdPeer}"/></WrapPanel>
+   </StackPanel>
+  </DockPanel></Border>
+  <WrapPanel Margin="0,3,0,12"><Button Content="{DynamicResource CheckRouteNow}" Command="{Binding CheckRoute}" Style="{StaticResource AccentButton}" Margin="0,0,8,0"/><Button Content="{DynamicResource Update}" Command="{Binding RefreshConnections}"/></WrapPanel>
+  <Expander Header="{DynamicResource NetworkSnapshot}" Style="{StaticResource DetailsPanel}">
+   <StackPanel><TextBlock Text="{Binding WindowsNetwork}" TextWrapping="Wrap" Style="{StaticResource Subtitle}"/>
+    <TextBlock Text="{Binding NetBirdInterfaceInfo}" Visibility="{Binding NetBirdEnabled, Converter={StaticResource BoolVisibility}}" TextWrapping="Wrap" Style="{StaticResource Subtitle}" Margin="0,8,0,0"/>
+   </StackPanel>
+  </Expander>
+ </StackPanel></ScrollViewer>
 </UserControl>
