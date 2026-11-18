@@ -116,10 +116,10 @@ internal sealed class NetBirdConfig
         if (defaultResolver is not null) DefaultTag = tags[defaultResolver];
     }
 
-    public string? ForDomain(string domain)
+    public string? ForDomain(string domain, string? unavailableTag)
     {
         var zone = routing?.Zones.FirstOrDefault(zone => zone.Matches(domain));
-        return zone is null ? DefaultTag : zone.Resolver is { } resolver ? tags[resolver] : null;
+        return zone is null ? DefaultTag ?? unavailableTag : zone.Resolver is { } resolver ? tags[resolver] : null;
     }
 }
 

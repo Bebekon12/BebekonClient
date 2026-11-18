@@ -14,9 +14,8 @@ public static class PresetCatalog
     // Compare against the existing profile, preserving intentional duplicates within the screenshot preset.
     public static int Apply(Preset preset, Profile profile)
     {
-        static string Signature(RoutingRule r) => $"{r.Kind}|{r.UseVpn}|{r.ServerId}|{string.Join('\n', r.Values).ToLowerInvariant()}";
-        var existing = profile.Rules.Select(Signature).ToHashSet(StringComparer.Ordinal);
-        var added = preset.CreateRules().Where(r => !existing.Contains(Signature(r))).ToList();
+        var existing = profile.Rules.Select(RoutingPolicy.RuleSignature).ToHashSet(StringComparer.Ordinal);
+        var added = preset.CreateRules().Where(r => !existing.Contains(RoutingPolicy.RuleSignature(r))).ToList();
         foreach (var rule in added) RuleValidation.Validate(rule);
         // Exceptions go before broad service sets already present in the profile.
         var directIndex = 0;

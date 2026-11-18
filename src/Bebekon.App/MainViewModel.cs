@@ -238,10 +238,14 @@ public sealed partial class MainViewModel : Observable, IDisposable
                 try { var (servers, info) = await SubscriptionLoader.LoadWithInfoAsync(item.Source, lifetime.Token); var sub = new Subscription { Name = item.Name, Source = item.Source, Hidden = item.Hidden }; sub.Apply(info); Data.Subscriptions.Add(sub); ReplaceServers(sub, servers); added++; }
                 catch (Exception e) when (e is UserError or HttpRequestException or OperationCanceledException && !lifetime.IsCancellationRequested) { failed++; }
             }
-            static string Signature(RoutingRule r) => $"{r.Kind}|{r.UseVpn}|{string.Join('\n', r.Values).ToLowerInvariant()}";
-            var existing = ActiveProfile.Rules.Select(Signature).ToHashSet();
-            var rules = data.Rules.Where(r => existing.Add(Signature(r))).ToList();
+            var existing = ActiveProfile.Rules.Select(RoutingPolicy.RuleSignature).ToHashSet(StringComparer.Ordinal);
+            var rules = data.Rules.Where(r => existing.Add(RoutingPolicy.RuleSignature(r))).ToList();
             foreach (var rule in rules) ActiveProfile.Rules.Add(rule);
+            if (data.DefaultRoute is { } defaultRoute)
+            {
+                ActiveProfile.DefaultRoute = defaultRoute;
+                Notify(nameof(IsWholePc)); Notify(nameof(ModeLabel)); Notify(nameof(StatusDetail));
+            }
             if (data.Settings is { } settings && settings.Mtu is >= 1280 and <= 9000)
                 foreach (var property in typeof(Settings).GetProperties().Where(p => p.CanWrite && p.Name != nameof(Settings.DesignVersion))) property.SetValue(Settings, property.GetValue(settings));
             Save(); if (rules.Count > 0) RulesChanged(); else QueueApply();

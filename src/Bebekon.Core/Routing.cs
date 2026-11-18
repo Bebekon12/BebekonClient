@@ -25,6 +25,17 @@ public static class RuleValidation
         if (!Enum.IsDefined(rule.Kind) || string.IsNullOrWhiteSpace(rule.Name) || rule.Name.Length > 160 || rule.Values.Count is < 1 or > 500) throw new UserError("Укажите название и адрес правила.");
         if (!Enum.IsDefined(rule.Target)) throw new UserError("Неизвестное направление правила.");
         if (rule.ServerId is { } serverId && (serverId.Length is < 1 or > 128 || serverId.Any(char.IsControl))) throw new UserError("Некорректный сервер правила.");
+        if (rule.Port is < 1 or > 65535 || rule.Transport is { } transport && !Enum.IsDefined(transport))
+            throw new UserError("Укажите TCP или UDP и порт от 1 до 65535.");
+        if (rule.AllowedRoutes?.Any(target => !Enum.IsDefined(target)) == true ||
+            rule.ForbiddenRoutes?.Any(target => !Enum.IsDefined(target)) == true || !rule.Allows(rule.Target))
+            throw new UserError("Выбранный маршрут запрещён политикой правила.");
+        if (rule.UnavailableRoute is { } alternative && (alternative != RouteTarget.Block &&
+            (alternative != RouteTarget.Direct || rule.Target != RouteTarget.NetBird || !rule.Allows(alternative))))
+            throw new UserError("Резервный Direct можно назначить только для правила NetBird, которое разрешает Direct.");
+        if (rule.FallbackServerIds is { Count: > 0 } backup &&
+            (rule.Target != RouteTarget.Vpn || backup.Count > 8 || backup.Any(id => string.IsNullOrWhiteSpace(id) || id.Length > 128 || id.Any(char.IsControl))))
+            throw new UserError("Укажите до восьми резервных серверов Bebekon VPN.");
         for (var i = 0; i < rule.Values.Count; i++)
         {
             var v = rule.Values[i].Trim();
@@ -44,7 +55,11 @@ public static class RuleValidation
                 case RuleKind.Network:
                     var p = v.Split('/');
                     if (p.Length > 2 || !IPAddress.TryParse(p[0], out var ip) || p.Length == 2 && (!int.TryParse(p[1], out var prefix) || prefix < 0 || prefix > (ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork ? 32 : 128))) throw new UserError("Укажите IP или подсеть, например 192.168.1.0/24.");
-                    if (p.Length == 1) v += ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork ? "/32" : "/128";
+                    var address = ip.GetAddressBytes();
+                    var bits = p.Length == 1 ? address.Length * 8 : int.Parse(p[1], CultureInfo.InvariantCulture);
+                    for (var part = 0; part < address.Length; part++)
+                        address[part] &= (byte)(0xff << (8 - Math.Clamp(bits - part * 8, 0, 8)));
+                    v = $"{new IPAddress(address)}/{bits}";
                     break;
                 case RuleKind.GeoSite:
                 case RuleKind.GeoIp:
@@ -75,6 +90,21 @@ public static class ProfileCodec
 public sealed record ConnectSpec(Server Server, Profile Profile, Settings Settings, int ProbePort, string ProbePassword, List<Server>? RuleServers = null, int OriginProbePort = 0, List<Server>? AutoServers = null, string? NetBirdPeer = null)
 {
     [JsonIgnore] public NetBirdRouting? NetBird { get; init; }
+
+    internal IEnumerable<Server> ResolveRuleServers()
+    {
+        var required = Profile.VpnServerIds.Where(id => id != Server.Id).Take(65).ToArray();
+        if (required.Length > 64) throw new UserError("В одном профиле можно использовать до 64 дополнительных серверов.");
+        foreach (var id in required)
+        {
+            var matches = RuleServers?.Where(node => node.Id == id).Take(2).ToArray() ?? [];
+            var pinned = Profile.ActiveRules.Any(rule => rule.Target == RouteTarget.Vpn &&
+                rule.ServerId == id && rule.FallbackServerIds is not { Count: > 0 });
+            if (matches.Length == 1 && (pinned || matches[0].Supported)) yield return matches[0];
+            else if (matches.Length > 1 || pinned)
+                throw new UserError("Сервер одного из правил недоступен. Измените правило или выберите «Авто».");
+        }
+    }
 }
 public static class ConfigGenerator
 {
@@ -105,14 +135,10 @@ public static class ConfigGenerator
         var serverTags = new Dictionary<string, string> { [s.Id] = "vpn" };
         if (!probeOnly)
         {
-            var required = spec.Profile.VpnServerIds.Where(id => id != s.Id).ToArray();
-            if (required.Length > 64) throw new UserError("В одном профиле можно использовать до 64 дополнительных серверов.");
-            foreach (var id in required)
+            foreach (var node in spec.ResolveRuleServers())
             {
-                var nodes = spec.RuleServers?.Where(n => n.Id == id).ToArray();
-                if (nodes is null || nodes.Length != 1) throw new UserError("Сервер одного из правил недоступен. Измените правило или выберите «Авто».");
                 var tag = "vpn-rule-" + serverTags.Count;
-                serverTags.Add(id, tag); outbounds.Add(Vpn(nodes[0], tag, runtime, trustTunnel)); dnsServers.Add(Dns(tag + "-dns", tag));
+                serverTags.Add(node.Id, tag); outbounds.Add(Vpn(node, tag, runtime, trustTunnel)); dnsServers.Add(Dns(tag + "-dns", tag));
             }
         }
         var inbounds = new JsonArray { new JsonObject { ["type"] = "mixed", ["tag"] = "vpn-probe", ["listen"] = "127.0.0.1", ["listen_port"] = spec.ProbePort, ["users"] = new JsonArray { new JsonObject { ["username"] = "bebekon", ["password"] = spec.ProbePassword } } } };
@@ -144,16 +170,23 @@ public static class ConfigGenerator
                 foreach (var value in rule.Values) if (setTags.Add(GeoCatalog.Tag(rule.Kind, value))) sets.Add(GeoCatalog.Inline(rule.Kind, value));
             if (rule.Target == RouteTarget.NetBird && rule.Kind == RuleKind.Site)
             {
-                foreach (var group in rule.Values.GroupBy(netBird.ForDomain))
+                foreach (var group in rule.Values.GroupBy(domain => netBird.ForDomain(domain, UnavailableTag(rule))))
                 {
-                    routes.Add(RouteAction(Match(rule, group), group.Key, false));
+                    routes.Add(RouteAction(Match(rule, group, forTraffic: true), group.Key, spec.Settings.TlsFragment));
                     dnsRules.Add(DnsAction(Match(rule, group), group.Key));
                 }
                 continue;
             }
-            var tag = rule.Target == RouteTarget.Vpn && rule.ServerId is { } serverId ? serverTags[serverId] : RouteTag(rule.Target, netBird);
-            routes.Add(RouteAction(Match(rule), tag, spec.Settings.TlsFragment));
-            if (rule.Kind is not (RuleKind.Network or RuleKind.GeoIp)) dnsRules.Add(DnsAction(Match(rule), tag));
+            var tag = rule.Target switch
+            {
+                RouteTarget.Vpn => VpnRuleTag(rule, serverTags, outbounds, dnsServers),
+                RouteTarget.NetBird => netBird.DefaultTag ?? UnavailableTag(rule),
+                _ => RouteTag(rule.Target, netBird)
+            };
+            routes.Add(RouteAction(Match(rule, forTraffic: true), tag, spec.Settings.TlsFragment));
+            if (rule.Kind is not (RuleKind.Network or RuleKind.GeoIp) &&
+                !(tag is null && (rule.Port is not null || rule.Transport is not null)))
+                dnsRules.Add(DnsAction(Match(rule), tag));
         }
         var finalTag = probeOnly ? "vpn" : RouteTag(spec.Profile.DefaultRoute, netBird);
         if (finalTag is null)
@@ -179,6 +212,24 @@ public static class ConfigGenerator
     public static List<Server> AutoServers(ConnectSpec spec) => spec.Settings.AutoServer && spec.AutoServers is { } servers
         ? servers.Prepend(spec.Server).Where(AutoEligible).DistinctBy(n => n.Id).Take(64).ToList() : [];
     public static bool AutoEligible(Server n) => n.Supported && n.Type != "trusttunnel" && n.Transport != "xhttp";
+    private static string? UnavailableTag(RoutingRule rule) =>
+        rule.UnavailableRoute == RouteTarget.Direct && rule.Allows(RouteTarget.Direct) ? "direct" : null;
+    private static string? VpnRuleTag(RoutingRule rule, IReadOnlyDictionary<string, string> serverTags, JsonArray outbounds, JsonArray dnsServers)
+    {
+        var primary = rule.ServerId is { } id ? serverTags.GetValueOrDefault(id) : "vpn";
+        if (rule.FallbackServerIds is not { Count: > 0 } backup) return primary;
+        var candidates = backup.Select(id => serverTags.GetValueOrDefault(id)).Prepend(primary)
+            .OfType<string>().Distinct(StringComparer.Ordinal).ToArray();
+        if (candidates.Length < 2) return candidates.FirstOrDefault();
+        var tag = $"vpn-fallback-{outbounds.Count}";
+        outbounds.Add(new JsonObject
+        {
+            ["type"] = "urltest", ["tag"] = tag, ["outbounds"] = Strings(candidates),
+            ["interval"] = "30s", ["tolerance"] = 5000, ["interrupt_exist_connections"] = true
+        });
+        dnsServers.Add(Dns(tag + "-dns", tag));
+        return tag;
+    }
     private static string? RouteTag(RouteTarget target, NetBirdConfig netBird) => target switch
     {
         RouteTarget.Direct => "direct",
@@ -211,7 +262,16 @@ public static class ConfigGenerator
         var vpn = new JsonObject { ["type"] = "socks", ["tag"] = tag, ["server"] = "127.0.0.1", ["server_port"] = bridge.Port, ["version"] = "5", ["username"] = "bebekon", ["password"] = bridge.Password, ["connect_timeout"] = "4s" };
         if (!s.UdpEnabled) vpn["network"] = "tcp"; return vpn;
     }
-    private static JsonObject Match(RoutingRule r, IEnumerable<string>? values = null)
+    private static JsonObject Match(RoutingRule r, IEnumerable<string>? values = null, bool forTraffic = false)
+    {
+        var match = MatchDestination(r, values);
+        if (forTraffic && r.Port is { } port) match["port"] = port;
+        if (forTraffic && r.Transport is { } transport) match["network"] = transport == RuleTransport.Tcp ? "tcp" : "udp";
+        // The application's destination port and protocol are unavailable to a DNS query.
+        return match;
+    }
+
+    private static JsonObject MatchDestination(RoutingRule r, IEnumerable<string>? values)
     {
         var key = r.Kind switch { RuleKind.Site => "domain_suffix", RuleKind.Contains => "domain_keyword", RuleKind.Network => "ip_cidr", _ => "process_name" };
         if (r.Kind is RuleKind.GeoSite or RuleKind.GeoIp) return new JsonObject { ["rule_set"] = Strings(r.Values.Select(v => GeoCatalog.Tag(r.Kind, v))) };

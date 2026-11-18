@@ -13,9 +13,7 @@ internal sealed class TrustTunnelRuntime
     internal static TrustTunnelRuntime? Create(ConnectSpec spec, bool probeOnly, XhttpRuntime? xhttp)
     {
         var nodes = new List<Server> { spec.Server };
-        if (!probeOnly)
-            foreach (var id in spec.Profile.VpnServerIds.Where(id => id != spec.Server.Id))
-            { var matches = spec.RuleServers?.Where(s => s.Id == id).ToArray(); if (matches?.Length != 1) throw new UserError("Сервер правила недоступен."); nodes.Add(matches[0]); }
+        if (!probeOnly) nodes.AddRange(spec.ResolveRuleServers());
         var selected = nodes.Where(s => s.Type == "trusttunnel").ToArray(); if (selected.Length == 0) return null;
         if (selected.Length > 8) throw new UserError("В одном подключении можно использовать до 8 серверов TrustTunnel.");
         var used = new HashSet<int> { spec.ProbePort, spec.OriginProbePort, 17890 };

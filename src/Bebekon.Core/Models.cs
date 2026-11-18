@@ -14,6 +14,7 @@ public abstract class Observable : INotifyPropertyChanged
     public void Notify([CallerMemberName] string? name = null) => PropertyChanged?.Invoke(this, new(name));
 }
 public enum RouteTarget { Direct, Vpn, NetBird, Block }
+public enum RuleTransport { Tcp, Udp }
 public enum RuleKind { Site, Contains, Application, Network, GeoSite, GeoIp }
 public enum LatencyQuality { Unknown, Good, Moderate, Poor }
 public static class LatencyDisplay
@@ -105,6 +106,12 @@ public sealed class RoutingRule : Observable
     public RuleKind Kind { get; set; }
     public List<string> Values { get; set; } = [];
     public string? ServerId { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public RuleTransport? Transport { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public int? Port { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public RouteTarget[]? AllowedRoutes { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public RouteTarget[]? ForbiddenRoutes { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public List<string>? FallbackServerIds { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public RouteTarget? UnavailableRoute { get; set; }
     private bool useVpn = true;
     private bool enabled = true;
     private RouteTarget? destination;
@@ -127,6 +134,9 @@ public sealed class RoutingRule : Observable
         set { if (Set(ref destination, value)) NotifyRoute(); }
     }
     [JsonIgnore] public RouteTarget Target => destination ?? (useVpn ? RouteTarget.Vpn : RouteTarget.Direct);
+    public bool Allows(RouteTarget route) => route == RouteTarget.Block ||
+        ((AllowedRoutes is not { Length: > 0 } || AllowedRoutes.Contains(route)) &&
+         ForbiddenRoutes?.Contains(route) != true);
     [JsonIgnore] public string RouteLabel => Target switch
     {
         RouteTarget.Vpn => "Bebekon VPN",
@@ -154,8 +164,9 @@ public sealed class Profile : Observable
     [JsonIgnore] public IEnumerable<RoutingRule> ActiveRules => Rules.Where(rule => rule.Enabled);
     [JsonIgnore] public bool UsesNetBird => DefaultRoute == RouteTarget.NetBird || ActiveRules.Any(rule => rule.Target == RouteTarget.NetBird);
     [JsonIgnore] public IEnumerable<string> VpnServerIds => ActiveRules
-        .Where(rule => rule.Target == RouteTarget.Vpn && rule.ServerId is not null)
-        .Select(rule => rule.ServerId!).Distinct(StringComparer.Ordinal);
+        .Where(rule => rule.Target == RouteTarget.Vpn)
+        .SelectMany(rule => new[] { rule.ServerId }.OfType<string>().Concat(rule.FallbackServerIds ?? []))
+        .Distinct(StringComparer.Ordinal);
 }
 public sealed class Subscription : Observable
 {

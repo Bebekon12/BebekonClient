@@ -4,7 +4,7 @@ using System.Text.Json.Nodes;
 namespace Bebekon.Core;
 
 public sealed record BackupSubscription(string Name, string Source, bool Hidden);
-public sealed record BackupData(List<BackupSubscription> Subscriptions, List<RoutingRule> Rules, Settings? Settings, int Skipped);
+public sealed record BackupData(List<BackupSubscription> Subscriptions, List<RoutingRule> Rules, Settings? Settings, int Skipped, RouteTarget? DefaultRoute = null);
 
 /// <summary>
 /// A backup file shared with the Android client. Subscriptions keep only their source, so
@@ -23,9 +23,26 @@ public static class BackupCodec
         ["subscriptions"] = new JsonArray(state.Subscriptions.Where(s => s.Source.Length > 0)
             .Select(s => (JsonNode?)new JsonObject { ["name"] = s.Name, ["source"] = s.Source, ["hidden"] = s.Hidden }).ToArray()),
         // Priority order: the first matching rule wins, as on Windows.
-        ["rules"] = new JsonArray(profile.Rules.Select(r => (JsonNode?)new JsonObject { ["name"] = r.Name, ["kind"] = Kinds[r.Kind], ["values"] = new JsonArray(r.Values.Select(v => (JsonNode?)JsonValue.Create(v)).ToArray()), ["vpn"] = r.UseVpn }).ToArray()),
+        ["rules"] = new JsonArray(profile.Rules.Select(r => (JsonNode?)ExportRule(r)).ToArray()),
+        ["windowsDefaultRoute"] = JsonSerializer.SerializeToNode(profile.DefaultRoute, Json.Options),
         ["windowsSettings"] = JsonSerializer.SerializeToNode(state.Settings, Json.Options),
     }.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
+
+    private static JsonObject ExportRule(RoutingRule rule)
+    {
+        if (!rule.Enabled || rule.Target is RouteTarget.NetBird or RouteTarget.Block || rule.Port is not null ||
+            rule.Transport is not null || rule.AllowedRoutes is not null || rule.ForbiddenRoutes is not null ||
+            rule.FallbackServerIds is { Count: > 0 } || rule.UnavailableRoute is not null)
+        {
+            // Other clients skip unknown kinds and never activate a reduced form of a Windows policy.
+            return new() { ["kind"] = "windowsPolicy", ["policy"] = JsonSerializer.SerializeToNode(rule, Json.Options) };
+        }
+        return new()
+        {
+            ["name"] = rule.Name, ["kind"] = Kinds[rule.Kind], ["vpn"] = rule.Target == RouteTarget.Vpn,
+            ["values"] = new JsonArray(rule.Values.Select(value => (JsonNode?)JsonValue.Create(value)).ToArray())
+        };
+    }
 
     public static BackupData Import(string text)
     {
@@ -47,6 +64,14 @@ public static class BackupCodec
         {
             try
             {
+                if ((string?)r?["kind"] == "windowsPolicy")
+                {
+                    var policy = r["policy"]?.Deserialize<RoutingRule>(Json.Options) ?? throw new UserError("Не указана политика правила.");
+                    RuleValidation.Validate(policy);
+                    policy.Id = Guid.NewGuid().ToString("N");
+                    rules.Add(policy);
+                    continue;
+                }
                 var kind = Kinds.FirstOrDefault(k => k.Value == (string?)r?["kind"]).Key;
                 if (r?["kind"] is null || !Kinds.ContainsValue((string)r["kind"]!)) { skipped++; continue; }
                 var values = (r["values"] as JsonArray ?? []).Select(v => ((string?)v)?.Trim() ?? "").Where(v => v.Length > 0).ToList();
@@ -54,10 +79,16 @@ public static class BackupCodec
                 var rule = new RoutingRule { CreatedAt = DateTimeOffset.UtcNow, Name = name.Length > 0 ? name[..Math.Min(160, name.Length)] : values.FirstOrDefault() ?? "Правило", Kind = kind, Values = values, UseVpn = r["vpn"]?.GetValueKind() != JsonValueKind.False };
                 RuleValidation.Validate(rule); rules.Add(rule);
             }
-            catch (Exception e) when (e is UserError or InvalidOperationException or FormatException) { skipped++; }
+            catch (Exception e) when (e is UserError or InvalidOperationException or FormatException or JsonException or NullReferenceException) { skipped++; }
         }
         Settings? settings = null;
         try { settings = o["windowsSettings"]?.Deserialize<Settings>(Json.Options); } catch (JsonException) { }
-        return new(subscriptions, rules, settings, skipped);
+        RouteTarget? defaultRoute = null;
+        try
+        {
+            if (o["windowsDefaultRoute"]?.Deserialize<RouteTarget>(Json.Options) is { } route && Enum.IsDefined(route)) defaultRoute = route;
+        }
+        catch (JsonException) { }
+        return new(subscriptions, rules, settings, skipped, defaultRoute);
     }
 }
