@@ -18,6 +18,8 @@ public static class I18n
         ("ProfileNameLabel","Профиль","Profile"),
         ("Unmatched","Остальной трафик","Other traffic"),
         ("NetBirdIntegration","Дополнительные клиенты · NetBird","Additional clients · NetBird"),
+        ("ScanOnOpen","Проверять задержку при открытии списка серверов","Check latency when opening Servers"),
+        ("ScanOnOpenHelp","Проверить все видимые серверы в фоне. Запустить проверку вручную можно кнопкой с молнией.","Check all visible servers in the background. Use the lightning button to start a scan manually."),
         ("NetBirdIntegrationHelp","Добавить корпоративную сеть в маршруты и показывать её статус. При выключении правила NetBird блокируют соединения.","Add the corporate network to route choices and show its status. Disabled NetBird routes block connections."),
         ("Connections","Подключения","Connections"),("Protection","Защита","Protection"),("CheckRouteNow","Проверить маршрут","Check route"),
         ("DefaultDirection","Маршрут по умолчанию","Default route"),("RuleEnabled","Активность правила","Rule activity"),

@@ -40,7 +40,13 @@ import androidx.compose.ui.window.Dialog
             if (kind == RuleKind.APP) Button({ appPicker = true }, Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) { Icon(Icons.Outlined.Apps, null, Modifier.size(18.dp)); Text("Выбрать приложения", Modifier.padding(start = 6.dp)) }
             if (kind in listOf(RuleKind.GEOSITE, RuleKind.GEOIP)) Text(if (kind == RuleKind.GEOSITE) "youtube, telegram, openai, anthropic, discord, netflix, tiktok, google, twitch, whatsapp, instagram, facebook, twitter" else "ru, de, nl, se, fi, ee, lv, lt, pl, fr, gb, us, ua, kz, cn, telegram", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             OutlinedTextField(name, { name = it }, Modifier.fillMaxWidth(), label = { Text("Название — необязательно") }, shape = RoundedCornerShape(14.dp), singleLine = true)
-            Row(verticalAlignment = Alignment.CenterVertically) { Text(if (vpn) "Через VPN" else "Напрямую", Modifier.weight(1f), fontWeight = FontWeight.SemiBold); Switch(vpn, { vpn = it }) }
+            Text("Куда направить трафик", style = MaterialTheme.typography.labelLarge)
+            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                listOf("Через VPN", "Напрямую").forEachIndexed { index, label ->
+                    SegmentedButton(selected = vpn == (index == 0), onClick = { vpn = index == 0 },
+                        shape = SegmentedButtonDefaults.itemShape(index, 2)) { Text(label) }
+                }
+            }
             Text("Новые правила имеют приоритет. Изменения применяются к текущему соединению.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (error.isNotEmpty()) Text(error, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
         }

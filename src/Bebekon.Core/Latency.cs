@@ -12,7 +12,7 @@ public sealed class LatencyService(string executable)
 {
     private readonly ConcurrentDictionary<string, LatencyResult> cache = new();
     private readonly SemaphoreSlim fastLimit = new(6);
-    private readonly SemaphoreSlim exactLimit = new(6);
+    private readonly SemaphoreSlim exactLimit = new(2);
     public static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(5);
     // Process launch, config check and antivirus scans are not network latency. They get their
     // own budget, so several parallel checks no longer report a reachable server as a timeout.

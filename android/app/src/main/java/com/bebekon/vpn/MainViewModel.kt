@@ -32,7 +32,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             catch (_: Exception) { SiteCheck(direct = "Не удалось проверить адрес", vpn = "Не удалось проверить адрес") }
         }
     }
-    private val pingLimit = Semaphore(4)
+    private val tcpPingLimit = Semaphore(4)
+    private val httpsPingLimit = Semaphore(2)
     private val pingJobs = mutableMapOf<String, Job>()
     init {
         viewModelScope.launch { saved.collect { origin.enabled(it.preferences.mapLocation) } }
@@ -135,7 +136,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
         VpnController.reload(getApplication()); message.value = "Сохранено правил приложений: ${actions.size}"
     }
-    fun saveRule(rule: Rule) = task { CoreConfig.validateRule(rule); if (rule.kind in listOf(RuleKind.GEOSITE, RuleKind.GEOIP)) rule.values.forEach { repo.geo((if (rule.kind == RuleKind.GEOSITE) "geosite-" else "geoip-") + it) }; repo.update { it.copy(rules = it.rules.filterNot { r -> r.id == rule.id } + rule) }; VpnController.reload(getApplication()) }
+    fun saveRule(rule: Rule) = task { CoreConfig.validateRule(rule); if (rule.kind in listOf(RuleKind.GEOSITE, RuleKind.GEOIP)) rule.values.forEach { repo.geo((if (rule.kind == RuleKind.GEOSITE) "geosite-" else "geoip-") + it) }; repo.update { state ->
+            val index = state.rules.indexOfFirst { it.id == rule.id }
+            val rules = state.rules.toMutableList()
+            if (index < 0) rules.add(rule) else rules[index] = rule.copy(created = rules[index].created)
+            state.copy(rules = rules)
+        }; VpnController.reload(getApplication()) }
     fun removeRule(id: String) = task { repo.update { it.copy(rules = it.rules.filterNot { r -> r.id == id }) }; VpnController.reload(getApplication()) }
     fun preset(rules: List<Rule>) = task { repo.update { state -> val signatures = state.rules.map { "${it.kind}|${it.vpn}|${it.values.joinToString()}" }.toSet(); val additions = rules.filter { "${it.kind}|${it.vpn}|${it.values.joinToString()}" !in signatures }; state.copy(rules = state.rules + additions.mapIndexed { i, r -> r.copy(created = System.currentTimeMillis() + i) }) }; VpnController.reload(getApplication()); message.value = "Готовые правила добавлены" }
     fun ping(node: Node) { if (pingJobs[node.id]?.isActive == true || node.unsupported.isNotEmpty()) return
@@ -144,7 +150,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val target = preferences.pingTarget
         repo.pings.value = repo.pings.value + (node.id to (repo.pings.value[node.id] ?: PingResult(method = method)).copy(running = true, queued = true))
         pingJobs[node.id] = viewModelScope.launch {
-            pingLimit.withPermit {
+            val limit = if (method == PingMethod.TCP) tcpPingLimit else httpsPingLimit
+            limit.withPermit {
                 repo.pings.value = repo.pings.value + (node.id to (repo.pings.value[node.id] ?: PingResult(method = method)).copy(running = true, queued = false))
                 val result = withContext(Dispatchers.IO) { runCatching {
                     if (method == PingMethod.TCP) {

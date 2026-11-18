@@ -118,8 +118,18 @@ public sealed partial class MainViewModel : Observable, IDisposable
             "System protection takes precedence. Drag rows to change the order within each group.");
     private int sortIndex;
     public int SortIndex { get => sortIndex; set { if (Set(ref sortIndex, value)) RefreshServers(); } }
+    public bool ScanOnOpen
+    {
+        get => Settings.ScanOnOpen;
+        set
+        {
+            if (value == Settings.ScanOnOpen) return;
+            Settings.ScanOnOpen = value;
+            Save(); Notify();
+        }
+    }
     private int latencyIndex = 1;
-    public int LatencyIndex { get => latencyIndex; set { if (value is < 0 or > 3) return; if (Set(ref latencyIndex, value)) { latencyGeneration++; scan?.Cancel(); Settings.LatencyMode = (LatencyMode)value; Save(); foreach (var s in Data.Servers) { s.Latency = "—"; s.LatencyMs = null; } RefreshServers(); if (PageName == "Servers") _ = ScanSafelyAsync(); } } }
+    public int LatencyIndex { get => latencyIndex; set { if (value is < 0 or > 3) return; if (Set(ref latencyIndex, value)) { latencyGeneration++; scan?.Cancel(); Settings.LatencyMode = (LatencyMode)value; Save(); foreach (var s in Data.Servers) { s.Latency = "—"; s.LatencyMs = null; } RefreshServers(); if (ScanOnOpen && PageName == "Servers") _ = ScanSafelyAsync(); } } }
     private bool listMode = true;
     public bool ListMode { get => listMode; set { if (Set(ref listMode, value)) { Notify(nameof(SecondColumn)); RefreshServers(); } } }
     public GridLength SecondColumn => new(ListMode ? 0 : 1, GridUnitType.Star);
@@ -261,7 +271,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
             if (data.Settings is { } settings && settings.Mtu is >= 1280 and <= 9000)
                 foreach (var property in typeof(Settings).GetProperties().Where(p => p.CanWrite && p.Name != nameof(Settings.DesignVersion))) property.SetValue(Settings, property.GetValue(settings));
             MigrateIntegrations();
-            Notify(nameof(NetBirdEnabled)); Notify(nameof(RouteChoices)); Notify(nameof(EmptyRulesDetail));
+            Notify(nameof(NetBirdEnabled)); Notify(nameof(RouteChoices)); Notify(nameof(EmptyRulesDetail)); Notify(nameof(ScanOnOpen));
             Save(); if (rules.Count > 0) RulesChanged(); else QueueApply();
             Banner = T($"Восстановлено подписок: {added}, правил: {rules.Count}", $"Restored subscriptions: {added}, rules: {rules.Count}") + (failed > 0 ? T($" · не удалось: {failed}", $" · failed: {failed}") : "");
         });
@@ -358,7 +368,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
         scanGeneration++; scan?.Cancel(); PageName = name; Page = name switch { "Servers" => new ServersPage(this), "Rules" => new RulesPage(this), "Subscriptions" => new SubscriptionsPage(this), "Settings" => new SettingsPage(this), "Connections" => new ConnectionsPage(this), "Protection" => new ProtectionPage(this), _ => new HomePage(this) };
         if (liveEnvironment && name == "Connections") RefreshConnections.Execute(null);
         if (liveEnvironment && name == "Protection") RefreshProtection.Execute(null);
-        if (name == "Servers" && Data.Servers.Count > 0) _ = ScanSafelyAsync();
+        if (ScanOnOpen && name == "Servers" && Data.Servers.Count > 0) _ = ScanSafelyAsync();
     }
     private async Task ScanSafelyAsync()
     {
