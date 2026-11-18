@@ -13,13 +13,41 @@ public sealed record WfpBlockEvent(DateTimeOffset Timestamp, string? Address, in
 public sealed partial class KillSwitch
 {
     /// <summary>Tests the system filtering mechanism with fresh sockets and a loopback-only rule.</summary>
-    public static async Task<WfpTestResult[]> TestLocalFilteringAsync(CancellationToken ct)
+    public static Task<WfpTestResult[]> TestLocalFilteringAsync(CancellationToken ct)
+        => TestLoopbackAsync(new RoutingRule
+        {
+            Name = "Bebekon local WFP fixture", Kind = RuleKind.Application,
+            Values = [Environment.ProcessPath!], SystemProtection = true
+        }, ct);
+
+    public static Task<WfpTestResult[]> TestInstalledRuleAsync(RoutingRule rule, CancellationToken ct)
+        => TestInstalledRuleAsync(PolicyProvider, rule, ct);
+
+    internal static async Task<WfpTestResult[]> TestInstalledRuleAsync(Guid provider, RoutingRule rule, CancellationToken ct)
+    {
+        RuleValidation.Validate(rule);
+        if (!rule.Enabled || !rule.SystemProtection) throw new UserError("У правила нет активной системной защиты.");
+        var scope = rule.SystemScope();
+        if (!ScopeIsInstalled(provider, scope)) throw new UserError("Фильтры выбранного правила не найдены в действующей политике WFP.");
+        var result = await TestLoopbackAsync(scope, ct);
+        if (!ScopeIsInstalled(provider, scope))
+            return result.Select(check => check with { Outcome = WfpTestOutcome.Unverified, Detail = "Действующая политика изменилась во время теста." }).ToArray();
+        return result;
+    }
+
+    private static async Task<WfpTestResult[]> TestLoopbackAsync(RoutingRule scope, CancellationToken ct)
     {
         var results = new List<WfpTestResult>();
-        foreach (var address in new[] { IPAddress.Loopback, IPAddress.IPv6Loopback })
-            foreach (var transport in new[] { RuleTransport.Tcp, RuleTransport.Udp })
+        var addresses = new[] { IPAddress.Loopback, IPAddress.IPv6Loopback };
+        if (scope is { Kind: RuleKind.Network })
+        {
+            var families = scope.Values.Select(value => IPNetwork.Parse(value).BaseAddress.AddressFamily).ToHashSet();
+            addresses = addresses.Where(address => families.Contains(address.AddressFamily)).ToArray();
+        }
+        foreach (var address in addresses)
+            foreach (var transport in scope.Transport is { } limited ? [limited] : new[] { RuleTransport.Tcp, RuleTransport.Udp })
             {
-                try { results.Add(await TestEndpointAsync(address, transport, ct)); }
+                try { results.Add(await TestEndpointAsync(address, transport, scope, ct)); }
                 catch (SocketException)
                 {
                     var family = address.AddressFamily == AddressFamily.InterNetwork ? "IPv4" : "IPv6";
@@ -29,12 +57,12 @@ public sealed partial class KillSwitch
         return results.ToArray();
     }
 
-    private static async Task<WfpTestResult> TestEndpointAsync(IPAddress address, RuleTransport transport, CancellationToken ct)
+    private static async Task<WfpTestResult> TestEndpointAsync(IPAddress address, RuleTransport transport, RoutingRule scope, CancellationToken ct)
     {
         var family = address.AddressFamily == AddressFamily.InterNetwork ? "IPv4" : "IPv6";
         var tcp = transport == RuleTransport.Tcp;
         var protocol = tcp ? ProtocolType.Tcp : ProtocolType.Udp;
-        using var listener = new Socket(address.AddressFamily, tcp ? SocketType.Stream : SocketType.Dgram, protocol);
+        using var listener = new Socket(address.AddressFamily, tcp ? SocketType.Stream : SocketType.Dgram, protocol) { ExclusiveAddressUse = true };
         listener.Bind(new IPEndPoint(address, 0));
         if (tcp) listener.Listen(4);
         var target = (IPEndPoint)listener.LocalEndPoint!;
@@ -57,7 +85,13 @@ public sealed partial class KillSwitch
         var source = (IPEndPoint)probe.LocalEndPoint!;
         try
         {
-            using var filter = BlockProbe(source, target, protocol, out var id);
+            using var filter = InstallProbePolicy(target, protocol, scope, out var id, out var permit);
+            using var available = ProbeSocket();
+            if (!await ReachesReceiverAsync(available, listener, target, tcp, ct))
+                return new(family, transport, WfpTestOutcome.Unverified, null, true, "Контрольный маршрут изолированной пробы недоступен.");
+            // Withdraw only the permit for this receiver. The scoped deny and every production
+            // filter remain in effect while the client attempts its fallback connection.
+            InTransaction(filter.engine, () => Check(FwpmFilterDeleteById0(filter.engine, permit), "FwpmFilterDeleteById0"));
             var started = DateTime.UtcNow.ToFileTimeUtc();
             reachedWhileBlocked = await ReachesReceiverAsync(probe, listener, target, tcp, ct);
             if (!reachedWhileBlocked)
@@ -111,23 +145,32 @@ public sealed partial class KillSwitch
         catch (OperationCanceledException) when (!ct.IsCancellationRequested) { return false; }
     }
 
-    private static KillSwitch BlockProbe(IPEndPoint source, IPEndPoint target, ProtocolType protocol, out ulong filterId)
+    private static KillSwitch InstallProbePolicy(IPEndPoint target, ProtocolType protocol, RoutingRule scope,
+        out ulong filterId, out ulong permitId)
     {
         using var memory = new NativeMemory();
         var engine = OpenEngine(memory, dynamic: true);
         try
         {
-            ulong id = 0;
+            ulong id = 0, allow = 0;
             InTransaction(engine, () =>
             {
                 var sublayer = AddSublayer(memory, engine, IntPtr.Zero);
                 var v4 = target.AddressFamily == AddressFamily.InterNetwork;
-                id = AddFilter(memory, engine, sublayer, v4 ? ConnectV4 : ConnectV6, 15, ActionBlock, "Bebekon local WFP diagnostic",
-                    [memory.App(Environment.ProcessPath!), NetworkCondition(memory, RemoteAddress, new(target.Address, v4 ? 32 : 128)),
-                     new(RemotePort, MatchEqual, TypeUInt16, target.Port), new(LocalPort, MatchEqual, TypeUInt16, source.Port),
-                     new(IpProtocol, MatchEqual, TypeUInt8, (byte)protocol)]);
+                var layer = v4 ? ConnectV4 : ConnectV6;
+                var conditions = new List<Condition>
+                {
+                    memory.App(Environment.ProcessPath!),
+                    NetworkCondition(memory, RemoteAddress, new(target.Address, v4 ? 32 : 128)),
+                    new(RemotePort, MatchEqual, TypeUInt16, target.Port),
+                    new(IpProtocol, MatchEqual, TypeUInt8, (byte)protocol)
+                };
+                id = AddScopeBlock(memory, engine, sublayer, layer, scope, conditions, IntPtr.Zero);
+                allow = AddFilter(memory, engine, sublayer, layer, 14, ActionPermit, "Bebekon local allowed route",
+                    [.. conditions, new(Flags, MatchFlagsAllSet, TypeUInt32, FlagIsLoopback)]);
             });
             filterId = id;
+            permitId = allow;
             return new(engine, [id]);
         }
         catch { FwpmEngineClose0(engine); throw; }
@@ -253,4 +296,5 @@ public sealed partial class KillSwitch
     [DllImport("fwpuclnt.dll")] private static extern uint FwpmNetEventCreateEnumHandle0(IntPtr engine, IntPtr template, out IntPtr enumerator);
     [DllImport("fwpuclnt.dll")] private static extern uint FwpmNetEventEnum0(IntPtr engine, IntPtr enumerator, uint limit, out IntPtr entries, out uint copied);
     [DllImport("fwpuclnt.dll")] private static extern uint FwpmNetEventDestroyEnumHandle0(IntPtr engine, IntPtr enumerator);
+    [DllImport("fwpuclnt.dll")] private static extern uint FwpmFilterDeleteById0(IntPtr engine, ulong id);
 }

@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Net;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
+using System.Security.AccessControl;
 
 namespace Bebekon.Core;
 
@@ -21,6 +22,7 @@ public sealed partial class KillSwitch : IDisposable
     private static readonly Guid ConnectV4 = new("c38d57d1-05a7-4c33-904f-7fbceee60e82");
     private static readonly Guid ConnectV6 = new("4a72393b-319f-44bc-84c3-ba54dcb3b6b4");
     private static readonly Guid AppId = new("d78e1e87-8644-4ea5-9437-d809ecefc971");
+    private static readonly Guid UserId = new("af043a0a-b34d-4f86-979c-c90371af6e66");
     private static readonly Guid LocalAddress = new("d9ee00de-c1ef-4617-bfe3-ffd8f5a08957");
     private static readonly Guid LocalInterface = new("4cd62a49-59c3-4969-b7f3-bda5d32890a4");
     private static readonly Guid RemoteAddress = new("b235ae9a-1d64-49b8-a44c-5ff3d9095045");
@@ -30,7 +32,8 @@ public sealed partial class KillSwitch : IDisposable
     private static readonly Guid Flags = new("632ce23b-5167-435c-86d7-e903684aa80c");
 
     private const uint MatchEqual = 0, MatchFlagsAllSet = 6;
-    private const uint TypeUInt8 = 1, TypeUInt16 = 2, TypeUInt32 = 3, TypeUInt64 = 4, TypeByteBlob = 12, TypeV4Mask = 0x100, TypeV6Mask = 0x101;
+    private const uint TypeUInt8 = 1, TypeUInt16 = 2, TypeUInt32 = 3, TypeUInt64 = 4, TypeByteBlob = 12,
+        TypeSecurityDescriptor = 14, TypeV4Mask = 0x100, TypeV6Mask = 0x101;
     private const uint ActionBlock = 0x1001, ActionPermit = 0x1002;
     private const uint FlagIsLoopback = 1, SessionDynamic = 1, AuthnWinNt = 10;
 
@@ -105,6 +108,25 @@ public sealed partial class KillSwitch : IDisposable
     private static Condition[] ReadAppConditions(NativeMemory memory, IEnumerable<string> executables) =>
         executables.Where(File.Exists).Distinct(StringComparer.OrdinalIgnoreCase).Select(memory.App).ToArray();
 
+    private static void AddTransportPermits(NativeMemory memory, IntPtr engine, Guid sublayer, Guid layer, IntPtr provider,
+        Condition[] apps)
+    {
+        if (apps.Length == 0) return;
+        // WFP evaluates the descriptor using FWP_ACTRL_MATCH_FILTER (0x1).
+        // The same executable launched interactively cannot inherit the service exemption.
+        var descriptor = new RawSecurityDescriptor("D:(A;;0x1;;;SY)");
+        var bytes = new byte[descriptor.BinaryLength];
+        descriptor.GetBinaryForm(bytes, 0);
+        var buffer = memory.Alloc(bytes.Length);
+        Marshal.Copy(bytes, 0, buffer, bytes.Length);
+        var blob = memory.Alloc(16);
+        Marshal.WriteInt32(blob, bytes.Length);
+        Marshal.WriteIntPtr(blob + 8, buffer);
+        var system = new Condition(UserId, MatchEqual, TypeSecurityDescriptor, blob.ToInt64());
+        foreach (var app in apps)
+            AddFilter(memory, engine, sublayer, layer, 15, ActionPermit, "VPN service transports", [app, system], provider);
+    }
+
     private static void AddGlobalFilters(NativeMemory memory, IntPtr engine, Guid sublayer, IntPtr provider,
         Condition[] apps, NetBirdRouting? netBird, bool requireTunnelInterface, bool permitTunnel, List<ulong> blocked)
     {
@@ -113,7 +135,7 @@ public sealed partial class KillSwitch : IDisposable
         foreach (var v4 in new[] { true, false })
         {
             var layer = v4 ? ConnectV4 : ConnectV6;
-            foreach (var app in apps) AddFilter(memory, engine, sublayer, layer, 15, ActionPermit, "VPN transports", [app], provider);
+            AddTransportPermits(memory, engine, sublayer, layer, provider, apps);
             AddFilter(memory, engine, sublayer, layer, 14, ActionPermit, "Loopback", [new(Flags, MatchFlagsAllSet, TypeUInt32, FlagIsLoopback)], provider);
             if (permitTunnel && (!requireTunnelInterface || tunnel is not null))
             {
@@ -167,7 +189,7 @@ public sealed partial class KillSwitch : IDisposable
     }
 
     private static ulong AddFilter(NativeMemory memory, IntPtr engine, Guid sublayer, Guid layer, byte weight, uint action,
-        string name, IReadOnlyList<Condition> conditions, IntPtr provider = default)
+        string name, IReadOnlyList<Condition> conditions, IntPtr provider = default, byte[]? policyFingerprint = null)
     {
         // FWPM_FILTER_CONDITION0: fieldKey@0, matchType@16, conditionValue{type@24, value@32}; 40 bytes.
         var array = conditions.Count == 0 ? IntPtr.Zero : memory.Alloc(40 * conditions.Count);
@@ -185,6 +207,13 @@ public sealed partial class KillSwitch : IDisposable
         {
             Marshal.WriteInt32(filter + 32, 1); // FWPM_FILTER_FLAG_PERSISTENT
             Marshal.WriteIntPtr(filter + 40, provider);
+        }
+        if (policyFingerprint is { Length: > 0 })
+        {
+            var data = memory.Alloc(policyFingerprint.Length);
+            Marshal.Copy(policyFingerprint, 0, data, policyFingerprint.Length);
+            Marshal.WriteInt32(filter + 48, policyFingerprint.Length);
+            Marshal.WriteIntPtr(filter + 56, data);
         }
         WriteGuid(filter + 64, layer); WriteGuid(filter + 80, sublayer);
         Marshal.WriteInt32(filter + 96, (int)TypeUInt8); Marshal.WriteInt64(filter + 104, weight);

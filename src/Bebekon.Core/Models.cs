@@ -113,6 +113,7 @@ public sealed class RoutingRule : Observable
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public List<string>? FallbackServerIds { get; set; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public RouteTarget? UnavailableRoute { get; set; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public bool SystemProtection { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public List<string>? ProtectedExecutables { get; set; }
     private bool useVpn = true;
     private bool enabled = true;
     private RouteTarget? destination;
@@ -135,9 +136,18 @@ public sealed class RoutingRule : Observable
         set { if (Set(ref destination, value)) NotifyRoute(); }
     }
     [JsonIgnore] public RouteTarget Target => destination ?? (useVpn ? RouteTarget.Vpn : RouteTarget.Direct);
+    [JsonIgnore] public bool HasApplicationScope => SystemProtection && RuleValidation.IsDomainRule(Kind);
     public bool Allows(RouteTarget route) => route == RouteTarget.Block ||
         ((AllowedRoutes is not { Length: > 0 } || AllowedRoutes.Contains(route)) &&
          ForbiddenRoutes?.Contains(route) != true);
+    internal RoutingRule SystemScope() => HasApplicationScope
+        ? new()
+        {
+            Id = Id, Name = Name, Kind = RuleKind.Application, Values = ProtectedExecutables ?? [],
+            Destination = Target, ServerId = ServerId, FallbackServerIds = FallbackServerIds,
+            AllowedRoutes = AllowedRoutes, ForbiddenRoutes = ForbiddenRoutes, SystemProtection = true
+        }
+        : this;
     [JsonIgnore] public string RouteLabel => Target switch
     {
         RouteTarget.Vpn => "Bebekon VPN",
@@ -163,7 +173,8 @@ public sealed class Profile : Observable
     public RouteTarget DefaultRoute { get => defaultRoute; set => Set(ref defaultRoute, value); }
     public ObservableCollection<RoutingRule> Rules { get; set; } = [];
     [JsonIgnore] public IEnumerable<RoutingRule> ActiveRules => Rules.Where(rule => rule.Enabled);
-    [JsonIgnore] public IEnumerable<RoutingRule> RulesByPrecedence => ActiveRules.OrderByDescending(rule => rule.SystemProtection);
+    [JsonIgnore] public IEnumerable<RoutingRule> SystemRules => ActiveRules.Where(rule => rule.SystemProtection).Select(rule => rule.SystemScope());
+    [JsonIgnore] public IEnumerable<RoutingRule> RulesByPrecedence => SystemRules.Concat(ActiveRules.Where(rule => !rule.SystemProtection || rule.HasApplicationScope));
     [JsonIgnore] public bool UsesNetBird => DefaultRoute == RouteTarget.NetBird || ActiveRules.Any(rule => rule.Target == RouteTarget.NetBird);
     [JsonIgnore] public bool HasProtectedRules => ActiveRules.Any(rule => rule.SystemProtection);
     [JsonIgnore] public IEnumerable<string> VpnServerIds => ActiveRules

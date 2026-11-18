@@ -18,12 +18,13 @@ public class KillSwitchTests
     }
 
     /// <summary>Real Windows Filtering Platform filters; needs an elevated Windows run (CI is).</summary>
-    [Fact] public async Task BlocksOutsideTheTunnelKeepsLoopbackAndTrustedCoresAndCleansUp()
+    [Fact] public async Task BlocksOutsideTheTunnelRestrictsTransportExceptionsAndCleansUp()
     {
         // GitHub's Windows runners are elevated and online: there the test must really run.
         var ci = OperatingSystem.IsWindows() && Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true";
         if (!OperatingSystem.IsWindows()) return;
-        var elevated = new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator);
+        using var identity = WindowsIdentity.GetCurrent();
+        var elevated = new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator);
         Assert.True(elevated || !ci, "CI must run this test elevated");
         if (!elevated) return;
         var online = await CanConnect(Internet);
@@ -37,8 +38,9 @@ public class KillSwitchTests
             Assert.True(await CanConnect(loopback));
         }
         Assert.True(await CanConnect(Internet));
-        // The bundled cores reach their servers directly; here the test host stands in for them.
-        using (KillSwitch.Enable([Environment.ProcessPath!, Path.Combine(AppContext.BaseDirectory, "missing.exe")])) Assert.True(await CanConnect(Internet));
+        // Service transports are permitted only when the trusted executable runs as LocalSystem.
+        using (KillSwitch.Enable([Environment.ProcessPath!, Path.Combine(AppContext.BaseDirectory, "missing.exe")]))
+            Assert.Equal(identity.IsSystem, await CanConnect(Internet));
         // Disposing twice is harmless and leaves nothing behind.
         var once = KillSwitch.Enable([]); once.Dispose(); once.Dispose();
         Assert.True(await CanConnect(Internet));

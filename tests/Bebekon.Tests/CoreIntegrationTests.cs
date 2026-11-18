@@ -17,6 +17,27 @@ public class CoreIntegrationTests
         try { var path=Path.Combine(root,"config.json"); await File.WriteAllTextAsync(path,ConfigGenerator.Generate(CoreTests.Spec(node:s))); using var core=new CoreProcess(CoreExe,new(root,"core"));await core.ValidateAsync(path,default); }
         finally {Directory.Delete(root,true);}
     }
+
+    [Fact]
+    public async Task OfficialCoreAcceptsAnOrderedSelectorWithABlockingMember()
+    {
+        var reserve = CoreTests.Node("security=tls&type=ws");
+        var profile = new Profile { Rules = [new()
+        {
+            Name = "Restricted", Values = ["private.example"], FallbackServerIds = [reserve.Id]
+        }] };
+        var spec = CoreTests.Spec(profile) with { RuleServers = [reserve] };
+        var root = Path.Combine(Path.GetTempPath(), "BebekonTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var path = Path.Combine(root, "config.json");
+            await File.WriteAllTextAsync(path, ConfigGenerator.Generate(spec));
+            using var core = new CoreProcess(CoreExe, new(root, "core"));
+            await core.ValidateAsync(path, default);
+        }
+        finally { Directory.Delete(root, true); }
+    }
     [Fact]
     public async Task RealVlessSelectiveAndEntirePcRouting()
     {

@@ -26,6 +26,8 @@ public sealed partial class MainViewModel
     }
     private Task RefreshMapOriginAsync()
     {
+        if (ActiveProfile.HasProtectedRules || Settings.KillSwitch && Settings.TunnelMode == TunnelMode.Tun || Protection?.Filters > 0)
+            return Task.CompletedTask;
         if (originLookup is { IsCompleted: false }) return originLookup;
         if (Connected && (spec is null || spec.OriginProbePort == 0)) return Task.CompletedTask;
         if (!MapLocationEnabled || ConnectionBusy && !locatingBeforeTunnel || testProbe is not null || Connected && appliedConfigurationVersion != configurationVersion || DateTimeOffset.UtcNow - originChecked < TimeSpan.FromMinutes(30) || DateTimeOffset.UtcNow - originAttempted < TimeSpan.FromSeconds(30)) return Task.CompletedTask;

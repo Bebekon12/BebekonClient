@@ -1,7 +1,6 @@
 using System.Net;
 using System.Net.Http;
 using System.Net.NetworkInformation;
-using System.Net.Sockets;
 using System.Windows.Input;
 
 namespace Bebekon.App;
@@ -166,11 +165,26 @@ public sealed partial class MainViewModel
             }));
     }
 
-    internal async Task<string> TestWfpAsync(CancellationToken ct)
+    internal Task<string> TestWfpAsync(CancellationToken ct) => TestWfpAsync(null, ct);
+
+    internal async Task<string> TestRuleWfpAsync(RouteQuery query, string? expectedRule, CancellationToken ct)
+    {
+        var profile = Connected && spec is { } active ? active.Profile : ActiveProfile;
+        var decision = RoutingPolicy.Analyze(profile, query);
+        var rule = profile.ActiveRules.FirstOrDefault(item => item.Id == decision.Rule?.Id);
+        if (rule is null || !rule.SystemProtection || expectedRule is not null && rule.Id != expectedRule)
+            return T("Не проверено · для этой цели не найдено соответствующее защищённое правило в применённой политике.",
+                     "Unverified · no matching protected rule was found in the applied policy.");
+        return string.Join(Environment.NewLine, rule.Name,
+            T("Имитация потери разрешённого пути на изолированном loopback-получателе.", "Loss of the allowed path is simulated against an isolated loopback receiver."),
+            await TestWfpAsync(rule, ct));
+    }
+
+    private async Task<string> TestWfpAsync(RoutingRule? rule, CancellationToken ct)
     {
         if (testProbe is null && !ServiceInstaller.IsInstalled)
             return T("Для проверки нужна установленная служба Bebekon VPN.", "The installed Bebekon helper is needed for the test.");
-        var response = await service.SendAsync(new("TestProtection"), true, ct);
+        var response = await service.SendAsync(new(rule is null ? "TestProtection" : "TestRuleProtection", TestRule: rule), true, ct);
         if (!response.Ok || response.WfpTest is not { Length: > 0 }) return response.Message ?? T("Служба не вернула результат WFP.", "The helper did not return a WFP result.");
         Protection = response.Status.Protection;
         return string.Join(Environment.NewLine, response.WfpTest.Select(check =>
@@ -189,14 +203,15 @@ public sealed partial class MainViewModel
     internal async Task<string> VerifyRouteAsync(RouteQuery query, CancellationToken ct)
     {
         var current = spec;
-        if (!Connected || current is null || testProbe is not null || query.Executable is not null || query.Transport == RuleTransport.Udp)
+        if (testProbe is not null || query.Transport == RuleTransport.Udp || query.Domain is null && query.Address is null)
             return T("Не проверено для этих параметров.", "Unverified for these parameters.");
-        var decision = RoutingPolicy.Analyze(current.Profile, query);
-        if (decision.Direction == RouteTarget.NetBird && !decision.DependsOnConnectionDetails && query.Address is { } address)
-            return await VerifyNetBirdAddressAsync(current, address, query.Port ?? 443, ct);
-        if (decision.Direction != RouteTarget.Vpn || decision.Rule?.FallbackServerIds is { Count: > 0 } ||
-            decision.Rule?.ServerId is { } pinned && pinned != current.Server.Id ||
-            query.Domain is null && query.Address is null)
+        var profile = Connected && current is not null ? current.Profile : ActiveProfile;
+        var target = query with { Port = query.Port ?? 443, Transport = RuleTransport.Tcp };
+        var decision = RoutingPolicy.Analyze(profile, target);
+        if (decision.Direction == RouteTarget.NetBird && !decision.DependsOnConnectionDetails)
+            return await VerifyNetBirdAsync(target, ct);
+        if (!Connected || current is null || decision.Direction != RouteTarget.Vpn || decision.Rule?.FallbackServerIds is { Count: > 0 } ||
+            decision.Rule?.ServerId is { } pinned && pinned != current.Server.Id)
             return T("Для действующего маршрута нет подходящей изолированной пробы.", "The active route has no suitable isolated probe.");
 
         using var http = LatencyService.ProbeClient(current);
@@ -207,23 +222,24 @@ public sealed partial class MainViewModel
         try { publicIp = await LatencyService.VpnIpAsync(current, ct); }
         catch (Exception e) when (e is HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested) { publicIp = "—"; }
         return T($"Проба через Bebekon VPN · HTTP {(int)response.StatusCode} · публичный IP {publicIp}",
-                 $"Bebekon VPN probe · HTTP {(int)response.StatusCode} · public IP {publicIp}");
+                 $"Bebekon VPN probe · HTTP {(int)response.StatusCode} · public IP {publicIp}") + Environment.NewLine +
+               T("Фактический путь DNS · Не проверено", "Actual DNS path · Unverified");
     }
 
-    private async Task<string> VerifyNetBirdAddressAsync(ConnectSpec current, IPAddress address, int port, CancellationToken ct)
+    private async Task<string> VerifyNetBirdAsync(RouteQuery target, CancellationToken ct)
     {
-        var routing = await NetBirdRouting.DiscoverAsync(current.NetBirdPeer, ct);
-        var v4 = address.AddressFamily == AddressFamily.InterNetwork;
-        var index = v4 ? routing?.IPv4Index : routing?.IPv6Index;
-        if (index is null || WindowsRoutes.BestInterfaceIndex(address) != index)
+        var status = await NetBirdClient.GetStatusAsync(ct);
+        var routing = await NetBirdRouting.DiscoverAsync(status.PeerAddress, ct);
+        if (routing is null)
             return T("Windows не подтвердила маршрут через интерфейс NetBird.", "Windows did not verify a route through the NetBird interface.");
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeout.CancelAfter(TimeSpan.FromSeconds(4));
-        using var socket = new Socket(address.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
-        const SocketOptionName unicastInterface = (SocketOptionName)31; // IP_UNICAST_IF / IPV6_UNICAST_IF
-        socket.SetSocketOption(v4 ? SocketOptionLevel.IP : SocketOptionLevel.IPv6, unicastInterface,
-            v4 ? IPAddress.HostToNetworkOrder(index.Value) : index.Value);
-        await socket.ConnectAsync(new IPEndPoint(address, port), timeout.Token);
-        return T($"TCP до {address} через {routing!.InterfaceName}", $"TCP to {address} through {routing!.InterfaceName}");
+        var result = await NetBirdProbe.VerifyAsync(routing, target, ct);
+        var reachability = result.Reached is { } address
+            ? T($"TCP {address} · порт {result.Port} · интерфейс {result.InterfaceName}",
+                $"TCP {address} · port {result.Port} · interface {result.InterfaceName}")
+            : T("TCP через NetBird · соединение не подтверждено", "TCP via NetBird · connection unverified");
+        if (target.Domain is null) return reachability;
+        return reachability + Environment.NewLine + (result.Resolver is { } dns
+            ? T($"DNS · ответ {dns} через {result.InterfaceName}", $"DNS · reply from {dns} via {result.InterfaceName}")
+            : T("Фактический путь DNS · Не проверено", "Actual DNS path · Unverified"));
     }
 }

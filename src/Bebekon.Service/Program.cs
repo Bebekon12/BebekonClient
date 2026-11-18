@@ -1,4 +1,6 @@
 using System.IO.Pipes;
+using System.Globalization;
+using System.Net;
 using System.Security.AccessControl;
 using System.Security.Principal;
 using System.ServiceProcess;
@@ -24,6 +26,11 @@ internal static class Program
             Environment.ExitCode = checks.All(check => check.Outcome == WfpTestOutcome.Passed) ? 0 : 1;
             return;
         }
+        if (args.Length > 0 && args[0] == "--test-netbird")
+        {
+            Environment.ExitCode = TestNetBirdAsync(args).GetAwaiter().GetResult();
+            return;
+        }
         if (args.Contains("--console"))
         {
             var sid = WindowsIdentity.GetCurrent().User!.Value;
@@ -32,6 +39,51 @@ internal static class Program
         var owner = Registry.GetValue(@"HKEY_LOCAL_MACHINE\SOFTWARE\BebekonVPN", "OwnerSid", null) as string;
         if (string.IsNullOrWhiteSpace(owner)) throw new InvalidOperationException("Authorized owner SID was not installed.");
         ServiceBase.Run(new VpnService(owner));
+    }
+
+    private static async Task<int> TestNetBirdAsync(string[] args)
+    {
+        var port = 443;
+        if (args.Length is < 2 or > 3 || args.Length == 3 && (!int.TryParse(args[2], out port) || port is < 1 or > 65535))
+        {
+            Console.Error.WriteLine("Укажите --test-netbird <домен или IP> [TCP-порт].");
+            return 2;
+        }
+
+        try
+        {
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(18));
+            var status = await NetBirdClient.GetStatusAsync(deadline.Token);
+            if (!status.Connected)
+            {
+                Console.Error.WriteLine("Для проверки нужен подключённый NetBird.");
+                return 1;
+            }
+            var routing = await NetBirdRouting.DiscoverAsync(status.PeerAddress, deadline.Token);
+            if (routing is null) throw new UserError("Windows не подтвердила интерфейс NetBird.");
+            var domain = IPAddress.TryParse(args[1], out var address) ? null : new IdnMapping().GetAscii(RuleValidation.SiteHost(args[1]));
+            if (domain is not null && Uri.CheckHostName(domain) != UriHostNameType.Dns)
+                throw new UserError("Укажите корректное доменное имя или IP.");
+            var report = await NetBirdProbe.VerifyAsync(routing, new(domain, address, Port: port), deadline.Token);
+            Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new
+            {
+                report.InterfaceName,
+                Resolver = report.Resolver?.ToString(),
+                Reached = report.Reached?.ToString(),
+                report.Port
+            }, Json.Options));
+            return report.Reached is null ? 1 : 0;
+        }
+        catch (UserError error)
+        {
+            Console.Error.WriteLine(error.Message);
+            return 1;
+        }
+        catch (Exception error) when (error is ArgumentException or OperationCanceledException or System.Net.Sockets.SocketException or System.Net.NetworkInformation.NetworkInformationException)
+        {
+            Console.Error.WriteLine("Проба NetBird не завершилась.");
+            return 1;
+        }
     }
 }
 internal sealed class VpnService : ServiceBase
@@ -87,7 +139,8 @@ internal sealed class VpnService : ServiceBase
         // Exited notification can arrive after a status request. Check before snapshotting.
         if (state == ConnectionState.Connected && core?.Running != true) { state = ConnectionState.Error; error = "Ядро VPN завершилось. Подключитесь заново."; connectedAt = null; File.Delete(Path.Combine(root, "sing-box.json")); }
         return new(state, error, connectedAt, core?.Pid, state == ConnectionState.Connected ? traffic?.Snapshot : null,
-            ReadProtection(), state == ConnectionState.Connected ? last?.NetBird?.InterfaceName : null);
+            ReadProtection(), state == ConnectionState.Connected ? last?.NetBird?.InterfaceName : null,
+            state == ConnectionState.Connected && traffic?.HasHealthyFallback == true);
     }
     private ProtectionStatus ReadProtection()
     {
@@ -131,6 +184,9 @@ internal sealed class VpnService : ServiceBase
                         case "StopCore": StopCore(request.KeepBlocking); break;
                         case "ClearProtection": StopCore(); KillSwitch.ClearPersistent(); break;
                         case "TestProtection": test = await KillSwitch.TestLocalFilteringAsync(timeout.Token); break;
+                        case "TestRuleProtection":
+                            test = await KillSwitch.TestInstalledRuleAsync(request.TestRule ?? throw new UserError("Выберите защищённое правило."), timeout.Token);
+                            break;
                         case "ProtectionEvents": blockEvents = KillSwitch.RecentPolicyBlocks(killSwitch); break;
                         case "ApplyStoredProtection":
                             await ApplyStoredProtectionAsync(request.Protection ?? throw new UserError("Не указана политика WFP."), timeout.Token);

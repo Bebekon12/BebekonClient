@@ -18,11 +18,15 @@ public sealed class CoreTraffic : IDisposable
     private readonly string secret = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
     private TrafficSnapshot? snapshot;
     private Task? loop;
+    private VpnFallback.Group[] fallbackGroups = [];
+    private HttpClient? fallbackController;
+    public bool HasHealthyFallback => !stop.IsCancellationRequested && fallbackGroups.Any(group => group.Healthy);
     public TrafficSnapshot? Snapshot => !stop.IsCancellationRequested && Volatile.Read(ref snapshot) is { } current && DateTimeOffset.UtcNow - current.SampledAt < TimeSpan.FromSeconds(4) ? current : null;
 
     public string AddToConfig(string config)
     {
         var document = JsonNode.Parse(config)!;
+        fallbackGroups = VpnFallback.ReadGroups(document.AsObject());
         document["experimental"] = new JsonObject { ["clash_api"] = new JsonObject {
             ["external_controller"] = "127.0.0.1:" + port, ["secret"] = secret,
             ["access_control_allow_origin"] = new JsonArray("http://localhost"),
@@ -35,6 +39,15 @@ public sealed class CoreTraffic : IDisposable
         if (loop is not null) throw new InvalidOperationException("Traffic sampling already started.");
         http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", secret);
         loop = ReadAsync();
+        if (fallbackGroups.Length > 0)
+        {
+            fallbackController = new(new SocketsHttpHandler { UseProxy = false, AllowAutoRedirect = false })
+            {
+                Timeout = TimeSpan.FromSeconds(5), MaxResponseContentBufferSize = 64 * 1024
+            };
+            fallbackController.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", secret);
+            _ = new VpnFallback(fallbackController, new($"http://127.0.0.1:{port}/"), fallbackGroups).RunAsync(stop.Token);
+        }
     }
     private async Task ReadAsync()
     {
@@ -66,5 +79,5 @@ public sealed class CoreTraffic : IDisposable
             try { await Task.Delay(1000, stop.Token); } catch (OperationCanceledException) { break; }
         }
     }
-    public void Dispose() { stop.Cancel(); http.Dispose(); Volatile.Write(ref snapshot, null); }
+    public void Dispose() { stop.Cancel(); http.Dispose(); fallbackController?.Dispose(); Volatile.Write(ref snapshot, null); }
 }

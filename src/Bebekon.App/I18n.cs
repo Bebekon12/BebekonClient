@@ -13,7 +13,7 @@ public static class I18n
         ("LocalWfpTest","Локальный тест WFP","Local WFP test"),("ClearWfp","Снять текущую защиту","Clear active protection"),
         ("ApplyStoredWfp","Применить без подключения","Apply while disconnected"),("WfpEventLog","Журнал блокировок WFP","WFP block events"),
         ("WfpTestScope","Тест ищет события блокировки TCP и UDP на loopback. Проверка реальной потери VPN требует изолированного стенда.","The test looks for TCP and UDP block events on loopback. Verifying actual VPN loss requires an isolated test environment."),
-        ("WfpScopeHelp","Системная защита правил доступна для IP/CIDR и полных путей приложений. Сохраняемые фильтры действуют после запуска BFE.","System protection is available for IP/CIDR and full app paths. Persistent filters take effect when BFE starts."),
+        ("WfpScopeHelp","Windows фильтрует IP/CIDR или весь трафик указанных исполняемых файлов. Сохраняемые фильтры действуют после запуска BFE.","Windows filters IP/CIDR scopes or all traffic from the selected executables. Persistent filters take effect when BFE starts."),
         ("ConnectionOverview","Ваше подключение","Your connection"),("SelectedServerTitle","Выбранный сервер","Selected server"),("RoutingModeTitle","Режим маршрутизации","Routing mode"),("NetworkComponents","Сетевые компоненты","Network components"),
         ("ProtocolColumn","Протокол","Protocol"),("ServerColumn","Сервер","Server"),("LatencyColumn","Пинг","Latency"),("On","Вкл.","On"),("Off","Выкл.","Off"),("ConfigureDns","Настроить DNS","Configure DNS"),
         ("UpdateLater","Не сейчас","Not now"),("UpdateNow","Обновить","Update"),("DownloadProgressLabel","Прогресс загрузки обновления","Update download progress"),

@@ -32,7 +32,7 @@ public static class BackupCodec
     {
         if (!rule.Enabled || rule.Target is RouteTarget.NetBird or RouteTarget.Block || rule.Port is not null ||
             rule.Transport is not null || rule.AllowedRoutes is not null || rule.ForbiddenRoutes is not null ||
-            rule.FallbackServerIds is { Count: > 0 } || rule.UnavailableRoute is not null || rule.SystemProtection)
+            rule.FallbackServerIds is { Count: > 0 } || rule.UnavailableRoute is not null || rule.SystemProtection || rule.ProtectedExecutables is { Count: > 0 })
         {
             // Other clients skip unknown kinds and never activate a reduced form of a Windows policy.
             return new() { ["kind"] = "windowsPolicy", ["policy"] = JsonSerializer.SerializeToNode(rule, Json.Options) };

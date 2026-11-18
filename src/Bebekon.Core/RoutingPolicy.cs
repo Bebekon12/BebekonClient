@@ -32,7 +32,8 @@ public static class RoutingPolicy
         string.Join('|', rule.Kind, rule.Target, rule.ServerId, rule.Transport, rule.Port, rule.UnavailableRoute, rule.SystemProtection,
             string.Join(',', rule.AllowedRoutes?.Order() ?? Enumerable.Empty<RouteTarget>()),
             string.Join(',', rule.ForbiddenRoutes?.Order() ?? Enumerable.Empty<RouteTarget>()),
-            string.Join(',', rule.FallbackServerIds ?? []), string.Join('\n', rule.Values).ToLowerInvariant());
+            string.Join(',', rule.FallbackServerIds ?? []), string.Join('\n', rule.Values).ToLowerInvariant(),
+            string.Join('\n', (rule.ProtectedExecutables ?? []).Order(StringComparer.OrdinalIgnoreCase)).ToLowerInvariant());
 
     private static bool? Matches(RoutingRule rule, RouteQuery query)
     {

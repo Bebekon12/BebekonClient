@@ -33,6 +33,8 @@ internal sealed class RuleEditor : StackPanel
     private readonly ComboBox transport = new() { MinHeight = 42 };
     private readonly TextBox port = new() { MinHeight = 42, Tag = "1–65535" };
     private readonly CheckBox protection = new() { Margin = new(0, 12, 0, 0) };
+    private readonly StackPanel scope = new() { Visibility = Visibility.Collapsed };
+    private readonly TextBox protectedApps = new() { MinHeight = 42, MaxHeight = 105, AcceptsReturn = true, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
     private readonly CheckBox directFallback = new() { Margin = new(0, 8, 0, 0) };
     private readonly Dictionary<RouteTarget, CheckBox> allowed = [];
     private RouteTarget Direction => direction.SelectedValue is RouteTarget target ? target : RouteTarget.Vpn;
@@ -113,11 +115,28 @@ internal sealed class RuleEditor : StackPanel
         Children.Add(new Expander { Header = I18n.T("Резерв и ограничения", "Fallback and restrictions"),
             Content = advanced, Margin = new(0, 10, 0, 0), Foreground = (Brush)Application.Current.Resources["Text"] });
         protection.Content = I18n.T("Системная защита WFP", "WFP system protection");
-        protection.ToolTip = I18n.T("Для IP/CIDR и полного пути приложения. Доменные правила работают в sing-box.", "Available for IP/CIDR and full app paths. Domain rules work in sing-box.");
+        protection.ToolTip = I18n.T("Windows защищает IP/CIDR или весь трафик указанных приложений.", "Windows protects an IP/CIDR or all traffic from the selected executables.");
         protection.IsChecked = old?.SystemProtection == true;
         protection.Checked += (_, _) => UpdateDirection();
         protection.Unchecked += (_, _) => UpdateDirection();
         Children.Add(protection);
+        scope.Children.Add(Label(I18n.T("Приложения для этого ресурса", "Applications for this resource")));
+        protectedApps.Text = string.Join(Environment.NewLine, old?.ProtectedExecutables ?? []);
+        scope.Children.Add(protectedApps);
+        var chooseProtectedApp = new Button { Content = I18n.T("Добавить .exe", "Add .exe"), Margin = new(0, 6, 0, 0), HorizontalAlignment = HorizontalAlignment.Left };
+        chooseProtectedApp.Click += (_, _) =>
+        {
+            var picker = new Microsoft.Win32.OpenFileDialog { Filter = "Applications (*.exe)|*.exe", Multiselect = true };
+            if (picker.ShowDialog(Window.GetWindow(this)) == true)
+                protectedApps.Text = string.Join(Environment.NewLine, Paths().Concat(picker.FileNames).Distinct(StringComparer.OrdinalIgnoreCase));
+        };
+        scope.Children.Add(chooseProtectedApp);
+        scope.Children.Add(new TextBlock
+        {
+            Text = I18n.T("Выбранное направление применяется ко всему трафику этих файлов.", "The selected route applies to all traffic from these executables."),
+            TextWrapping = TextWrapping.Wrap, Style = (Style)Application.Current.Resources["Subtitle"], Margin = new(0, 6, 0, 0)
+        });
+        Children.Add(scope);
         direction.SelectionChanged += (_, _) => UpdateDirection();
         direction.SelectedValue = old?.Target ?? RouteTarget.Vpn;
         ValueField.Text = old is null ? "" : string.Join(", ", old.Values); NameField.Text = old?.Name ?? "";
@@ -156,11 +175,15 @@ internal sealed class RuleEditor : StackPanel
     private void UpdateDirection()
     {
         ServerField.IsEnabled = reserve.IsEnabled = UseVpn;
-        protection.IsEnabled = protection.IsChecked == true || Direction != RouteTarget.Direct && Kind is (RuleKind.Application or RuleKind.Network);
+        var domainScope = RuleValidation.IsDomainRule(Kind) && Direction is RouteTarget.Vpn or RouteTarget.Block;
+        protection.IsEnabled = protection.IsChecked == true || Direction != RouteTarget.Direct &&
+            (Kind is RuleKind.Application or RuleKind.Network || domainScope);
+        scope.Visibility = domainScope && protection.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         directFallback.IsEnabled = Direction == RouteTarget.NetBird && protection.IsChecked != true &&
             allowed.TryGetValue(RouteTarget.Direct, out var direct) && direct.IsChecked == true;
         if (!directFallback.IsEnabled) directFallback.IsChecked = false;
     }
+    private string[] Paths() => protectedApps.Text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
     internal RoutingRule Build()
     {
         var values = ValueField.Text.Split(Kind == RuleKind.Application ? new[] { ',', '\n', '\r' } : new[] { ',', '\n', '\r', ' ' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(v => Kind == RuleKind.Site ? RuleValidation.SiteHost(v, dropWww: true) : v).Where(v => v.Length > 0).Distinct().ToList();
@@ -185,6 +208,7 @@ internal sealed class RuleEditor : StackPanel
             UnavailableRoute = directFallback.IsChecked == true ? RouteTarget.Direct : null,
             ForbiddenRoutes = denied.Length == 0 ? null : denied,
             SystemProtection = protection.IsChecked == true,
+            ProtectedExecutables = RuleValidation.IsDomainRule(Kind) && Paths() is { Length: > 0 } paths ? [.. paths] : null,
             Transport = transport.SelectedIndex <= 0 ? null : (RuleTransport)(transport.SelectedIndex - 1),
             Port = destinationPort
         };

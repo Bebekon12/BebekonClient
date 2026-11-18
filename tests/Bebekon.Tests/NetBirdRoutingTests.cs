@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Sockets;
 using System.Text.Json.Nodes;
 using Bebekon.Core;
 using Xunit;
@@ -7,6 +8,70 @@ namespace Bebekon.Tests;
 
 public class NetBirdRoutingTests
 {
+    [Fact]
+    public void BoundDnsProbeRejectsAnUnrelatedOrTruncatedReply()
+    {
+        var request = NetBirdProbe.CreateQuery("git.corp.example", 1);
+        Assert.Equal(1, request[^3]); // A, followed by class IN
+        Assert.Equal(1, request[^1]);
+        byte[] response = [.. request, 0xc0, 12, 0, 1, 0, 1, 0, 0, 0, 10, 0, 4, 100, 100, 0, 42];
+        response[2] = 0x81; response[3] = 0x80; response[7] = 1;
+        Assert.Equal(IPAddress.Parse("100.100.0.42"), Assert.Single(NetBirdProbe.ReadAnswer(response, request, 1)));
+        Assert.Empty(NetBirdProbe.ReadAnswer(response.AsSpan(0, response.Length - 1), request, 1));
+        response[13] ^= 1;
+        Assert.Empty(NetBirdProbe.ReadAnswer(response, request, 1));
+        response[13] ^= 1;
+        response[0] ^= 1;
+        Assert.Empty(NetBirdProbe.ReadAnswer(response, request, 1));
+    }
+
+    [Fact]
+    public async Task DnsAndTcpProbesUseTheSameConfirmedInterface()
+    {
+        var address = IPAddress.Loopback;
+        var index = WindowsRoutes.BestInterfaceIndex(address);
+        Assert.NotNull(index);
+        using var dns = new UdpClient(new IPEndPoint(address, 0));
+        using var tcp = new TcpListener(address, 0);
+        tcp.Start();
+        var target = (IPEndPoint)tcp.LocalEndpoint;
+        var resolver = (IPEndPoint)dns.Client.LocalEndPoint!;
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var ct = deadline.Token;
+
+        async Task Respond()
+        {
+            for (var i = 0; i < 2; i++)
+            {
+                var request = await dns.ReceiveAsync(ct);
+                var isA = request.Buffer[^3] == 1;
+                byte[] response = isA
+                    ? [.. request.Buffer, 0xc0, 12, 0, 1, 0, 1, 0, 0, 0, 10, 0, 4, 127, 0, 0, 1]
+                    : request.Buffer;
+                response[2] = 0x81; response[3] = 0x80; response[7] = (byte)(isA ? 1 : 0);
+                await dns.SendAsync(response, request.RemoteEndPoint, ct);
+            }
+        }
+
+        var routing = new NetBirdRouting("Local test interface", index, null, null, [new("corp.example", true, address.ToString())]);
+        var dnsWork = Respond();
+        try
+        {
+            var report = await NetBirdProbe.VerifyAsync(routing, new("git.corp.example", Port: target.Port), resolver.Port, ct);
+            await dnsWork;
+            using var accepted = await tcp.AcceptTcpClientAsync(ct);
+            Assert.Equal(address, report.Resolver);
+            Assert.Equal(address, report.Reached);
+            Assert.Equal(target.Port, report.Port);
+        }
+        finally
+        {
+            deadline.Cancel();
+            try { await dnsWork; }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
+        }
+    }
+
     [Theory]
     [InlineData("Connected", true, "100.100.1.2")]
     [InlineData("Idle", false, null)]

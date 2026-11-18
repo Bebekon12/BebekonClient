@@ -15,6 +15,18 @@ public sealed record NetBirdDnsZone(string Domain, bool IncludesSubdomains, stri
 
 public sealed record NetBirdRouting(string InterfaceName, int? IPv4Index, int? IPv6Index, string? DefaultResolver, IReadOnlyList<NetBirdDnsZone> Zones)
 {
+    internal string? EffectiveDefaultResolver
+    {
+        get
+        {
+            if (DefaultResolver is not null) return DefaultResolver;
+            var resolvers = Zones.Select(zone => zone.Resolver).OfType<string>().Distinct(StringComparer.Ordinal).Take(2).ToArray();
+            return resolvers.Length == 1 ? resolvers[0] : null;
+        }
+    }
+
+    internal NetBirdDnsZone? ZoneFor(string host) => Zones.FirstOrDefault(zone => zone.Matches(host));
+
     public static async Task<NetBirdRouting?> DiscoverAsync(string? peerAddress, CancellationToken ct)
     {
         if (!OperatingSystem.IsWindows() || !IPAddress.TryParse(peerAddress, out var peer) ||
@@ -100,7 +112,7 @@ internal sealed class NetBirdConfig
         if (routing is null) return;
         this.routing = routing;
         var scoped = routing.Zones.Select(zone => zone.Resolver).OfType<string>().Distinct().ToArray();
-        var defaultResolver = routing.DefaultResolver ?? (scoped.Length == 1 ? scoped[0] : null);
+        var defaultResolver = routing.EffectiveDefaultResolver;
         foreach (var resolver in scoped.Append(defaultResolver).OfType<string>().Distinct(StringComparer.Ordinal))
         {
             var tag = "netbird-" + tags.Count;
@@ -131,7 +143,7 @@ internal sealed class NetBirdConfig
 
     public string? ForDomain(string domain, string? unavailableTag)
     {
-        var zone = routing?.Zones.FirstOrDefault(zone => zone.Matches(domain));
+        var zone = routing?.ZoneFor(domain);
         return zone is null ? DefaultTag ?? unavailableTag : zone.Resolver is { } resolver ? tags[resolver] : null;
     }
 }

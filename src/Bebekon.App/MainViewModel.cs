@@ -500,7 +500,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
             var ruleServerIds = ActiveProfile.VpnServerIds.ToHashSet(StringComparer.Ordinal);
             spec = new(SelectedServer, ActiveProfile, Settings, LatencyService.FreePort(), Convert.ToHexString(RandomNumberGenerator.GetBytes(24)), Data.Servers.Where(s => ruleServerIds.Contains(s.Id)).ToList(),
                 AutoServers: Settings.AutoServer ? AutoPool : null, NetBirdPeer: netBird?.PeerAddress);
-            if (MapLocationEnabled) {
+            if (MapLocationEnabled && spec.AllowsOriginLookup) {
                 int originPort;
                 do { originPort = LatencyService.FreePort(); } while (originPort == spec.ProbePort || originPort == 17890);
                 spec = spec with { OriginProbePort = originPort };
@@ -563,10 +563,17 @@ public sealed partial class MainViewModel : Observable, IDisposable
             }
             catch (Exception e) when ((e is HttpRequestException or TaskCanceledException) && !token.IsCancellationRequested) { failure = e; }
         }
+        if (current.Profile.ActiveRules.Any(rule => rule.FallbackServerIds is { Count: > 0 }))
+        {
+            var reply = await service.SendAsync(new("GetStatus"), ct: token);
+            if (reply.Ok && reply.Status is { State: ConnectionState.Connected, HasHealthyFallback: true }) return;
+        }
         throw failure!;
     }
     private async Task MonitorNetBirdAsync()
     {
+        ConnectSpec? observed = null;
+        string? previousStamp = null;
         try
         {
             using var timer = new PeriodicTimer(TimeSpan.FromSeconds(10));
@@ -578,7 +585,18 @@ public sealed partial class MainViewModel : Observable, IDisposable
                 if (!affectsPolicy && PageName is not ("Home" or "Connections")) continue;
                 var actual = await NetBirdClient.GetStatusAsync(lifetime.Token);
                 ShowNetBird(actual);
-                if (affectsPolicy && ReferenceEquals(active, spec) && Connected && active!.NetBirdPeer != actual.PeerAddress) QueueApply();
+                if (!affectsPolicy || !ReferenceEquals(active, spec) || !Connected) continue;
+                if (active!.NetBirdPeer != actual.PeerAddress) { QueueApply(); continue; }
+                NetBirdRouting? routing;
+                try { routing = await NetBirdRouting.DiscoverAsync(actual.PeerAddress, lifetime.Token); }
+                catch (NetworkInformationException) { continue; }
+                if (!ReferenceEquals(active, spec) || !Connected) continue;
+                var stamp = string.Join('\n', routing?.InterfaceName, routing?.IPv4Index, routing?.IPv6Index, routing?.DefaultResolver,
+                    string.Join(',', actual.Networks.Order(StringComparer.Ordinal)),
+                    string.Join(',', (routing?.Zones ?? []).Select(zone => $"{zone.Domain}|{zone.IncludesSubdomains}|{zone.Resolver}").Order(StringComparer.Ordinal)));
+                if (ReferenceEquals(observed, active) && previousStamp != stamp) QueueApply();
+                observed = active;
+                previousStamp = stamp;
             }
         }
         catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }

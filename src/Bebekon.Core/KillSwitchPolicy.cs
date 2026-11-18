@@ -2,6 +2,8 @@ using System.Buffers.Binary;
 using System.Net;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
+using System.Security.Cryptography;
+using System.Text.Json;
 
 namespace Bebekon.Core;
 
@@ -55,7 +57,7 @@ public sealed partial class KillSwitch
                 }
                 var vpn = tunnelReady ? FindInterface(memory, "Bebekon") : null;
                 var netBird = FindInterface(memory, netBirdRouting?.InterfaceName);
-                foreach (var rule in profile.ActiveRules.Where(rule => rule.SystemProtection))
+                foreach (var rule in profile.SystemRules)
                 {
                     var corporateInterface = rule.Target == RouteTarget.NetBird ? netBird : null;
                     var bebekonInterface = rule.Target == RouteTarget.Vpn || corporateInterface is not null ? vpn : null;
@@ -134,15 +136,50 @@ public sealed partial class KillSwitch
                 }
                 if (corporateInterface is { } corporate)
                     AddFilter(memory, engine, sublayer, layer, 14, ActionPermit, "Protected rule through NetBird", [.. conditions, corporate], provider);
-                blocked.Add(AddFilter(memory, engine, sublayer, layer, 0, ActionBlock, "Protected routing rule", conditions, provider));
+                blocked.Add(AddScopeBlock(memory, engine, sublayer, layer, rule, conditions, provider));
             }
             if (rule.Kind == RuleKind.Network)
             {
-                foreach (var app in trustedTransports)
-                    AddFilter(memory, engine, sublayer, layer, 15, ActionPermit, "VPN transports", [app], provider);
+                AddTransportPermits(memory, engine, sublayer, layer, provider, trustedTransports);
                 AddDhcp(memory, engine, sublayer, layer, v4, provider);
             }
         }
+    }
+
+    private static ulong AddScopeBlock(NativeMemory memory, IntPtr engine, Guid sublayer, Guid layer,
+        RoutingRule scope, IReadOnlyList<Condition> conditions, IntPtr provider) =>
+        AddFilter(memory, engine, sublayer, layer, 0, ActionBlock, "Protected routing rule", conditions, provider, ScopeFingerprint(scope));
+
+    private static byte[] ScopeFingerprint(RoutingRule scope) => SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(new
+    {
+        scope.Id, scope.Kind, scope.Target, scope.Port, scope.Transport, scope.ServerId, scope.FallbackServerIds,
+        Values = scope.Values.Select(value => value.ToUpperInvariant()).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray()
+    }, Json.Options));
+
+    private static bool ScopeIsInstalled(Guid providerKey, RoutingRule scope)
+    {
+        using var memory = new NativeMemory();
+        var engine = OpenEngine(memory, dynamic: false);
+        try
+        {
+            if (!ProviderExists(engine, providerKey)) return false;
+            var provider = memory.Alloc(16);
+            WriteGuid(provider, providerKey);
+            var expected = ScopeFingerprint(scope);
+            var observed = new byte[expected.Length];
+            var matched = 0;
+            ReadProviderFilters(memory, engine, provider, filter =>
+            {
+                if (!IsEnabledBlock(filter) || Marshal.ReadInt32(filter + 48) != expected.Length) return;
+                var data = Marshal.ReadIntPtr(filter + 56);
+                if (data == IntPtr.Zero) return;
+                Marshal.Copy(data, observed, 0, observed.Length);
+                if (observed.AsSpan().SequenceEqual(expected)) matched++;
+            });
+            var values = scope.Values.Distinct(StringComparer.OrdinalIgnoreCase).Count();
+            return matched == (scope.Kind == RuleKind.Application ? values * 2 : values);
+        }
+        finally { FwpmEngineClose0(engine); }
     }
 
     private static Condition NetworkCondition(NativeMemory memory, Guid field, IPNetwork prefix)

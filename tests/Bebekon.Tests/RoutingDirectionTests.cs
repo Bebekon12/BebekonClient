@@ -93,10 +93,13 @@ public class RoutingDirectionTests
         var spec = CoreTests.Spec(new() { Rules = [rule] }) with { RuleServers = [primary, reserve] };
         var config = JsonNode.Parse(ConfigGenerator.Generate(spec))!;
         var group = config["outbounds"]!.AsArray().Last()!;
-        Assert.Equal("urltest", (string?)group["type"]);
-        Assert.Equal(new[] { "vpn-rule-1", "vpn-rule-2" }, group["outbounds"]!.AsArray().Select(node => (string)node!));
+        Assert.Equal("selector", (string?)group["type"]);
+        Assert.Equal("vpn-rule-1", (string?)group["default"]);
+        Assert.Equal(new[] { "vpn-rule-1", "vpn-rule-2", VpnFallback.Offline }, group["outbounds"]!.AsArray().Select(node => (string)node!));
         var spare = JsonNode.Parse(ConfigGenerator.Generate(spec with { RuleServers = [reserve] }))!;
-        Assert.Equal("vpn-rule-1", (string?)spare["route"]!["rules"]![4]!["outbound"]);
+        var spareSelector = spare["outbounds"]!.AsArray().Last()!;
+        Assert.Equal("vpn-rule-1", (string?)spareSelector["default"]);
+        Assert.Equal((string?)spareSelector["tag"], (string?)spare["route"]!["rules"]![4]!["outbound"]);
         var blocked = JsonNode.Parse(ConfigGenerator.Generate(spec with { RuleServers = [] }))!;
         Assert.Equal("reject", (string?)blocked["route"]!["rules"]![4]!["action"]);
     }

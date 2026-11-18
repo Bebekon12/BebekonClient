@@ -8,6 +8,7 @@ namespace Bebekon.Core;
 
 public static class RuleValidation
 {
+    public static bool IsDomainRule(RuleKind kind) => kind is RuleKind.Site or RuleKind.Contains or RuleKind.GeoSite;
     /// <summary>Accepts what users paste: "https://www.example.com/page?q" → "www.example.com".</summary>
     public static string SiteHost(string value, bool dropWww = false)
     {
@@ -36,9 +37,18 @@ public static class RuleValidation
         if (rule.FallbackServerIds is { Count: > 0 } backup &&
             (rule.Target != RouteTarget.Vpn || backup.Count > 8 || backup.Any(id => string.IsNullOrWhiteSpace(id) || id.Length > 128 || id.Any(char.IsControl))))
             throw new UserError("Укажите до восьми резервных серверов Bebekon VPN.");
-        if (rule.SystemProtection && (rule.Target == RouteTarget.Direct || rule.UnavailableRoute == RouteTarget.Direct ||
-            rule.Kind is not (RuleKind.Application or RuleKind.Network)))
-            throw new UserError("Защита WFP доступна для полного пути к приложению или IP/CIDR. Выберите VPN либо Block без резерва Direct.");
+        if (rule.SystemProtection)
+        {
+            if (rule.Target == RouteTarget.Direct || rule.UnavailableRoute == RouteTarget.Direct ||
+                !(rule.Kind is RuleKind.Application or RuleKind.Network || rule.HasApplicationScope && rule.Target is RouteTarget.Vpn or RouteTarget.Block))
+                throw new UserError("Выберите VPN или Block без резерва Direct. Для домена область WFP задаётся локальными приложениями и поддерживает Bebekon VPN или Block.");
+            if (rule.HasApplicationScope)
+            {
+                if (rule.ProtectedExecutables is not { Count: > 0 and <= 128 } paths)
+                    throw new UserError("Выберите приложения, через которые открывается этот ресурс. WFP защищает весь трафик их исполняемых файлов.");
+                rule.ProtectedExecutables = paths.Select(ProtectedExecutable).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            }
+        }
         for (var i = 0; i < rule.Values.Count; i++)
         {
             var v = rule.Values[i].Trim();
@@ -54,8 +64,7 @@ public static class RuleValidation
                 case RuleKind.Application:
                     if (!v.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) throw new UserError("Выберите приложение .exe.");
                     if (v.Contains('\\') && !Path.IsPathFullyQualified(v)) throw new UserError("Укажите полный путь к приложению.");
-                    if (rule.SystemProtection && (!Path.IsPathFullyQualified(v) || v.StartsWith(@"\\", StringComparison.Ordinal)))
-                        throw new UserError("Для защиты WFP выберите полный локальный путь к исполняемому файлу.");
+                    if (rule.SystemProtection) v = ProtectedExecutable(v);
                     break;
                 case RuleKind.Network:
                     var p = v.Split('/');
@@ -80,8 +89,31 @@ public static class RuleValidation
         if (string.IsNullOrWhiteSpace(profile.Name) || profile.Name.Length > 160 || !Enum.IsDefined(profile.DefaultRoute) || profile.Rules.Count > 5000) throw new UserError("Некорректный профиль.");
         foreach (var rule in profile.Rules) Validate(rule);
         if (profile.Rules.Select(r => r.Id).Distinct().Count() != profile.Rules.Count) throw new UserError("В профиле повторяются идентификаторы правил.");
-        if (profile.ActiveRules.Where(rule => rule.SystemProtection).Sum(rule => rule.Values.Count) > 128)
+        if (profile.SystemRules.Sum(rule => rule.Values.Count) > 128)
             throw new UserError("В профиле можно защитить до 128 путей приложений или подсетей Windows.");
+        var domainScopes = profile.ActiveRules.Where(rule => rule.HasApplicationScope).ToArray();
+        if (domainScopes.Length != 0)
+        {
+            var appScopes = profile.SystemRules.Where(rule => rule.Kind == RuleKind.Application).ToArray();
+            foreach (var domain in domainScopes)
+            {
+                if (appScopes.Any(scope => scope.Id != domain.Id &&
+                    scope.Values.Intersect(domain.ProtectedExecutables!, StringComparer.OrdinalIgnoreCase).Any() &&
+                    (scope.Target != domain.Target || scope.ServerId != domain.ServerId ||
+                     !(scope.FallbackServerIds ?? []).SequenceEqual(domain.FallbackServerIds ?? []))))
+                    throw new UserError("Для одного защищённого приложения задайте одинаковое направление и одинаковые серверы во всех доменных правилах.");
+            }
+        }
+    }
+
+    private static string ProtectedExecutable(string value)
+    {
+        var path = value?.Trim() ?? "";
+        if (path.Length is < 1 or > 2048 || path.Any(char.IsControl) || !path.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ||
+            !Path.IsPathFullyQualified(path) || path.StartsWith(@"\\", StringComparison.Ordinal))
+            throw new UserError("Для защиты WFP выберите полный локальный путь к исполняемому файлу.");
+        try { return Path.GetFullPath(path); }
+        catch (ArgumentException) { throw new UserError("Некорректный путь к защищённому приложению."); }
     }
 }
 public static class ProfileCodec
@@ -97,6 +129,7 @@ public static class ProfileCodec
 public sealed record ConnectSpec(Server Server, Profile Profile, Settings Settings, int ProbePort, string ProbePassword, List<Server>? RuleServers = null, int OriginProbePort = 0, List<Server>? AutoServers = null, string? NetBirdPeer = null)
 {
     [JsonIgnore] public NetBirdRouting? NetBird { get; init; }
+    [JsonIgnore] public bool AllowsOriginLookup => !Profile.HasProtectedRules && !(Settings.KillSwitch && Settings.TunnelMode == TunnelMode.Tun);
 
     internal IEnumerable<Server> ResolveRuleServers()
     {
@@ -163,7 +196,8 @@ public static class ConfigGenerator
         if (runtime is not null) { inbounds.Add(new JsonObject { ["type"] = "mixed", ["tag"] = "xray-direct", ["listen"] = "127.0.0.1", ["listen_port"] = runtime.Direct.Port, ["users"] = new JsonArray { new JsonObject { ["username"] = "bebekon", ["password"] = runtime.Direct.Password } } }); routes.Insert(0, new JsonObject { ["inbound"] = Strings(["xray-direct"]), ["action"] = "route", ["outbound"] = "direct" }); }
         trustTunnel?.AddRelays(inbounds, routes);
         var dnsRules = new JsonArray(); var sets = new JsonArray(); var setTags = new HashSet<string>();
-        if (!probeOnly && spec.Settings.MapLocation && spec.OriginProbePort != 0) {
+        var fallbackTags = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (!probeOnly && spec.Settings.MapLocation && spec.AllowsOriginLookup && spec.OriginProbePort != 0) {
             // A private authenticated channel only for our opt-in HTTPS location lookup.
             // No domain/process exceptions are inserted into the user's traffic policy.
             inbounds.Add(new JsonObject { ["type"] = "mixed", ["tag"] = "origin-probe", ["listen"] = "127.0.0.1", ["listen_port"] = spec.OriginProbePort,
@@ -186,7 +220,7 @@ public static class ConfigGenerator
             }
             var tag = rule.Target switch
             {
-                RouteTarget.Vpn => VpnRuleTag(rule, serverTags, outbounds, dnsServers),
+                RouteTarget.Vpn => VpnRuleTag(rule, serverTags, outbounds, dnsServers, fallbackTags),
                 RouteTarget.NetBird => (rule.Kind is RuleKind.Network or RuleKind.GeoIp ? netBird.AddressTag : netBird.DefaultTag) ?? UnavailableTag(rule),
                 _ => RouteTag(rule.Target, netBird)
             };
@@ -221,18 +255,24 @@ public static class ConfigGenerator
     public static bool AutoEligible(Server n) => n.Supported && n.Type != "trusttunnel" && n.Transport != "xhttp";
     private static string? UnavailableTag(RoutingRule rule) =>
         rule.UnavailableRoute == RouteTarget.Direct && rule.Allows(RouteTarget.Direct) ? "direct" : null;
-    private static string? VpnRuleTag(RoutingRule rule, IReadOnlyDictionary<string, string> serverTags, JsonArray outbounds, JsonArray dnsServers)
+    private static string? VpnRuleTag(RoutingRule rule, IReadOnlyDictionary<string, string> serverTags, JsonArray outbounds,
+        JsonArray dnsServers, Dictionary<string, string> fallbackTags)
     {
         var primary = rule.ServerId is { } id ? serverTags.GetValueOrDefault(id) : "vpn";
         if (rule.FallbackServerIds is not { Count: > 0 } backup) return primary;
         var candidates = backup.Select(id => serverTags.GetValueOrDefault(id)).Prepend(primary)
             .OfType<string>().Distinct(StringComparer.Ordinal).ToArray();
-        if (candidates.Length < 2) return candidates.FirstOrDefault();
-        var tag = $"vpn-fallback-{outbounds.Count}";
+        if (candidates.Length == 0) return null;
+        var key = string.Join(',', candidates);
+        if (fallbackTags.TryGetValue(key, out var existing)) return existing;
+        if (fallbackTags.Count == 0)
+            outbounds.Add(new JsonObject { ["type"] = "block", ["tag"] = VpnFallback.Offline });
+        var tag = VpnFallback.Prefix + fallbackTags.Count;
+        fallbackTags.Add(key, tag);
         outbounds.Add(new JsonObject
         {
-            ["type"] = "urltest", ["tag"] = tag, ["outbounds"] = Strings(candidates),
-            ["interval"] = "30s", ["tolerance"] = 5000, ["interrupt_exist_connections"] = true
+            ["type"] = "selector", ["tag"] = tag, ["outbounds"] = Strings(candidates.Append(VpnFallback.Offline)),
+            ["default"] = candidates[0], ["interrupt_exist_connections"] = true
         });
         dnsServers.Add(Dns(tag + "-dns", tag));
         return tag;

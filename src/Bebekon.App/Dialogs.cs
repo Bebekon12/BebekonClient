@@ -176,7 +176,8 @@ public static class Dialogs
         var sample = draft?.Values.FirstOrDefault() ?? "";
         var destination = Field(body, I18n.T("Домен или IP", "Domain or IP"),
             draft?.Kind is RuleKind.Site or RuleKind.Network ? sample.Split('/')[0] : "");
-        var application = Field(body, I18n.T("Приложение", "Application"), draft?.Kind == RuleKind.Application ? sample : "");
+        var application = Field(body, I18n.T("Приложение", "Application"), draft?.Kind == RuleKind.Application ? sample :
+            draft?.ProtectedExecutables?.FirstOrDefault() ?? "");
         var choose = new Button { Content = I18n.T("Выбрать .exe", "Choose .exe"), HorizontalAlignment = HorizontalAlignment.Left, Margin = new(0, 5, 0, 0) };
         choose.Click += (_, _) =>
         {
@@ -262,11 +263,8 @@ public static class Dialogs
                 decision.Rule?.SystemProtection == true ? I18n.T("Для правила запрошена системная защита WFP.", "WFP system protection is requested for this rule.") : "");
         });
         AddAction(I18n.T("Реальная проверка", "Live check"), async () =>
-            I18n.T("Действующая политика", "Active policy") + Environment.NewLine + await vm.VerifyRouteAsync(Query(), token) + Environment.NewLine +
-            I18n.T("Фактический путь DNS · Не проверено", "Actual DNS path · Unverified"));
-        AddAction(I18n.T("Тест Kill Switch", "Kill switch test"), async () =>
-            I18n.T("Локальная проверка WFP", "Local WFP check") + Environment.NewLine + await vm.TestWfpAsync(token) + Environment.NewLine +
-            I18n.T("Потеря VPN для выбранной цели · Не проверено", "VPN loss for the selected target · Unverified"));
+            I18n.T("Действующая политика", "Active policy") + Environment.NewLine + await vm.VerifyRouteAsync(Query(), token));
+        AddAction(I18n.T("Тест Kill Switch", "Kill switch test"), () => vm.TestRuleWfpAsync(Query(), draft?.Id, token));
         window.ShowDialog();
     }
     internal static string? GeoSet(RuleKind kind)

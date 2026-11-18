@@ -49,7 +49,9 @@ public class WfpKernelTests
         await Baseline();
         try
         {
-            Assert.Equal(1, KillSwitch.ApplyPersistent(provider, CoreTests.Spec(profile), [], tunnelReady: false));
+            using var identity = WindowsIdentity.GetCurrent();
+            string[] transports = identity.IsSystem ? [] : [Environment.ProcessPath!];
+            Assert.Equal(1, KillSwitch.ApplyPersistent(provider, CoreTests.Spec(profile), transports, tunnelReady: false));
             // The transaction and its engine are gone. Only the native persistent policy can block this socket.
             Assert.Equal(1, KillSwitch.PersistentBlockCount(provider));
             using var probe = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
@@ -72,9 +74,38 @@ public class WfpKernelTests
         await Baseline();
     }
 
-    private static bool IsEnabled()
+    [Fact]
+    public async Task InstalledRuleProvesFailoverAndKeepsItsProductionFilters()
     {
-        if (!OperatingSystem.IsWindows() || Environment.GetEnvironmentVariable("BEBEKON_WFP_TEST_VM") != "1") return false;
+        if (!IsEnabled(documentationRangeOnly: true)) return;
+        var provider = Guid.NewGuid();
+        var rule = new RoutingRule { Name = "Documentation network", Kind = RuleKind.Network, Values = ["192.0.2.87", "2001:db8::87"],
+            Transport = RuleTransport.Tcp, SystemProtection = true };
+        var spec = CoreTests.Spec(new() { Rules = [rule] });
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        try
+        {
+            Assert.Equal(2, KillSwitch.ApplyPersistent(provider, spec, [Environment.ProcessPath!], tunnelReady: false));
+            var report = await KillSwitch.TestInstalledRuleAsync(provider, rule, deadline.Token);
+            Assert.Equal(2, report.Length);
+            Assert.All(report, check =>
+            {
+                Assert.True(check.Outcome == WfpTestOutcome.Passed, $"{check.AddressFamily}: {check.Detail}");
+                Assert.NotNull(check.FilterId);
+                Assert.True(check.Restored);
+            });
+            Assert.Equal(2, KillSwitch.PersistentBlockCount(provider));
+            rule.Values = ["192.0.2.88"];
+            await Assert.ThrowsAsync<UserError>(() => KillSwitch.TestInstalledRuleAsync(provider, rule, deadline.Token));
+        }
+        finally { KillSwitch.ClearPersistent(provider); }
+    }
+
+    private static bool IsEnabled(bool documentationRangeOnly = false)
+    {
+        if (!OperatingSystem.IsWindows() ||
+            !(Environment.GetEnvironmentVariable("BEBEKON_WFP_TEST_VM") == "1" ||
+              documentationRangeOnly && Environment.GetEnvironmentVariable("BEBEKON_WFP_DOCUMENTATION_FIXTURE") == "1")) return false;
         using var identity = WindowsIdentity.GetCurrent();
         Assert.True(new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator), "The WFP fixture requires an elevated test VM.");
         return true;
