@@ -8,6 +8,17 @@ namespace Bebekon.Tests;
 
 public class SubscriptionTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void LinkListCanIncludeProviderComments(bool encoded)
+    {
+        var content = $"# profile-title: Example\n\nvless://{CoreTests.Id}@server.example:443#Test\n# end";
+        if (encoded) content = Convert.ToBase64String(Encoding.UTF8.GetBytes(content));
+        Assert.Equal("server.example", Assert.Single(VlessParser.ParseSubscription(content)).Host);
+        Assert.Throws<UserError>(() => VlessParser.ParseSubscription("# just a comment"));
+    }
+
     internal static JsonObject Xray(string network = "grpc", string security = "reality") => new()
     {
         ["remarks"] = "Estonia · JSON fixture",

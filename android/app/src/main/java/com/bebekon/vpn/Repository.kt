@@ -86,7 +86,10 @@ class Repository(private val context: Context) {
                 if (auth != null) connection.setRequestProperty("Authorization", auth)
                 connection.setRequestProperty("x-hwid", digest("bebekon-android:" + Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)))
                 connection.setRequestProperty("x-device-os", "Android"); connection.setRequestProperty("x-ver-os", android.os.Build.VERSION.RELEASE)
-                require(connection.responseCode in 200..299) { "Провайдер вернул HTTP ${connection.responseCode}. Проверьте подписку и лимит устройств" }
+                val status = connection.responseCode
+                require(status != 429) { "Провайдер временно ограничил частоту запросов (HTTP 429). Попробуйте позже" }
+                require(status !in 500..599) { "Сервис подписок временно недоступен (HTTP $status). Повторите попытку позже" }
+                require(status in 200..299) { "Провайдер вернул HTTP $status. Проверьте подписку и лимит устройств" }
                 budget.check()
                 val data = connection.inputStream.use { it.readLimited(4 * 1024 * 1024, budget) }; content = data.toString(Charsets.UTF_8)
                 if (title.isEmpty()) { val h = connection.getHeaderField("profile-title") ?: ""; title = if (h.startsWith("base64:")) runCatching { SubscriptionParser.decode(h.substringAfter(':')) }.getOrDefault("") else h }

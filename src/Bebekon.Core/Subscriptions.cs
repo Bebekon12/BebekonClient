@@ -58,7 +58,7 @@ public static class VlessParser
         content = content.Trim().TrimStart('\uFEFF').TrimStart();
         if (TrustTunnelParser.LooksLikeToml(content)) return TrustTunnelParser.ParseToml(content);
         if (content.StartsWith('<')) throw new UserError("Провайдер вернул веб-страницу вместо подписки. Нужна прямая ссылка на список серверов.");
-        if (!ProtocolParser.IsLink(content) && !IsJson(content) && !IsYaml(content))
+        if (!content.StartsWith('#') && !ProtocolParser.IsLink(content) && !IsJson(content) && !IsYaml(content))
         {
             try { var b = string.Concat(content.Where(c => !char.IsWhiteSpace(c))).Replace('-', '+').Replace('_', '/'); content = new UTF8Encoding(false, true).GetString(Convert.FromBase64String(b.PadRight((b.Length + 3) / 4 * 4, '='))); }
             catch (Exception e) when (e is FormatException or DecoderFallbackException) { throw new UserError("Неизвестный формат подписки. Поддерживаются VPN-ссылки, Base64, JSON Xray и Clash/Mihomo YAML или JSON."); }
@@ -89,10 +89,12 @@ public static class VlessParser
         var servers = new List<Server>();
         for (var i = 0; i < lines.Length; i++)
         {
+            if (lines[i].StartsWith('#')) continue;
             try { servers.Add(ProtocolParser.Parse(lines[i])); }
             catch (UserError e) { throw new UserError($"Строка {i + 1}: {e.Message}"); }
             catch (Exception e) when (e is UriFormatException or ArgumentException) { throw new UserError($"Строка {i + 1}: повреждённая ссылка VPN."); }
         }
+        if (servers.Count == 0) throw new UserError("Подписка не содержит серверов.");
         return servers.DistinctBy(s => s.Id).ToList();
     }
     private static bool IsYaml(string content) => Regex.IsMatch(content, """(?:^|[\r\n,{])\s*['"]?(?:proxies|proxy-providers)['"]?\s*:""", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
@@ -100,7 +102,7 @@ public static class VlessParser
 }
 public static class SubscriptionLoader
 {
-    public static readonly HttpClient Http = new(new SocketsHttpHandler { UseProxy = false, AllowAutoRedirect = false, PooledConnectionLifetime = TimeSpan.FromMinutes(5) }) { Timeout = TimeSpan.FromSeconds(20) };
+    public static readonly HttpClient Http = new(new SocketsHttpHandler { AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli, UseProxy = false, AllowAutoRedirect = false, PooledConnectionLifetime = TimeSpan.FromMinutes(5) }) { Timeout = TimeSpan.FromSeconds(20) };
     public static async Task<List<Server>> LoadAsync(string source, CancellationToken ct = default)
         => await LoadAsync(source, ct, 0, null);
     /// <summary>Also returns the provider's traffic/expiry/links headers (empty for pasted configs).</summary>
@@ -153,6 +155,8 @@ public static class SubscriptionLoader
                 throw new UserError("Достигнут лимит устройств подписки. Удалите старое устройство в кабинете провайдера или обратитесь в поддержку.");
             if (HeaderFlag("x-hwid-not-supported"))
                 throw new UserError("Провайдер не принял идентификатор устройства (HWID). Проверьте поддержку клиента у провайдера.");
+            if ((int)response.StatusCode == 429) throw new UserError("Провайдер временно ограничил частоту запросов (HTTP 429). Попробуйте обновить подписку позже.");
+            if ((int)response.StatusCode is >= 500 and <= 599) throw new UserError($"Сервис подписок временно недоступен (HTTP {(int)response.StatusCode}). Повторите попытку позже.");
             if (!response.IsSuccessStatusCode) throw new UserError($"Провайдер вернул HTTP {(int)response.StatusCode}. Проверьте подписку.");
             capture?.Invoke(ProviderInfo.From(response.Headers));
             if (response.Content.Headers.ContentLength > 4 * 1024 * 1024) throw new UserError("Подписка слишком большая.");
