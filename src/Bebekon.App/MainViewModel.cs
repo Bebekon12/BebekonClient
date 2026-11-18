@@ -12,6 +12,7 @@ namespace Bebekon.App;
 public sealed partial class MainViewModel : Observable, IDisposable
 {
     private readonly StateStore store;
+    private readonly bool liveEnvironment;
     private readonly IServiceClient service;
     private readonly Func<ConnectSpec, CancellationToken, Task>? testProbe;
     private readonly Func<Server, LatencyMode, bool, CancellationToken, Action?, Task<LatencyResult>>? testLatency;
@@ -66,8 +67,8 @@ public sealed partial class MainViewModel : Observable, IDisposable
     public bool TlsFragmentEnabled { get => Settings.TlsFragment; set { if (Settings.TlsFragment == value) return; Settings.TlsFragment = value; Notify(); Save(); QueueApply(); } }
     public bool AutoServerEnabled { get => Settings.AutoServer; set { if (Settings.AutoServer == value) return; Settings.AutoServer = value; Notify(); Notify(nameof(ServerLabel)); Save(); QueueApply(); if (value && !AutoActive) Banner = T("Для автовыбора нужно минимум два сервера VLESS, VMess, Trojan, Shadowsocks, Hysteria2 или TUIC.", "Auto needs at least two VLESS, VMess, Trojan, Shadowsocks, Hysteria2 or TUIC servers."); } }
     private Profile activeProfile;
-    public Profile ActiveProfile { get => activeProfile; set { if (value is null || ReferenceEquals(activeProfile, value)) return; DetachProfile(activeProfile); Set(ref activeProfile, value); Data.SelectedProfileId = value.Id; AttachProfile(); RefreshRules(); Notify(nameof(ModeLabel)); Notify(nameof(IsWholePc)); Notify(nameof(EmptyRulesDetail)); Notify(nameof(StatusDetail)); Save(); QueueApply(); } }
-    public bool IsWholePc { get => ActiveProfile.DefaultRoute == RouteTarget.Vpn; set { if (value == IsWholePc) return; ActiveProfile.DefaultRoute = value ? RouteTarget.Vpn : RouteTarget.Direct; Notify(); Notify(nameof(ModeLabel)); Notify(nameof(EmptyRulesDetail)); Notify(nameof(StatusDetail)); Save(); QueueApply(); } }
+    public Profile ActiveProfile { get => activeProfile; set { if (value is null || ReferenceEquals(activeProfile, value)) return; DetachProfile(activeProfile); Set(ref activeProfile, value); Data.SelectedProfileId = value.Id; AttachProfile(); RefreshRules(); Notify(nameof(ModeLabel)); Notify(nameof(IsWholePc)); Notify(nameof(DefaultDirection)); Notify(nameof(ProtectedRuleCount)); Notify(nameof(EmptyRulesDetail)); Notify(nameof(StatusDetail)); Save(); QueueApply(); } }
+    public bool IsWholePc { get => ActiveProfile.DefaultRoute == RouteTarget.Vpn; set { if (value) DefaultDirection = RouteTarget.Vpn; else if (IsWholePc) DefaultDirection = RouteTarget.Direct; } }
     public string ModeLabel => IsWholePc ? T("Весь ПК", "Entire PC") : T("По правилам", "By rules");
     private ConnectionState state;
     public ConnectionState State { get => state; private set { if (Set(ref state, value)) { NotifyStatus(); CommandManager.InvalidateRequerySuggested(); } } }
@@ -75,8 +76,10 @@ public sealed partial class MainViewModel : Observable, IDisposable
     public bool ConnectionBusy => State is ConnectionState.Connecting or ConnectionState.Disconnecting;
     public string ConnectLabel => State switch { ConnectionState.Connecting => T("Отменить", "Cancel"), ConnectionState.Disconnecting => T("Отключаем…", "Disconnecting…"), ConnectionState.Connected => T("Отключить", "Disconnect"), _ => T("Подключить", "Connect") };
     public string StatusLabel => State switch { ConnectionState.Connected => T("Подключено", "Connected"), ConnectionState.Connecting => T("Подключение", "Connecting"), ConnectionState.Disconnecting => T("Отключение", "Disconnecting"), ConnectionState.Error => T("Ошибка подключения", "Connection error"), _ => T("Не подключено", "Not connected") };
-    public string StatusDetail => Connected ? Settings.TunnelMode == TunnelMode.Proxy ? T("Выбранный трафик приложений с прокси идёт через VPN", "Selected traffic from proxy-aware applications uses VPN") : IsWholePc ? T("Весь трафик идёт через VPN", "All traffic goes through VPN") : T("Выбранный трафик идёт через VPN", "Selected traffic goes through VPN") : T("Ваш интернет использует обычное подключение", "Your internet uses your normal connection");
-    public string EmptyRulesDetail => IsWholePc ? T("Без правил весь трафик идёт через VPN", "Without rules all traffic goes through VPN") : T("Без правил весь трафик идёт напрямую", "Without rules all traffic goes direct");
+    public string StatusDetail => Connected ? Settings.TunnelMode == TunnelMode.Proxy ? T("Выбранный трафик приложений с прокси идёт через VPN", "Selected traffic from proxy-aware applications uses VPN") : EmptyRulesDetail :
+        Protection?.Filters > 0 ? T("Фильтры защиты WFP действуют", "WFP protection filters are active") :
+        T("VPN отключён", "VPN is disconnected");
+    public string EmptyRulesDetail => T("Маршрут по умолчанию · ", "Default route · ") + RouteChoice.NameOf(DefaultDirection);
     public string FooterLabel => Connected ? T("онлайн", "online") : T("офлайн", "offline");
     public string FooterMode => Connected ? Settings.TunnelMode == TunnelMode.Tun ? "TUN" : T("Прокси", "Proxy") : T("Нет подключения", "Disconnected");
     private string vpnIp = "—";
@@ -177,6 +180,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
         latencyIndex = Enum.IsDefined(Settings.LatencyMode) ? (int)Settings.LatencyMode : 1;
         if (Settings.DesignVersion < 1) { Settings.AccentColor = "Blue"; Settings.DesignVersion = 1; store.Save(Data); }
         Settings.TunnelMode = TunnelMode.Tun;
+        liveEnvironment = storage is null && testProbe is null;
         if (storage is null) Settings.StartWithWindows = AutoStart.IsEnabled;
         activeProfile = Data.Profiles.FirstOrDefault(p => p.Id == Data.SelectedProfileId) ?? Data.Profiles[0];
         selectedServer = Settings.RestoreServer ? Data.Servers.FirstOrDefault(s => s.Id == Data.SelectedServerId) : null;
@@ -184,6 +188,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
         Presets = PresetCatalog.Load();
         AttachProfile(); RefreshServers(); RefreshRules();
         Navigate = new Command(p => Go((string)p!)); CollapseSidebar = new Command(_ => SidebarCollapsed = !SidebarCollapsed);
+        InitializeRoutingCommands();
         ToggleConnect = new Command(_ => _ = ToggleSafelyAsync(), () => State != ConnectionState.Disconnecting && !updateInstalling);
         SelectServer = new Command(p => { var node = (Server)p!; if (!node.Supported) Banner = node.UnsupportedReason; else SelectedServer = node; });
         ConfigureTrustTunnel = new Command(p =>
@@ -244,7 +249,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
             if (data.DefaultRoute is { } defaultRoute)
             {
                 ActiveProfile.DefaultRoute = defaultRoute;
-                Notify(nameof(IsWholePc)); Notify(nameof(ModeLabel)); Notify(nameof(StatusDetail));
+                Notify(nameof(IsWholePc)); Notify(nameof(DefaultDirection)); Notify(nameof(ModeLabel)); Notify(nameof(StatusDetail));
             }
             if (data.Settings is { } settings && settings.Mtu is >= 1280 and <= 9000)
                 foreach (var property in typeof(Settings).GetProperties().Where(p => p.CanWrite && p.Name != nameof(Settings.DesignVersion))) property.SetValue(Settings, property.GetValue(settings));
@@ -254,8 +259,8 @@ public sealed partial class MainViewModel : Observable, IDisposable
         // Provider links are validated as https when stored (ProviderInfo.SafeLink).
         OpenProviderLink = new Command(p => { if (ProviderInfo.SafeLink(p as string) is { Length: > 0 } link) Process.Start(new ProcessStartInfo(link) { UseShellExecute = true }); });
         DeleteSubscription = Async(async p => { var sub = (Subscription)p!; if (!Dialogs.Confirm(T("Удалить подписку?", "Delete subscription?"), sub.Name)) return; if (Connected && SelectedServer?.SubscriptionId == sub.Id) await DisconnectAsync(); Data.Subscriptions.Remove(sub); foreach (var s in Data.Servers.Where(s => s.SubscriptionId == sub.Id).ToArray()) Data.Servers.Remove(s); if (!Data.Servers.Contains(SelectedServer!)) SelectedServer = Data.Servers.FirstOrDefault(); Save(); RefreshServers(); Notify(nameof(NoSubscriptions)); });
-        AddRule = new Command(_ => { var rule = Dialogs.Rule(null, Data.Servers); if (rule is not null) { ActiveProfile.Rules.Add(rule); RulesChanged(); } });
-        EditRule = new Command(p => { var rule = (RoutingRule)p!; var edit = Dialogs.Rule(rule, Data.Servers); if (edit is null) return; var i = ActiveProfile.Rules.IndexOf(rule); rule.PropertyChanged -= OnRuleChanged; ActiveProfile.Rules[i] = edit; RulesChanged(); });
+        AddRule = new Command(_ => { var rule = Dialogs.Rule(null, Data.Servers, draft => Dialogs.RouteCheck(this, draft)); if (rule is not null) { ActiveProfile.Rules.Add(rule); RulesChanged(); } });
+        EditRule = new Command(p => { var rule = (RoutingRule)p!; var edit = Dialogs.Rule(rule, Data.Servers, draft => Dialogs.RouteCheck(this, draft)); if (edit is null) return; var i = ActiveProfile.Rules.IndexOf(rule); rule.PropertyChanged -= OnRuleChanged; ActiveProfile.Rules[i] = edit; RulesChanged(); });
         DeleteRule = new Command(p => { var rule = (RoutingRule)p!; rule.PropertyChanged -= OnRuleChanged; ActiveProfile.Rules.Remove(rule); RulesChanged(); });
         AddPreset = new Command(_ => { var preset = Dialogs.Preset(Presets); if (preset is null) return; var count = PresetCatalog.Apply(preset, ActiveProfile); RulesChanged(); Banner = count == 0 ? T("Этот набор уже добавлен.", "This preset has already been added.") : T($"Добавлено правил: {count}.", $"Added {count} rules."); });
         AddApplication = Async(async _ => { var app = await Dialogs.ApplicationAsync(); if (app is null) return; ActiveProfile.Rules.Add(new() { CreatedAt = DateTimeOffset.UtcNow, Kind = RuleKind.Application, Name = app.Name, Values = [app.Path] }); RulesChanged(); });
@@ -289,7 +294,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
         _ = RefreshMapOriginAsync();
         WarnSubscription();
         _ = AutoRefreshAsync();
-        if (testProbe is null) _ = MonitorNetBirdAsync();
+        if (liveEnvironment) { _ = MonitorNetBirdAsync(); RefreshConnections.Execute(null); }
         if (Settings.AutoConnect && !Connected && SelectedServer is not null) await AutoConnectAsync(systemStartup);
     }
     private readonly Dictionary<string, DateTimeOffset> refreshAttempts = [];
@@ -341,7 +346,9 @@ public sealed partial class MainViewModel : Observable, IDisposable
     }
     public void Go(string name)
     {
-        scanGeneration++; scan?.Cancel(); PageName = name; Page = name switch { "Servers" => new ServersPage(this), "Rules" => new RulesPage(this), "Subscriptions" => new SubscriptionsPage(this), "Settings" => new SettingsPage(this), _ => new HomePage(this) };
+        scanGeneration++; scan?.Cancel(); PageName = name; Page = name switch { "Servers" => new ServersPage(this), "Rules" => new RulesPage(this), "Subscriptions" => new SubscriptionsPage(this), "Settings" => new SettingsPage(this), "Connections" => new ConnectionsPage(this), "Protection" => new ProtectionPage(this), _ => new HomePage(this) };
+        if (liveEnvironment && name == "Connections") RefreshConnections.Execute(null);
+        if (liveEnvironment && name == "Protection") RefreshProtection.Execute(null);
         if (name == "Servers" && Data.Servers.Count > 0) _ = ScanSafelyAsync();
     }
     private async Task ScanSafelyAsync()
@@ -429,8 +436,8 @@ public sealed partial class MainViewModel : Observable, IDisposable
     private void RefreshRules() { VisibleRules.Clear(); var rules = ActiveProfile.Rules.Where(r => r.Name.Contains(RuleSearch, StringComparison.OrdinalIgnoreCase) || r.Description.Contains(RuleSearch, StringComparison.OrdinalIgnoreCase)); if (RuleSortIndex == 0) rules = rules.OrderByDescending(r => r.CreatedAt); foreach (var r in rules) VisibleRules.Add(r); Notify(nameof(RuleCount)); Notify(nameof(NoRules)); }
     private void AttachProfile() { foreach (var r in ActiveProfile.Rules) { r.PropertyChanged -= OnRuleChanged; r.PropertyChanged += OnRuleChanged; } }
     private void DetachProfile(Profile p) { foreach (var r in p.Rules) r.PropertyChanged -= OnRuleChanged; }
-    private void OnRuleChanged(object? sender, PropertyChangedEventArgs e) { if (e.PropertyName is nameof(RoutingRule.Target) or nameof(RoutingRule.Enabled)) { Save(); QueueApply(); } }
-    internal void RulesChanged() { AttachProfile(); RefreshRules(); Save(); QueueApply(); }
+    private void OnRuleChanged(object? sender, PropertyChangedEventArgs e) { if (e.PropertyName is nameof(RoutingRule.Target) or nameof(RoutingRule.Enabled)) { Notify(nameof(ProtectedRuleCount)); Save(); QueueApply(); } }
+    internal void RulesChanged() { AttachProfile(); RefreshRules(); Notify(nameof(ProtectedRuleCount)); Save(); QueueApply(); }
     public void Reorder(RoutingRule source, RoutingRule target) { var a = ActiveProfile.Rules.IndexOf(source); var b = ActiveProfile.Rules.IndexOf(target); if (a < 0 || b < 0 || a == b) return; ActiveProfile.Rules.Move(a, b); RulesChanged(); }
     private void QueueApply()
     {
@@ -564,10 +571,12 @@ public sealed partial class MainViewModel : Observable, IDisposable
             while (await timer.WaitForNextTickAsync(lifetime.Token))
             {
                 var active = spec;
-                if (!Connected || active is null ||
-                    !(active.Profile.UsesNetBird || active.Settings.KillSwitch || active.Profile.HasProtectedRules)) continue;
+                var affectsPolicy = Connected && active is not null &&
+                    (active.Profile.UsesNetBird || active.Settings.KillSwitch || active.Profile.HasProtectedRules);
+                if (!affectsPolicy && PageName is not ("Home" or "Connections")) continue;
                 var actual = await NetBirdClient.GetStatusAsync(lifetime.Token);
-                if (ReferenceEquals(active, spec) && Connected && active.NetBirdPeer != actual.PeerAddress) QueueApply();
+                ShowNetBird(actual);
+                if (affectsPolicy && ReferenceEquals(active, spec) && Connected && active!.NetBirdPeer != actual.PeerAddress) QueueApply();
             }
         }
         catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
@@ -631,7 +640,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
     private bool Blocking => Protection?.Filters > 0 && State == ConnectionState.Error;
     private bool Monitoring => Connected || Blocking;
     private ProtectionStatus? protection;
-    public ProtectionStatus? Protection { get => protection; private set => Set(ref protection, value); }
+    public ProtectionStatus? Protection { get => protection; private set { if (Set(ref protection, value)) Notify(nameof(StatusDetail)); } }
     private void ApplyStatus(ServiceStatus s) { Protection = s.Protection; State = s.State; started = s.ConnectedAt; SetTraffic(s.State == ConnectionState.Connected ? s.Traffic : null); if (s.Error is not null) Banner = s.Error; }
     private void SetTraffic(TrafficSnapshot? value)
     {

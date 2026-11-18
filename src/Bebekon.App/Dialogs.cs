@@ -1,3 +1,7 @@
+using System.Globalization;
+using System.Net;
+using System.Net.Http;
+using System.Net.Sockets;
 using System.Windows.Data;
 using System.Windows.Media;
 
@@ -138,15 +142,132 @@ public static class Dialogs
         return w.ShowDialog() == true ? selected : null;
     }
 
-    public static RoutingRule? Rule(RoutingRule? old, IEnumerable<Server>? servers = null)
+    public static RoutingRule? Rule(RoutingRule? old, IEnumerable<Server>? servers = null, Action<RoutingRule>? checkRoute = null)
     {
         var w = Shell(I18n.T(old is null ? "Новое правило" : "Изменить правило", old is null ? "New rule" : "Edit rule"), out var body);
         var editor = new RuleEditor(old, servers ?? []); body.Children.Add(editor);
         var error = new TextBlock { TextWrapping = TextWrapping.Wrap, FontSize = 12, Margin = new(0, 8, 0, 0) };
         error.SetResourceReference(TextBlock.ForegroundProperty, "Danger"); body.Children.Add(error);
+        if (checkRoute is not null)
+        {
+            var check = new Button { Content = I18n.T("Проверить маршрут", "Check route"), Margin = new(0, 12, 0, 0) };
+            check.Click += (_, _) =>
+            {
+                try { error.Text = ""; checkRoute(editor.Build()); }
+                catch (UserError e) { error.Text = e.Message; }
+            };
+            body.Children.Add(check);
+        }
         RoutingRule? result = null;
         Submit(body, I18n.T("Сохранить", "Save"), () => { try { result = editor.Build(); w.DialogResult = true; } catch (UserError e) { error.Text = e.Message; } });
         return w.ShowDialog() == true ? result : null;
+    }
+
+    internal static void RouteCheck(MainViewModel vm, RoutingRule? draft = null)
+    {
+        var window = Shell(I18n.T("Проверка маршрута", "Route check"), out var body);
+        var profile = new Profile { Name = vm.ActiveProfile.Name, DefaultRoute = vm.ActiveProfile.DefaultRoute, Rules = [.. vm.ActiveProfile.Rules] };
+        if (draft is not null)
+        {
+            var saved = profile.Rules.FirstOrDefault(rule => rule.Id == draft.Id);
+            if (saved is null) profile.Rules.Add(draft);
+            else profile.Rules[profile.Rules.IndexOf(saved)] = draft;
+        }
+        var sample = draft?.Values.FirstOrDefault() ?? "";
+        var destination = Field(body, I18n.T("Домен или IP", "Domain or IP"),
+            draft?.Kind is RuleKind.Site or RuleKind.Network ? sample.Split('/')[0] : "");
+        var application = Field(body, I18n.T("Приложение", "Application"), draft?.Kind == RuleKind.Application ? sample : "");
+        var choose = new Button { Content = I18n.T("Выбрать .exe", "Choose .exe"), HorizontalAlignment = HorizontalAlignment.Left, Margin = new(0, 5, 0, 0) };
+        choose.Click += (_, _) =>
+        {
+            var file = new Microsoft.Win32.OpenFileDialog { Filter = "Applications (*.exe)|*.exe" };
+            if (file.ShowDialog(window) == true) application.Text = file.FileName;
+        };
+        body.Children.Add(choose);
+        var port = Field(body, I18n.T("Порт назначения", "Destination port"), draft?.Port?.ToString() ?? "");
+        var protocol = new ComboBox { ItemsSource = new[] { I18n.T("Любой протокол", "Any protocol"), "TCP", "UDP" },
+            SelectedIndex = draft?.Transport is { } selected ? (int)selected + 1 : 0, Margin = new(0, 8, 0, 0) };
+        body.Children.Add(protocol);
+
+        RouteQuery Query()
+        {
+            var input = destination.Text.Trim();
+            var exe = application.Text.Trim();
+            if (input.Length == 0 && exe.Length == 0) throw new UserError(I18n.T("Укажите домен, IP или приложение.", "Enter a domain, IP address or application."));
+            string? domain = null;
+            IPAddress? address = null;
+            if (input.Length > 0 && !IPAddress.TryParse(input, out address))
+            {
+                try { domain = new IdnMapping().GetAscii(RuleValidation.SiteHost(input)).ToLowerInvariant(); }
+                catch (ArgumentException) { }
+                if (domain is null || Uri.CheckHostName(domain) != UriHostNameType.Dns || !domain.Contains('.'))
+                    throw new UserError(I18n.T("Укажите полное доменное имя или IP.", "Enter a fully qualified domain name or IP address."));
+            }
+            int? number = null;
+            if (!string.IsNullOrWhiteSpace(port.Text))
+            {
+                if (!int.TryParse(port.Text, out var parsed) || parsed is < 1 or > 65535)
+                    throw new UserError(I18n.T("Укажите порт от 1 до 65535.", "Enter a port from 1 to 65535."));
+                number = parsed;
+            }
+            return new(domain, address, exe.Length == 0 ? null : exe,
+                protocol.SelectedIndex <= 0 ? null : (RuleTransport)(protocol.SelectedIndex - 1), number);
+        }
+
+        var controls = new WrapPanel { Margin = new(0, 14, 0, 0) };
+        var result = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new(0, 10, 0, 0), FontSize = 13 };
+        body.Children.Add(controls);
+        body.Children.Add(result);
+        using var lifetime = new CancellationTokenSource();
+        var token = lifetime.Token;
+        window.Closed += (_, _) => lifetime.Cancel();
+
+        void AddAction(string caption, Func<Task<string>> action)
+        {
+            var button = new Button { Content = caption, Margin = new(0, 0, 6, 6) };
+            button.Click += async (_, _) =>
+            {
+                controls.IsEnabled = false;
+                try { result.Text = await action(); }
+                catch (UserError e) { result.Text = e.Message; }
+                catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+                catch (Exception e) when (e is SocketException or HttpRequestException or OperationCanceledException)
+                { result.Text = I18n.T("Не проверено · сетевая проба не завершилась.", "Unverified · the network probe did not complete."); }
+                catch (Exception) { result.Text = I18n.T("Служба диагностики недоступна.", "Diagnostics are unavailable."); }
+                finally { controls.IsEnabled = true; }
+            };
+            controls.Children.Add(button);
+        }
+
+        AddAction(I18n.T("Анализ политики", "Analyze policy"), async () =>
+        {
+            var query = Query();
+            var decision = await Task.Run(() => RoutingPolicy.Analyze(profile, query), token);
+            var title = draft is null ? I18n.T("Профиль", "Profile") : I18n.T("Черновик", "Draft");
+            var rule = decision.Rule?.Name ?? I18n.T("Маршрут по умолчанию", "Default route");
+            var route = RouteChoice.NameOf(decision.Direction);
+            var dns = query.Domain is null || decision.Rule?.Kind is RuleKind.Network or RuleKind.GeoIp
+                ? I18n.T("Зависит от DNS-имени", "Depends on the DNS name")
+                : decision.Direction == RouteTarget.Block ? "REFUSED" : route;
+            var direct = decision.Direction == RouteTarget.Direct || decision.WhenUnavailable == RouteTarget.Direct
+                ? I18n.T("Разрешён политикой", "Allowed by policy") : I18n.T("Запрещён политикой", "Denied by policy");
+            var fallback = decision.Direction == RouteTarget.Direct ? "Direct" :
+                decision.WhenUnavailable == RouteTarget.Block ? I18n.T("Блокировать", "Block") : RouteChoice.NameOf(decision.WhenUnavailable);
+            return string.Join(Environment.NewLine, $"{title} · {profile.Name}",
+                I18n.T("Правило · ", "Rule · ") + rule, I18n.T("Выбранный маршрут · ", "Selected route · ") + route,
+                I18n.T("Интерфейс по политике · ", "Expected interface · ") + vm.ExpectedInterface(decision.Direction),
+                I18n.T("DNS по политике · ", "DNS policy · ") + dns, I18n.T("Прямой выход · ", "Direct access · ") + direct,
+                I18n.T("При потере маршрута · ", "If the route fails · ") + fallback,
+                decision.DependsOnConnectionDetails ? I18n.T("Правило может измениться с учётом IP, приложения, порта или протокола.", "The result may change with the IP, application, port or protocol.") : "",
+                decision.Rule?.SystemProtection == true ? I18n.T("Для правила запрошена системная защита WFP.", "WFP system protection is requested for this rule.") : "");
+        });
+        AddAction(I18n.T("Реальная проверка", "Live check"), async () =>
+            I18n.T("Действующая политика", "Active policy") + Environment.NewLine + await vm.VerifyRouteAsync(Query(), token) + Environment.NewLine +
+            I18n.T("Фактический путь DNS · Не проверено", "Actual DNS path · Unverified"));
+        AddAction(I18n.T("Тест Kill Switch", "Kill switch test"), async () =>
+            I18n.T("Локальная проверка WFP", "Local WFP check") + Environment.NewLine + await vm.TestWfpAsync(token) + Environment.NewLine +
+            I18n.T("Потеря VPN для выбранной цели · Не проверено", "VPN loss for the selected target · Unverified"));
+        window.ShowDialog();
     }
     internal static string? GeoSet(RuleKind kind)
     {

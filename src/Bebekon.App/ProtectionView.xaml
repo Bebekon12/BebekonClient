@@ -1,0 +1,40 @@
+<UserControl x:Class="Bebekon.App.ProtectionView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+ <ScrollViewer VerticalScrollBarVisibility="Auto">
+  <StackPanel>
+   <TextBlock Text="{DynamicResource Protection}" Style="{StaticResource Heading}" Margin="0,0,0,16"/>
+   <Border Style="{StaticResource CardStyle}" Padding="16" Margin="0,0,0,12">
+    <StackPanel>
+     <CheckBox Content="Kill Switch" IsChecked="{Binding KillSwitchEnabled}" Margin="0,0,0,12"/>
+     <CheckBox Content="{DynamicResource PersistentWfp}" IsEnabled="{Binding KillSwitchEnabled}" IsChecked="{Binding PersistentProtection}" Margin="0,0,0,12"/>
+     <TextBlock Text="{DynamicResource WfpScopeHelp}" Style="{StaticResource Subtitle}" TextWrapping="Wrap"/>
+    </StackPanel>
+   </Border>
+   <Border Style="{StaticResource CardStyle}" Padding="16" Margin="0,0,0,12">
+    <StackPanel>
+     <DockPanel Margin="0,0,0,8">
+      <TextBlock DockPanel.Dock="Right" Text="{Binding ProtectedRuleCount}" FontWeight="SemiBold"/>
+      <TextBlock Text="{DynamicResource ProtectedRules}"/>
+     </DockPanel>
+     <DockPanel>
+      <TextBlock DockPanel.Dock="Right" Text="{Binding Protection.Filters, FallbackValue=—, TargetNullValue=—}" FontWeight="SemiBold"/>
+      <TextBlock Text="{DynamicResource WfpCount}"/>
+     </DockPanel>
+     <TextBlock Text="{Binding Protection.Error}" Foreground="{DynamicResource Warning}" TextWrapping="Wrap" Margin="0,6,0,0"/>
+     <WrapPanel Margin="0,10,0,0">
+      <Button Content="{DynamicResource Update}" Command="{Binding RefreshProtection}" Margin="0,0,8,0"/>
+      <Button Content="{DynamicResource ClearWfp}" Command="{Binding ClearProtection}"/>
+     </WrapPanel>
+    </StackPanel>
+   </Border>
+   <Border Style="{StaticResource CardStyle}" Padding="16">
+    <StackPanel>
+     <TextBlock Text="{DynamicResource WfpTestScope}" Style="{StaticResource Subtitle}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+     <Button Content="{DynamicResource LocalWfpTest}" Command="{Binding TestWfp}" HorizontalAlignment="Left"/>
+     <TextBlock Text="{Binding WfpResult}" TextWrapping="Wrap" Margin="0,10,0,0"/>
+    </StackPanel>
+   </Border>
+  </StackPanel>
+ </ScrollViewer>
+</UserControl>

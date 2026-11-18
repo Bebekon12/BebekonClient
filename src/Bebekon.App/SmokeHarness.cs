@@ -118,6 +118,7 @@ internal static class SmokeHarness
         ((Button)home.FindName("OpenServersCard")).Command.Execute("Servers");
         if (vm.PageName != "Servers") throw new InvalidOperationException("Home server card must navigate.");
         await vm.StopScansAsync(); vm.Go("Home"); window.UpdateLayout(); home = Descendants(window).OfType<HomeView>().Single();
+        RoutingRule? routeCheckDraft = null;
         Dialogs.RenderObserver = dialog => dialog.Dispatcher.BeginInvoke(new Action(() =>
         {
             var target = Descendants(dialog).OfType<Button>().Single(b => Equals(b.Tag, "EntirePC"));
@@ -204,7 +205,8 @@ internal static class SmokeHarness
         vm.IsTunMode = true; if (!vm.IsTunMode || vm.IsProxyMode) throw new InvalidOperationException("TUN must switch Proxy off.");
         report.Add("Settings categories, cross-category search, empty results and TUN/Proxy exclusivity passed.");
         window.Width = window.MinWidth; window.Height = window.MinHeight; window.UpdateLayout();
-        foreach (var page in new[] { "Home", "Servers", "Rules", "Subscriptions", "Settings" }) { vm.Go(page); await vm.StopScansAsync(); await Task.Delay(150); window.UpdateLayout(); if (page == "Rules") CheckRulesViewport(window); Capture(window, page + "-Minimum"); }
+        foreach (var page in new[] { "Home", "Servers", "Rules", "Connections", "Protection", "Subscriptions", "Settings" }) { vm.Go(page); await vm.StopScansAsync(); await Task.Delay(150); window.UpdateLayout(); if (page == "Rules") CheckRulesViewport(window); Capture(window, page + "-Minimum"); }
+        report.Add("Connections and Protection render at minimum window size.");
         window.Width = 1000; window.Height = 740; window.UpdateLayout();
         vm.Go("Settings"); await Task.Delay(150); I18n.Set("English"); window.UpdateLayout(); Capture(window, "Settings-English"); I18n.Set("Русский");
         string dialogName = "Subscription"; Exception? renderFailure = null;
@@ -212,7 +214,12 @@ internal static class SmokeHarness
         {
             try {
                 dialog.UpdateLayout();
-                if (dialogName == "Rule") CheckRuleEditor(dialog, vm);
+                if (dialogName == "Rule")
+                {
+                    CheckRuleEditor(dialog, vm);
+                    Descendants(dialog).OfType<Button>().Single(button => button.Content as string == I18n.T("Проверить маршрут", "Check route"))
+                        .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                }
                 if (window.Content is not UIElement { Effect: System.Windows.Media.Effects.BlurEffect { Radius: 8 } }) throw new InvalidOperationException("Modal background must be blurred.");
                 Capture(dialog, "Dialog-" + dialogName); Capture(window, "Backdrop-" + dialogName);
             }
@@ -221,7 +228,8 @@ internal static class SmokeHarness
         }));
         try
         {
-            Dialogs.Subscription(null); dialogName = "Rule"; Dialogs.Rule(null, vm.Data.Servers);
+            Dialogs.Subscription(null); dialogName = "Rule"; Dialogs.Rule(null, vm.Data.Servers, draft => routeCheckDraft = draft);
+            dialogName = "RouteCheck"; Dialogs.RouteCheck(vm, routeCheckDraft);
             dialogName = "Preset"; Dialogs.Preset(vm.Presets);
             dialogName = "Application"; await Dialogs.ApplicationAsync();
             dialogName = "Confirm"; Dialogs.Confirm("Удалить правило?", "UI test fixture");
@@ -229,6 +237,8 @@ internal static class SmokeHarness
         }
         finally { Dialogs.RenderObserver = null; }
         if (renderFailure is not null) throw renderFailure;
+        if (routeCheckDraft is not { Kind: RuleKind.Application, Target: RouteTarget.Vpn })
+            throw new InvalidOperationException("Route check must receive the unsaved editor rule.");
         if (((UIElement)window.Content).Effect is not null || Dialogs.ModalOpen) throw new InvalidOperationException("Closing dialogs must restore the background.");
         report.Add("Rule editor: all six types, optional name, actions and server references; full button areas; modal blur/restoration passed.");
         report.Add("Six native dialogs rendered with the shared theme, including TrustTunnel transport selection and file import.");
@@ -594,7 +604,7 @@ internal static class SmokeHarness
     {
         var editor = Descendants(dialog).OfType<RuleEditor>().Single();
         var choices = Descendants(editor).OfType<RadioButton>().ToArray();
-        if (choices.Length != 8 || choices.Any(c => c.ActualHeight < 44 || c.ActualWidth < 180)) throw new InvalidOperationException("Rule choices need full, equal-sized hit areas.");
+        if (choices.Length != 6 || choices.Any(c => c.ActualHeight < 44 || c.ActualWidth < 180)) throw new InvalidOperationException("Rule type choices need full, equal-sized hit areas.");
         foreach (var (kind, value) in new[] { (RuleKind.Application, "Telegram.exe"), (RuleKind.GeoSite, "openai"), (RuleKind.Site, "figma.com"), (RuleKind.Contains, "claude"), (RuleKind.GeoIp, "telegram"), (RuleKind.Network, "192.168.1.0/24") })
         {
             editor.SelectKind(kind); editor.ValueField.Text = value; editor.NameField.Clear();
@@ -605,6 +615,10 @@ internal static class SmokeHarness
         if (editor.Build().ServerId != vm.Data.Servers[1].Id) throw new InvalidOperationException("Explicit server selection was lost.");
         editor.SelectAction(false);
         if (editor.ServerField.IsEnabled || editor.Build().UseVpn || editor.Build().ServerId is not null) throw new InvalidOperationException("Direct rules cannot use a VPN server.");
+        editor.SelectDirection(RouteTarget.NetBird);
+        if (editor.ServerField.IsEnabled || editor.Build().Target != RouteTarget.NetBird) throw new InvalidOperationException("NetBird uses its own route.");
+        editor.SelectDirection(RouteTarget.Block);
+        if (editor.Build().Target != RouteTarget.Block) throw new InvalidOperationException("Block rules must retain their destination.");
         editor.SelectAction(true); editor.ServerField.SelectedIndex = 0;
         dialog.UpdateLayout();
         foreach (var button in Descendants(dialog).OfType<Button>().Where(b => b.IsDefault || b.Content as string == "Отмена"))

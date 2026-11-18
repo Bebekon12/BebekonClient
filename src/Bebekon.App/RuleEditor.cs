@@ -8,24 +8,38 @@ internal sealed record RuleServerChoice(string? Id, string Name)
     public override string ToString() => Name;
 }
 
+public sealed record RouteChoice(RouteTarget Target, string Label)
+{
+    public static IReadOnlyList<RouteChoice> Options { get; } =
+        [new(RouteTarget.Vpn, "Bebekon VPN"), new(RouteTarget.NetBird, "NetBird"), new(RouteTarget.Direct, "Direct"), new(RouteTarget.Block, "Block")];
+
+    internal static string NameOf(RouteTarget target) => Options.First(option => option.Target == target).Label;
+}
+
 /// <summary>The same editor state drives new rules and edits; it never changes the profile before Save.</summary>
 internal sealed class RuleEditor : StackPanel
 {
     private readonly RoutingRule? original;
     internal RuleKind Kind { get; private set; }
-    internal bool UseVpn { get; private set; }
+    internal bool UseVpn => Direction == RouteTarget.Vpn;
     internal TextBox ValueField { get; } = new() { MinHeight = 46 };
     internal TextBox NameField { get; } = new() { MinHeight = 46 };
     internal ComboBox ServerField { get; } = new() { MinHeight = 46, DisplayMemberPath = "Name" };
     private readonly TextBlock explanation = new() { TextWrapping = TextWrapping.Wrap, MinHeight = 38, Margin = new(0, 6, 0, 2), FontSize = 12 };
     private readonly Button picker = new() { MinHeight = 46, MinWidth = 88, Margin = new(8, 0, 0, 0) };
     private readonly Dictionary<RuleKind, RadioButton> typeButtons = [];
-    private readonly RadioButton vpnButton;
-    private readonly RadioButton directButton;
+    private readonly ComboBox direction = new() { MinHeight = 44, DisplayMemberPath = "Label", SelectedValuePath = "Target", ItemsSource = RouteChoice.Options };
+    private readonly ComboBox reserve = new() { MinHeight = 44, DisplayMemberPath = "Name" };
+    private readonly ComboBox transport = new() { MinHeight = 42 };
+    private readonly TextBox port = new() { MinHeight = 42, Tag = "1–65535" };
+    private readonly CheckBox protection = new() { Margin = new(0, 12, 0, 0) };
+    private readonly CheckBox directFallback = new() { Margin = new(0, 8, 0, 0) };
+    private readonly Dictionary<RouteTarget, CheckBox> allowed = [];
+    private RouteTarget Direction => direction.SelectedValue is RouteTarget target ? target : RouteTarget.Vpn;
 
     public RuleEditor(RoutingRule? old, IEnumerable<Server> servers)
     {
-        original = old; Kind = old?.Kind ?? RuleKind.Application; UseVpn = old?.UseVpn ?? true;
+        original = old; Kind = old?.Kind ?? RuleKind.Application;
         explanation.SetResourceReference(TextBlock.ForegroundProperty, "Muted");
         Children.Add(Label(I18n.T("Тип правила", "Rule type")));
         var types = new System.Windows.Controls.Primitives.UniformGrid { Columns = 2 };
@@ -58,20 +72,56 @@ internal sealed class RuleEditor : StackPanel
         Children.Add(valueRow);
         Children.Add(Label(I18n.T("Название (необязательно)", "Name (optional)")));
         NameField.Tag = I18n.T("Заполнится автоматически", "Filled automatically"); Children.Add(NameField);
-        Children.Add(Label(I18n.T("Действие", "Action")));
-        var actions = new System.Windows.Controls.Primitives.UniformGrid { Columns = 2 };
-        vpnButton = Choice(I18n.T("Через VPN", "Through VPN"), "Shield", "RuleAction");
-        directButton = Choice(I18n.T("Без VPN", "Direct"), "Proxy", "RuleAction");
-        vpnButton.Checked += (_, _) => { UseVpn = true; ServerField.IsEnabled = true; };
-        directButton.Checked += (_, _) => { UseVpn = false; ServerField.IsEnabled = false; };
-        actions.Children.Add(vpnButton); actions.Children.Add(directButton); Children.Add(actions);
+        Children.Add(Label(I18n.T("Маршрут", "Route")));
+        Children.Add(direction);
         Children.Add(Label(I18n.T("Через сервер", "Through server")));
         var choices = new List<RuleServerChoice> { new(null, I18n.T("Авто — выбранный сервер", "Auto — selected server")) };
         choices.AddRange(servers.Where(s => s.Supported).Select(s => new RuleServerChoice(s.Id, s.DisplayName)));
         if (old?.ServerId is { } id && choices.All(c => c.Id != id)) choices.Add(new(id, I18n.T("Сервер недоступен — выберите другой", "Server unavailable — choose another")));
         ServerField.ItemsSource = choices; ServerField.SelectedItem = choices.First(c => c.Id == old?.ServerId); Children.Add(ServerField);
+        var advanced = new StackPanel();
+        var firstReserve = old?.FallbackServerIds?.FirstOrDefault();
+        var reserves = choices.Where(choice => choice.Id is not null).Prepend(new(null, I18n.T("Без резерва", "No reserve"))).ToList();
+        if (firstReserve is not null && reserves.All(choice => choice.Id != firstReserve))
+            reserves.Add(new(firstReserve, I18n.T("Резервный сервер недоступен", "Reserve server unavailable")));
+        reserve.ItemsSource = reserves;
+        reserve.SelectedItem = reserves.First(choice => choice.Id == firstReserve);
+        advanced.Children.Add(Label(I18n.T("Резервный сервер", "Reserve server")));
+        advanced.Children.Add(reserve);
+        directFallback.Content = I18n.T("Direct при потере NetBird", "Use Direct if NetBird is unavailable");
+        directFallback.IsChecked = old?.UnavailableRoute == RouteTarget.Direct;
+        advanced.Children.Add(directFallback);
+        advanced.Children.Add(Label(I18n.T("Разрешённые направления", "Allowed connections")));
+        var choicesRow = new WrapPanel();
+        foreach (var choice in RouteChoice.Options.Where(option => option.Target != RouteTarget.Block))
+        {
+            var enabled = new CheckBox { Content = choice.Label, IsChecked = old?.Allows(choice.Target) ?? true, Margin = new(0, 0, 16, 0) };
+            enabled.Checked += (_, _) => UpdateDirection();
+            enabled.Unchecked += (_, _) => UpdateDirection();
+            allowed.Add(choice.Target, enabled);
+            choicesRow.Children.Add(enabled);
+        }
+        advanced.Children.Add(choicesRow);
+        advanced.Children.Add(Label(I18n.T("Протокол и порт назначения", "Destination protocol and port")));
+        transport.ItemsSource = new[] { I18n.T("Любой протокол", "Any protocol"), "TCP", "UDP" };
+        transport.SelectedIndex = old?.Transport is { } protocol ? (int)protocol + 1 : 0;
+        port.Text = old?.Port?.ToString() ?? "";
+        var networkRow = new System.Windows.Controls.Primitives.UniformGrid { Columns = 2 };
+        networkRow.Children.Add(transport);
+        networkRow.Children.Add(port);
+        advanced.Children.Add(networkRow);
+        Children.Add(new Expander { Header = I18n.T("Резерв и ограничения", "Fallback and restrictions"),
+            Content = advanced, Margin = new(0, 10, 0, 0), Foreground = (Brush)Application.Current.Resources["Text"] });
+        protection.Content = I18n.T("Системная защита WFP", "WFP system protection");
+        protection.ToolTip = I18n.T("Для IP/CIDR и полного пути приложения. Доменные правила работают в sing-box.", "Available for IP/CIDR and full app paths. Domain rules work in sing-box.");
+        protection.IsChecked = old?.SystemProtection == true;
+        protection.Checked += (_, _) => UpdateDirection();
+        protection.Unchecked += (_, _) => UpdateDirection();
+        Children.Add(protection);
+        direction.SelectionChanged += (_, _) => UpdateDirection();
+        direction.SelectedValue = old?.Target ?? RouteTarget.Vpn;
         ValueField.Text = old is null ? "" : string.Join(", ", old.Values); NameField.Text = old?.Name ?? "";
-        typeButtons[Kind].IsChecked = true; (UseVpn ? vpnButton : directButton).IsChecked = true; UpdateKind();
+        typeButtons[Kind].IsChecked = true; UpdateKind();
     }
     private static TextBlock Label(string text)
     {
@@ -87,7 +137,8 @@ internal sealed class RuleEditor : StackPanel
         return new() { GroupName = group, Content = row, Style = (Style)Application.Current.Resources["RuleChoice"], MinHeight = 44, Margin = new(0, 0, 8, 8) };
     }
     internal void SelectKind(RuleKind kind) => typeButtons[kind].IsChecked = true;
-    internal void SelectAction(bool vpn) => (vpn ? vpnButton : directButton).IsChecked = true;
+    internal void SelectDirection(RouteTarget route) => direction.SelectedValue = route;
+    internal void SelectAction(bool vpn) => SelectDirection(vpn ? RouteTarget.Vpn : RouteTarget.Direct);
     private void UpdateKind()
     {
         var (hint, placeholder) = Kind switch {
@@ -100,13 +151,43 @@ internal sealed class RuleEditor : StackPanel
         explanation.Text = hint; ValueField.Tag = placeholder;
         picker.Visibility = Kind is RuleKind.Application or RuleKind.GeoSite or RuleKind.GeoIp ? Visibility.Visible : Visibility.Collapsed;
         picker.Content = I18n.T("Список", "List");
+        UpdateDirection();
+    }
+    private void UpdateDirection()
+    {
+        ServerField.IsEnabled = reserve.IsEnabled = UseVpn;
+        protection.IsEnabled = protection.IsChecked == true || Direction != RouteTarget.Direct && Kind is (RuleKind.Application or RuleKind.Network);
+        directFallback.IsEnabled = Direction == RouteTarget.NetBird && protection.IsChecked != true &&
+            allowed.TryGetValue(RouteTarget.Direct, out var direct) && direct.IsChecked == true;
+        if (!directFallback.IsEnabled) directFallback.IsChecked = false;
     }
     internal RoutingRule Build()
     {
         var values = ValueField.Text.Split(Kind == RuleKind.Application ? new[] { ',', '\n', '\r' } : new[] { ',', '\n', '\r', ' ' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(v => Kind == RuleKind.Site ? RuleValidation.SiteHost(v, dropWww: true) : v).Where(v => v.Length > 0).Distinct().ToList();
         var name = NameField.Text.Trim();
         if (name.Length == 0 && values.Count > 0) name = Kind == RuleKind.Application ? Path.GetFileNameWithoutExtension(values[0]) : values[0];
-        var result = new RoutingRule { Id = original?.Id ?? Guid.NewGuid().ToString("N"), CreatedAt = original is null ? DateTimeOffset.UtcNow : original.CreatedAt, Name = name, Kind = Kind, Values = values, UseVpn = UseVpn, ServerId = UseVpn ? (ServerField.SelectedItem as RuleServerChoice)?.Id : null };
+        int? destinationPort = null;
+        if (!string.IsNullOrWhiteSpace(port.Text))
+        {
+            if (!int.TryParse(port.Text, out var parsed)) throw new UserError(I18n.T("Введите номер порта.", "Enter a port number."));
+            destinationPort = parsed;
+        }
+        var denied = allowed.Where(entry => entry.Value.IsChecked != true).Select(entry => entry.Key).ToArray();
+        var reserveId = (reserve.SelectedItem as RuleServerChoice)?.Id;
+        var result = new RoutingRule
+        {
+            Id = original?.Id ?? Guid.NewGuid().ToString("N"), CreatedAt = original is null ? DateTimeOffset.UtcNow : original.CreatedAt,
+            Name = name, Kind = Kind, Values = values, Enabled = original?.Enabled ?? true, UseVpn = Direction != RouteTarget.Direct,
+            Destination = Direction is RouteTarget.Direct or RouteTarget.Vpn ? null : Direction,
+            ServerId = UseVpn ? (ServerField.SelectedItem as RuleServerChoice)?.Id : null,
+            FallbackServerIds = UseVpn && reserveId is not null
+                ? original?.FallbackServerIds is { Count: > 0 } previous && previous[0] == reserveId ? [.. previous] : [reserveId] : null,
+            UnavailableRoute = directFallback.IsChecked == true ? RouteTarget.Direct : null,
+            ForbiddenRoutes = denied.Length == 0 ? null : denied,
+            SystemProtection = protection.IsChecked == true,
+            Transport = transport.SelectedIndex <= 0 ? null : (RuleTransport)(transport.SelectedIndex - 1),
+            Port = destinationPort
+        };
         RuleValidation.Validate(result); return result;
     }
 }

@@ -10,6 +10,8 @@
    <DataTemplate DataType="{x:Type local:RulesPage}"><local:RulesView DataContext="{Binding Main}"/></DataTemplate>
    <DataTemplate DataType="{x:Type local:SubscriptionsPage}"><local:SubscriptionsView DataContext="{Binding Main}"/></DataTemplate>
    <DataTemplate DataType="{x:Type local:SettingsPage}"><local:SettingsView DataContext="{Binding Main}"/></DataTemplate>
+   <DataTemplate DataType="{x:Type local:ConnectionsPage}"><local:ConnectionsView DataContext="{Binding Main}"/></DataTemplate>
+   <DataTemplate DataType="{x:Type local:ProtectionPage}"><local:ProtectionView DataContext="{Binding Main}"/></DataTemplate>
   </ResourceDictionary>
  </Application.Resources>
 </Application>

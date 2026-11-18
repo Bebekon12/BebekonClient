@@ -58,6 +58,8 @@ public partial class ServersView : UserControl
     }
 }
 public partial class SubscriptionsView : UserControl { public SubscriptionsView() => InitializeComponent(); }
+public partial class ConnectionsView : UserControl { public ConnectionsView() => InitializeComponent(); }
+public partial class ProtectionView : UserControl { public ProtectionView() => InitializeComponent(); }
 public partial class SettingsView : UserControl
 {
     private string category = "Network";

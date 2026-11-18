@@ -25,4 +25,6 @@ public sealed record ServersPage(MainViewModel Main) : PageModel(Main);
 public sealed record RulesPage(MainViewModel Main) : PageModel(Main);
 public sealed record SubscriptionsPage(MainViewModel Main) : PageModel(Main);
 public sealed record SettingsPage(MainViewModel Main) : PageModel(Main);
+public sealed record ConnectionsPage(MainViewModel Main) : PageModel(Main);
+public sealed record ProtectionPage(MainViewModel Main) : PageModel(Main);
 public sealed record ServerRow(Server Left, Server? Right);

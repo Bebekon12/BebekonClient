@@ -77,12 +77,16 @@ internal static class ConnectionChecks
         public ConnectSpec? Last;
         public async Task<ServiceResponse> SendAsync(ServiceRequest request, bool startService = false, CancellationToken ct = default)
         {
-            var transition = request.Operation is "StartCore" or "StopCore";
+            var transition = request.Operation is "StartCore" or "StopCore" or "RestartCore";
             if (transition) MaxConcurrentTransitions = Math.Max(MaxConcurrentTransitions, ++transitions);
             try
             {
                 await Task.Delay(20, ct);
-                if (request.Operation == "StartCore") { Require(!Running, "No duplicate start"); Starts++; Running = true; Last = request.Spec; }
+                if (request.Operation is "StartCore" or "RestartCore")
+                {
+                    if (request.Operation == "StartCore") Require(!Running, "No duplicate start");
+                    Starts++; Running = true; Last = request.Spec;
+                }
                 if (request.Operation == "StopCore") Running = false;
                 return new(true, new(Running ? ConnectionState.Connected : ConnectionState.Disconnected,
                     ConnectedAt: Running ? DateTimeOffset.UtcNow : null, CorePid: Running ? 123 : null,
