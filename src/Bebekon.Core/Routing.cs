@@ -281,6 +281,7 @@ public static class ConfigGenerator
         // Fragmentation only ever applies to direct connections; inside the VPN it would only add delay.
         else if (spec.Settings.TlsFragment && finalTag == "direct") routes.Add(RouteAction(new(), finalTag, true));
         var route = new JsonObject { ["rules"] = routes, ["final"] = finalTag ?? "vpn", ["auto_detect_interface"] = true, ["default_domain_resolver"] = "direct-dns" };
+        if (!probeOnly && spec.Settings.TlsFragment) spec.Settings.DirectPolicy?.Apply(routes, sets);
         if (sets.Count > 0) route["rule_set"] = sets;
         var config = new JsonObject {
             ["log"] = new JsonObject { ["level"] = "info", ["timestamp"] = false, ["disabled"] = false },

@@ -102,6 +102,8 @@ public sealed partial class MainViewModel
         }
         finally { connectionGate.Release(); }
     }
+    public ICommand ConfigureDirectTraffic { get; private set; } = null!;
+    public ICommand ConfigureObhod { get; private set; } = null!;
     public ICommand RefreshConnections { get; private set; } = null!;
     public ICommand ChangeNetBird { get; private set; } = null!;
     public ICommand CheckRoute { get; private set; } = null!;
@@ -114,6 +116,13 @@ public sealed partial class MainViewModel
     {
         EditDestinations = Async(_ => ChangeDestinationsAsync(true), () => !ConnectionBusy);
         ToggleDestinations = Async(_ => ChangeDestinationsAsync(false), () => !ConnectionBusy && Protection?.GuardTargets is { Length: > 0 });
+        ConfigureDirectTraffic = new Command(_ =>
+        {
+            var policy = Dialogs.DirectPolicyEditor(Settings.DirectPolicy, Settings.ObhodFolder);
+            if (policy == null) return;
+            Settings.DirectPolicy = policy; Save(); if (TlsFragmentEnabled) QueueApply();
+        });
+        ConfigureObhod = new Command(_ => Dialogs.ManageObhod(Settings, Save));
         RefreshConnections = Async(_ => ReadConnectionsAsync(lifetime.Token));
         ChangeNetBird = Async(async value =>
         {

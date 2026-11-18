@@ -265,11 +265,14 @@ public sealed class Settings
     public TunnelMode TunnelMode { get; set; } = TunnelMode.Tun;
     public bool Animations { get; set; } = true;
     public bool MapLocation { get; set; } = true;
+    public string ObhodFolder { get; set; } = "";
+    public string ObhodProfile { get; set; } = "";
     public bool ScanOnOpen { get; set; }
     /// <summary>sing-box urltest across the visible servers instead of the selected one.</summary>
     public bool AutoServer { get; set; }
     /// <summary>Split the TLS ClientHello of direct (non-VPN) connections, against throttling by SNI.</summary>
     public bool TlsFragment { get; set; }
+    public DirectTrafficPolicy DirectPolicy { get; set; } = new();
     /// <summary>Block traffic outside the tunnel while connected or reconnecting (TUN mode, see KillSwitch).</summary>
     public bool KillSwitch { get; set; }
     public bool PersistentKillSwitch { get; set; }

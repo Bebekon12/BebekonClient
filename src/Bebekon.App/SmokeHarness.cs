@@ -68,6 +68,7 @@ internal static class SmokeHarness
         await ConnectionChecks.RunAsync(Path.Combine(Root, "connection-regression"));
         await CheckStaleLatencyAsync(report);
         await CheckLiveLatencySortingAsync(report);
+        CheckNetworkEditors(report);
         var hiddenSub = vm.Data.Subscriptions[0]; var selectedBeforeHide = vm.SelectedServer;
         vm.ToggleSubscriptionVisibility.Execute(hiddenSub);
         if (vm.ServerRows.Count != 0 || vm.SelectedServer != selectedBeforeHide || vm.Data.Servers.Count == 0) throw new InvalidOperationException("Hiding a subscription must only affect its visible servers.");
@@ -611,6 +612,47 @@ internal static class SmokeHarness
         report.Add("Home: one scroll surface, 1000-server virtualization, empty subscription guidance, matched dock geometry, public and local IP labels.");
     }
 
+    private static void CheckNetworkEditors(List<string> report)
+    {
+        var root = Directory.CreateTempSubdirectory();
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(root.FullName, "bin"));
+            Directory.CreateDirectory(Path.Combine(root.FullName, "lists"));
+            File.WriteAllBytes(Path.Combine(root.FullName,"bin","winws.exe"), []);
+            foreach (var name in new[] {"general.bat","general (ALT).bat","service.bat","other.bat"})
+                File.WriteAllBytes(Path.Combine(root.FullName,name),[]);
+            if (!Dialogs.ObhodProfiles(root.FullName).SequenceEqual(new[] {"general.bat","general (ALT).bat"}))
+                throw new InvalidOperationException("Only selectable Obhod profiles belong in the list.");
+            var settings = new Settings { ObhodFolder = root.FullName };
+            Dialogs.RenderObserver = w => w.Dispatcher.BeginInvoke(new Action(() =>
+            {
+                var profiles = Descendants(w).OfType<ComboBox>().Single();
+                profiles.SelectedItem = "general (ALT).bat"; w.UpdateLayout(); Capture(w,"Obhod"); w.Close();
+            }));
+            Dialogs.ManageObhod(settings, () => {});
+            if (settings.ObhodProfile != "general (ALT).bat") throw new InvalidOperationException("Profile choice was not retained.");
+            Dialogs.RenderObserver = w => w.Dispatcher.BeginInvoke(new Action(() =>
+            {
+                var inputs = Descendants(w).OfType<TextBox>().ToArray();
+                inputs[0].Text = "^exact.example\n192.0.2.1"; inputs[1].Text = "exclude.example";
+                w.UpdateLayout(); Capture(w,"Direct-Lists");
+                Descendants(w).OfType<Button>().Single(b => b.IsDefault).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            }));
+            var direct = Dialogs.DirectPolicyEditor(null, root.FullName);
+            if (direct?.Include.Length != 2 || direct.Exclude.Single() != "exclude.example") throw new InvalidOperationException("Direct list editor lost entries.");
+            Dialogs.RenderObserver = w => w.Dispatcher.BeginInvoke(new Action(() =>
+            {
+                Descendants(w).OfType<TextBox>().Single().Text = "fixture.example\n192.0.2.25";
+                w.UpdateLayout(); Capture(w,"Guard-List");
+                Descendants(w).OfType<Button>().Single(b => b.IsDefault).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            }));
+            var saved = Dialogs.Lines("Защита выбранных адресов","Домены и IP/CIDR",[], lines => DestinationGuard.Parse(lines).Entries);
+            if (saved?.Length != 2 || !saved.Contains("192.0.2.25/32")) throw new InvalidOperationException("Guard editor lost a target.");
+            report.Add("Protected destination and direct-list editors save normalized entries; external profile selection persisted without launching a tool.");
+        }
+        finally { Dialogs.RenderObserver = null; root.Delete(true); }
+    }
     private static void CheckNewestRules(MainViewModel vm, List<string> report)
     {
         var prior = vm.ActiveProfile.Rules.ToArray();
