@@ -150,7 +150,7 @@ Known limits:
 - TLS ECH hides SNI; encrypted names cannot be sniffed. Browser DoH plus ECH can prevent domain selection. No promise to infer names from arbitrary encrypted traffic.
 - The basic Telegram preset covers websites; the admin preset also includes Telegram.exe and the official Telegram IP ranges. Process DNS from the Windows DNS Client service cannot always be attributed to the original program; use TUN and domain rules alongside process rules where needed.
 - Domain-only routing does not cover hard-coded IPs without an observable hostname. Add IP/subnet or application rules.
-- Full-VPN is not a kill switch after a core crash; Windows resumes its normal route when the TUN closes.
+- Windows resumes normal routing after a core crash unless a WFP policy is active. See the [Windows routing and WFP validation notes](docs/WINDOWS-ROUTING-ANALYSIS.md).
 - RAM targets are goals; any missed target is reported, without trimming Working Sets or hiding processes.
 - Sleep/wake and availability changes trigger status/probe verification and a controlled reconnect when needed. Physical adapters, DoH/ECH behavior, UAC installation, upgrade and clean-machine testing need the manual matrix.
 - Unsigned personal build: no Authenticode signing key was provided.

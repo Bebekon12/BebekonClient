@@ -6,7 +6,7 @@
        → sing-box 1.14.2 (native protocols, routing, DNS, counters, child job)
        → optional Xray 26.3.27 (VLESS XHTTP, separate child job, authenticated loopback bridges)
        → optional TrustTunnel client 1.1.7 (HTTP/2 / HTTP/3, child jobs, fixed TCP/UDP endpoint relays)
-       → TUN → ordered rules → selected VPN protocols or Direct
+       → TUN → ordered rules → Bebekon VPN, NetBird, Direct or Block
 
 App owns the DPAPI-protected subscription, servers, profiles and settings. Service owns the active privileged core and networking lifetime. Core is the only VLESS/TUN implementation; C# does not implement VPN cryptography.
 
@@ -14,7 +14,11 @@ TrustTunnel keeps the existing sing-box TUN/rules/DNS/counters. One official SOC
 
 Theme.xaml owns the shared palette and native control templates. IconView renders cached outline geometry; SettingRow gives searchable settings a common layout. View filtering stays local to presentation, while switches bind to the shared view model. TUN and Proxy always select one mode. Dialogs use the same tokens, keyboard focus, Escape/cancel and native window chrome. UI rendering and console helper tests have separate instance/pipe identities and cannot operate on the installed service.
 
-Core library is shared by the UI, service and tests. ConfigGenerator maps human rule kinds to domain_suffix, domain_keyword, process_path/process_name, ip_cidr and modern rule_set references. One ordered list drives routing and compatible DNS matching. The admin preset inserts its Direct exceptions first when applied; configuration generation preserves the resulting user order. FINAL=Direct by default; FINAL=VPN only for explicit Entire PC mode. Protocol sniff and DNS capture precede the list, while the authenticated probe inbound is always forced through VPN.
+Core library is shared by the UI, service and tests. ConfigGenerator maps active rules to domain_suffix, domain_keyword, process_path/process_name, ip_cidr and embedded rule_set references. User order is preserved within the WFP-protected and ordinary rules. WFP-protected rules take precedence. A profile has an explicit default destination. Legacy profiles keep their default route and the existing Entire PC selection. Protocol sniff and DNS capture precede the list. The authenticated health probe always uses Bebekon VPN.
+
+The UI reads the registered NetBird CLI status as the interactive user. The helper derives interface binding and split DNS from the active Windows adapter, route lookup and effective NRPT. The interface and DNS context are excluded from IPC serialization. NetBird destinations use interface-bound outbounds, and an unavailable corporate DNS scope yields a refusal unless a permitted fallback applies. Native TUN DNS lets Windows keep using corporate split DNS when NetBird is present for the active policy. The corporate ACLs and connection lifetime belong to NetBird.
+
+The helper installs requested Windows Filtering Platform protection before starting or replacing TUN. The session-wide option uses a dynamic session. Explicit persistent global protection and scoped protection use a dedicated provider. Scoped policies use full executable paths or IP/CIDR, with optional port and protocol. Persistent filters load with BFE and can be cleared through the helper or by the administrator during uninstall. The local self-test correlates socket probes with WFP drop events and verifies connectivity after removing the temporary filters.
 
 GeoCatalog reads only trusted embedded headless rule sets; the privileged service does not load user-writable data files or download geo data. RoutingRule.ServerId optionally pins a rule to a supported subscription node. ConnectSpec includes only referenced extra nodes, which are validated again by the service and mapped to generated outbound/DNS tags. Missing references are errors; the probe remains on the main selected server. RuleEditor builds a validated model only on Save. PresetCatalog creates independent rules, preserves intentional screenshot entries and prevents repeated application from duplicating existing rules.
 
