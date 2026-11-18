@@ -22,6 +22,7 @@ public static class RuleValidation
     public static void Validate(RoutingRule rule)
     {
         if (!Enum.IsDefined(rule.Kind) || string.IsNullOrWhiteSpace(rule.Name) || rule.Name.Length > 160 || rule.Values.Count is < 1 or > 500) throw new UserError("Укажите название и адрес правила.");
+        if (!Enum.IsDefined(rule.Target)) throw new UserError("Неизвестное направление правила.");
         if (rule.ServerId is { } serverId && (serverId.Length is < 1 or > 128 || serverId.Any(char.IsControl))) throw new UserError("Некорректный сервер правила.");
         for (var i = 0; i < rule.Values.Count; i++)
         {
@@ -98,7 +99,7 @@ public static class ConfigGenerator
         var serverTags = new Dictionary<string, string> { [s.Id] = "vpn" };
         if (!probeOnly)
         {
-            var required = spec.Profile.Rules.Where(r => r.UseVpn && r.ServerId is not null).Select(r => r.ServerId!).Distinct().Where(id => id != s.Id).ToArray();
+            var required = spec.Profile.VpnServerIds.Where(id => id != s.Id).ToArray();
             if (required.Length > 64) throw new UserError("В одном профиле можно использовать до 64 дополнительных серверов.");
             foreach (var id in required)
             {
@@ -131,21 +132,27 @@ public static class ConfigGenerator
             routes.Insert(0, new JsonObject { ["inbound"] = Strings(["origin-probe"]), ["domain"] = Strings(MapLocation.LookupHosts), ["port"] = 443, ["action"] = "route", ["outbound"] = "direct" });
             routes.Insert(1, new JsonObject { ["inbound"] = Strings(["origin-probe"]), ["action"] = "reject" });
         }
-        foreach (var rule in probeOnly ? [] : spec.Profile.Rules)
+        foreach (var rule in probeOnly ? [] : spec.Profile.ActiveRules)
         {
             if (rule.Kind is RuleKind.GeoSite or RuleKind.GeoIp)
                 foreach (var value in rule.Values) if (setTags.Add(GeoCatalog.Tag(rule.Kind, value))) sets.Add(GeoCatalog.Inline(rule.Kind, value));
-            var tag = !rule.UseVpn ? "direct" : rule.ServerId is null ? "vpn" : serverTags[rule.ServerId];
-            var match = Match(rule); match["action"] = "route"; match["outbound"] = tag; if (tag == "direct" && spec.Settings.TlsFragment) match["tls_fragment"] = true; routes.Add(match);
-            if (rule.Kind is not (RuleKind.Network or RuleKind.GeoIp)) { var dm = Match(rule); dm["action"] = "route"; dm["server"] = tag == "vpn" ? "vpn-dns" : tag + "-dns"; dnsRules.Add(dm); }
+            var tag = rule.Target == RouteTarget.Vpn && rule.ServerId is { } serverId ? serverTags[serverId] : RouteTag(rule.Target);
+            routes.Add(RouteAction(Match(rule), tag, spec.Settings.TlsFragment));
+            if (rule.Kind is not (RuleKind.Network or RuleKind.GeoIp)) dnsRules.Add(DnsAction(Match(rule), tag));
+        }
+        var finalTag = probeOnly ? "vpn" : RouteTag(spec.Profile.DefaultRoute);
+        if (finalTag is null)
+        {
+            routes.Add(RouteAction(new(), null, false));
+            dnsRules.Add(DnsAction(new(), null));
         }
         // Fragmentation only ever applies to direct connections; inside the VPN it would only add delay.
-        if (!probeOnly && spec.Settings.TlsFragment && spec.Profile.DefaultRoute != RouteTarget.Vpn) routes.Add(new JsonObject { ["action"] = "route", ["outbound"] = "direct", ["tls_fragment"] = true });
-        var route = new JsonObject { ["rules"] = routes, ["final"] = spec.Profile.DefaultRoute == RouteTarget.Vpn || probeOnly ? "vpn" : "direct", ["auto_detect_interface"] = true, ["default_domain_resolver"] = "direct-dns" };
+        else if (spec.Settings.TlsFragment && finalTag == "direct") routes.Add(RouteAction(new(), finalTag, true));
+        var route = new JsonObject { ["rules"] = routes, ["final"] = finalTag ?? "vpn", ["auto_detect_interface"] = true, ["default_domain_resolver"] = "direct-dns" };
         if (sets.Count > 0) route["rule_set"] = sets;
         return new JsonObject {
             ["log"] = new JsonObject { ["level"] = "info", ["timestamp"] = false, ["disabled"] = false },
-            ["dns"] = new JsonObject { ["servers"] = dnsServers, ["rules"] = dnsRules, ["final"] = spec.Profile.DefaultRoute == RouteTarget.Vpn || probeOnly ? "vpn-dns" : "direct-dns", ["reverse_mapping"] = true, ["cache_capacity"] = 4096, ["strategy"] = "prefer_ipv4" },
+            ["dns"] = new JsonObject { ["servers"] = dnsServers, ["rules"] = dnsRules, ["final"] = (finalTag ?? "vpn") + "-dns", ["reverse_mapping"] = true, ["cache_capacity"] = 4096, ["strategy"] = "prefer_ipv4" },
             ["inbounds"] = inbounds, ["outbounds"] = outbounds, ["route"] = route
         }.ToJsonString(Json.Options);
     }
@@ -157,6 +164,26 @@ public static class ConfigGenerator
     public static List<Server> AutoServers(ConnectSpec spec) => spec.Settings.AutoServer && spec.AutoServers is { } servers
         ? servers.Prepend(spec.Server).Where(AutoEligible).DistinctBy(n => n.Id).Take(64).ToList() : [];
     public static bool AutoEligible(Server n) => n.Supported && n.Type != "trusttunnel" && n.Transport != "xhttp";
+    private static string? RouteTag(RouteTarget target) => target switch
+    {
+        RouteTarget.Direct => "direct",
+        RouteTarget.Vpn => "vpn",
+        _ => null
+    };
+    private static JsonObject RouteAction(JsonObject match, string? tag, bool tlsFragment)
+    {
+        match["action"] = tag is null ? "reject" : "route";
+        if (tag is not null) match["outbound"] = tag;
+        if (tag == "direct" && tlsFragment) match["tls_fragment"] = true;
+        return match;
+    }
+    private static JsonObject DnsAction(JsonObject match, string? tag)
+    {
+        match["action"] = tag is null ? "predefined" : "route";
+        if (tag is null) match["rcode"] = "REFUSED";
+        else match["server"] = tag + "-dns";
+        return match;
+    }
     private static JsonObject Dns(string tag, string detour) => new() { ["type"] = "https", ["tag"] = tag, ["server"] = "1.1.1.1", ["detour"] = detour, ["tls"] = new JsonObject { ["server_name"] = "cloudflare-dns.com" } };
     private static JsonObject Vpn(Server s, string tag, XhttpRuntime? runtime, TrustTunnelRuntime? trustTunnel)
     {

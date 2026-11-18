@@ -13,7 +13,7 @@ public abstract class Observable : INotifyPropertyChanged
     { if (EqualityComparer<T>.Default.Equals(field, value)) return false; field = value; Notify(name); return true; }
     public void Notify([CallerMemberName] string? name = null) => PropertyChanged?.Invoke(this, new(name));
 }
-public enum RouteTarget { Direct, Vpn }
+public enum RouteTarget { Direct, Vpn, NetBird, Block }
 public enum RuleKind { Site, Contains, Application, Network, GeoSite, GeoIp }
 public enum LatencyQuality { Unknown, Good, Moderate, Poor }
 public static class LatencyDisplay
@@ -106,9 +106,40 @@ public sealed class RoutingRule : Observable
     public List<string> Values { get; set; } = [];
     public string? ServerId { get; set; }
     private bool useVpn = true;
-    public bool UseVpn { get => useVpn; set { if (Set(ref useVpn, value)) { Notify(nameof(Target)); Notify(nameof(RouteLabel)); } } }
-    [JsonIgnore] public RouteTarget Target => UseVpn ? RouteTarget.Vpn : RouteTarget.Direct;
-    [JsonIgnore] public string RouteLabel => UseVpn ? "Через VPN" : "Без VPN";
+    private bool enabled = true;
+    private RouteTarget? destination;
+    // Profiles saved before Destination was introduced still restore both legacy routes.
+    public bool UseVpn
+    {
+        get => Target != RouteTarget.Direct;
+        set
+        {
+            if (useVpn == value) return;
+            useVpn = value;
+            if (destination is null) NotifyRoute();
+        }
+    }
+    public bool Enabled { get => enabled; set => Set(ref enabled, value); }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public RouteTarget? Destination
+    {
+        get => destination;
+        set { if (Set(ref destination, value)) NotifyRoute(); }
+    }
+    [JsonIgnore] public RouteTarget Target => destination ?? (useVpn ? RouteTarget.Vpn : RouteTarget.Direct);
+    [JsonIgnore] public string RouteLabel => Target switch
+    {
+        RouteTarget.Vpn => "Bebekon VPN",
+        RouteTarget.Direct => "Direct",
+        RouteTarget.NetBird => "NetBird",
+        _ => "Block"
+    };
+    private void NotifyRoute()
+    {
+        Notify(nameof(Target));
+        Notify(nameof(RouteLabel));
+        Notify(nameof(UseVpn));
+    }
     [JsonIgnore] public string Description => Kind switch { RuleKind.Application => "Программа · " + string.Join(", ", Values.Select(System.IO.Path.GetFileName)), RuleKind.Network => "IP / подсеть · " + string.Join(", ", Values), RuleKind.GeoSite => "Сайты и сервисы · " + string.Join(", ", Values), RuleKind.GeoIp => "IP-адреса набора · " + string.Join(", ", Values), RuleKind.Contains => "Адрес содержит · " + string.Join(", ", Values), _ => "Сайт и поддомены · " + string.Join(", ", Values) };
     [JsonIgnore] public string Glyph => Kind switch { RuleKind.Application => "▦", RuleKind.Network => "⌘", _ => "◎" };
 }
@@ -120,6 +151,10 @@ public sealed class Profile : Observable
     private RouteTarget defaultRoute = RouteTarget.Direct;
     public RouteTarget DefaultRoute { get => defaultRoute; set => Set(ref defaultRoute, value); }
     public ObservableCollection<RoutingRule> Rules { get; set; } = [];
+    [JsonIgnore] public IEnumerable<RoutingRule> ActiveRules => Rules.Where(rule => rule.Enabled);
+    [JsonIgnore] public IEnumerable<string> VpnServerIds => ActiveRules
+        .Where(rule => rule.Target == RouteTarget.Vpn && rule.ServerId is not null)
+        .Select(rule => rule.ServerId!).Distinct(StringComparer.Ordinal);
 }
 public sealed class Subscription : Observable
 {

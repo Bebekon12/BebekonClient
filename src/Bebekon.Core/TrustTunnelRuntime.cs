@@ -14,7 +14,7 @@ internal sealed class TrustTunnelRuntime
     {
         var nodes = new List<Server> { spec.Server };
         if (!probeOnly)
-            foreach (var id in spec.Profile.Rules.Where(r => r.UseVpn && r.ServerId is not null).Select(r => r.ServerId!).Distinct().Where(id => id != spec.Server.Id))
+            foreach (var id in spec.Profile.VpnServerIds.Where(id => id != spec.Server.Id))
             { var matches = spec.RuleServers?.Where(s => s.Id == id).ToArray(); if (matches?.Length != 1) throw new UserError("Сервер правила недоступен."); nodes.Add(matches[0]); }
         var selected = nodes.Where(s => s.Type == "trusttunnel").ToArray(); if (selected.Length == 0) return null;
         if (selected.Length > 8) throw new UserError("В одном подключении можно использовать до 8 серверов TrustTunnel.");

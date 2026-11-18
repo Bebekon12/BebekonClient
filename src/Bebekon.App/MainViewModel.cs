@@ -193,7 +193,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
             if (transport is null || transport == node.Transport) return;
             node.Transport = transport; node.PreferredTrustTunnelTransport = transport; node.Notify(nameof(Server.Protocol)); node.Notify(nameof(Server.ConnectionLabel));
             node.Latency = "—"; node.LatencyMs = null; Save(); RefreshServers();
-            if (SelectedServer?.Id == node.Id || ActiveProfile.Rules.Any(r => r.UseVpn && r.ServerId == node.Id)) QueueApply();
+            if (SelectedServer?.Id == node.Id || ActiveProfile.VpnServerIds.Contains(node.Id)) QueueApply();
         });
         FavoriteServer = new Command(p => { var s = (Server)p!; s.Favorite = !s.Favorite; Save(); });
         PingAll = Async(_ => ScanAsync(true), () => !Scanning);
@@ -424,7 +424,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
     private void RefreshRules() { VisibleRules.Clear(); var rules = ActiveProfile.Rules.Where(r => r.Name.Contains(RuleSearch, StringComparison.OrdinalIgnoreCase) || r.Description.Contains(RuleSearch, StringComparison.OrdinalIgnoreCase)); if (RuleSortIndex == 0) rules = rules.OrderByDescending(r => r.CreatedAt); foreach (var r in rules) VisibleRules.Add(r); Notify(nameof(RuleCount)); Notify(nameof(NoRules)); }
     private void AttachProfile() { foreach (var r in ActiveProfile.Rules) { r.PropertyChanged -= OnRuleChanged; r.PropertyChanged += OnRuleChanged; } }
     private void DetachProfile(Profile p) { foreach (var r in p.Rules) r.PropertyChanged -= OnRuleChanged; }
-    private void OnRuleChanged(object? sender, PropertyChangedEventArgs e) { if (e.PropertyName == nameof(RoutingRule.UseVpn)) { Save(); QueueApply(); } }
+    private void OnRuleChanged(object? sender, PropertyChangedEventArgs e) { if (e.PropertyName is nameof(RoutingRule.Target) or nameof(RoutingRule.Enabled)) { Save(); QueueApply(); } }
     internal void RulesChanged() { AttachProfile(); RefreshRules(); Save(); QueueApply(); }
     public void Reorder(RoutingRule source, RoutingRule target) { var a = ActiveProfile.Rules.IndexOf(source); var b = ActiveProfile.Rules.IndexOf(target); if (a < 0 || b < 0 || a == b) return; ActiveProfile.Rules.Move(a, b); RulesChanged(); }
     private void QueueApply()
@@ -481,7 +481,8 @@ public sealed partial class MainViewModel : Observable, IDisposable
             catch (TimeoutException) { }
             finally { locatingBeforeTunnel = false; }
             token.ThrowIfCancellationRequested();
-            spec = new(SelectedServer, ActiveProfile, Settings, LatencyService.FreePort(), Convert.ToHexString(RandomNumberGenerator.GetBytes(24)), Data.Servers.Where(s => ActiveProfile.Rules.Any(r => r.UseVpn && r.ServerId == s.Id)).ToList(),
+            var ruleServerIds = ActiveProfile.VpnServerIds.ToHashSet(StringComparer.Ordinal);
+            spec = new(SelectedServer, ActiveProfile, Settings, LatencyService.FreePort(), Convert.ToHexString(RandomNumberGenerator.GetBytes(24)), Data.Servers.Where(s => ruleServerIds.Contains(s.Id)).ToList(),
                 AutoServers: Settings.AutoServer ? AutoPool : null);
             if (MapLocationEnabled) {
                 int originPort;

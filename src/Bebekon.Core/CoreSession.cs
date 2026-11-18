@@ -15,7 +15,7 @@ public sealed class XhttpRuntime
         var nodes = new List<Server> { spec.Server };
         if (!probeOnly)
         {
-            foreach (var id in spec.Profile.Rules.Where(r => r.UseVpn && r.ServerId is not null).Select(r => r.ServerId!).Distinct().Where(id => id != spec.Server.Id))
+            foreach (var id in spec.Profile.VpnServerIds.Where(id => id != spec.Server.Id))
             { var found = spec.RuleServers?.Where(s => s.Id == id).ToArray(); if (found?.Length != 1) throw new UserError("Сервер правила недоступен."); nodes.Add(found[0]); }
         }
         if (nodes.Count > 65) throw new UserError("Слишком много дополнительных серверов.");
