@@ -25,11 +25,9 @@ jobs:
         env:
           BEBEKON_WFP_TEST_VM: '1'
         run: |
-          dotnet build src/Bebekon.Core/Bebekon.Core.csproj -c Release
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           netsh wfp set options netevents=on
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          dotnet test tests/Bebekon.Tests/Bebekon.Tests.csproj -c Release -p:BuildProjectReferences=false --filter 'Category=WfpKernel' --logger 'trx;LogFileName=wfp.trx' --results-directory artifacts/wfp
+          dotnet test tests/Bebekon.Tests/Bebekon.Tests.csproj -c Release -p:WfpKernelOnly=true --filter 'Category=WfpKernel' --logger 'trx;LogFileName=wfp.trx' --results-directory artifacts/wfp
           $testExit = $LASTEXITCODE
           if ($testExit -ne 0 -and (Test-Path -LiteralPath artifacts/wfp/wfp.trx)) {
             $trx = [xml](Get-Content -LiteralPath artifacts/wfp/wfp.trx -Raw)
