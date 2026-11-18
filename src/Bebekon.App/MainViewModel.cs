@@ -129,12 +129,22 @@ public sealed partial class MainViewModel : Observable, IDisposable
         }
     }
     private int latencyIndex = 1;
-    public int LatencyIndex { get => latencyIndex; set { if (value is < 0 or > 3) return; if (Set(ref latencyIndex, value)) { latencyGeneration++; scan?.Cancel(); Settings.LatencyMode = (LatencyMode)value; Save(); foreach (var s in Data.Servers) { s.Latency = "—"; s.LatencyMs = null; } RefreshServers(); if (ScanOnOpen && PageName == "Servers") _ = ScanSafelyAsync(); } } }
+    public int LatencyIndex { get => latencyIndex; set { if (value is < 0 or > 3) return; if (Set(ref latencyIndex, value)) { latencyGeneration++; scan?.Cancel(); if (!Scanning) { scanTotal = scanCompleted = scanFailed = 0; NotifyScan(); } Settings.LatencyMode = (LatencyMode)value; Save(); foreach (var s in Data.Servers) { s.Latency = "—"; s.LatencyMs = null; } RefreshServers(); if (ScanOnOpen && PageName == "Servers") _ = ScanSafelyAsync(); } } }
     private bool listMode = true;
     public bool ListMode { get => listMode; set { if (Set(ref listMode, value)) { Notify(nameof(SecondColumn)); RefreshServers(); } } }
     public GridLength SecondColumn => new(ListMode ? 0 : 1, GridUnitType.Star);
     private bool scanning;
     private int scanGeneration;
+    private int scanCompleted, scanTotal, scanFailed;
+    private bool scanStopped;
+    public int ScanCompleted => scanCompleted;
+    public int ScanTotal => scanTotal;
+    public string ScanSummary => scanTotal == 0 ? "" :
+        (Scanning ? (scan?.IsCancellationRequested == true ? T("Останавливаем", "Stopping") : T("Проверяем", "Checking")) :
+            scanStopped ? T("Остановлено", "Stopped") : T("Проверено", "Checked")) +
+        $" {scanCompleted} / {scanTotal}" + (scanFailed == 0 ? "" : T($" · без ответа {scanFailed}", $" · unavailable {scanFailed}")) +
+        (Scanning && scan?.IsCancellationRequested == false && (LatencyMode)LatencyIndex is (LatencyMode.HttpsGet or LatencyMode.HttpsHead) ? T(" · по два сервера", " · two at a time") : "");
+    private void NotifyScan() { Notify(nameof(ScanSummary)); Notify(nameof(ScanCompleted)); Notify(nameof(ScanTotal)); }
     public bool Scanning { get => scanning; private set { if (Set(ref scanning, value)) CommandManager.InvalidateRequerySuggested(); } }
     public string CoreVersion => ConfigGenerator.CoreVersion;
     public string ServerCount => DisplayServers.Count().ToString();
@@ -218,10 +228,10 @@ public sealed partial class MainViewModel : Observable, IDisposable
             if (SelectedServer?.Id == node.Id || ActiveProfile.VpnServerIds.Contains(node.Id)) QueueApply();
         });
         FavoriteServer = new Command(p => { var s = (Server)p!; s.Favorite = !s.Favorite; Save(); });
-        PingAll = Async(_ => ScanAsync(true), () => !Scanning);
+        PingAll = Async(_ => ScanAsync(true), () => !Scanning && DisplayServers.Any(s => s.Supported || (LatencyMode)LatencyIndex is LatencyMode.Tcp or LatencyMode.Icmp));
         PingServer = Async(async p => { if ((p as Server ?? SelectedServer) is { } node) await MeasureServerAsync(node, true, lifetime.Token); }, () => !Scanning);
         ChangeRoutingMode = new Command(_ => { var mode = Dialogs.RoutingMode(IsWholePc); if (mode is { } all) IsWholePc = all; });
-        CancelPing = new Command(_ => { scanGeneration++; scan?.Cancel(); });
+        CancelPing = new Command(_ => { scanGeneration++; scan?.Cancel(); NotifyScan(); }, () => Scanning && scan?.IsCancellationRequested == false);
         RefreshSubscriptions = Async(async _ => { foreach (var sub in Data.Subscriptions.ToArray()) await RefreshSubAsync(sub); });
         AddTrustTunnel = new Command(_ => { var sub = Dialogs.ManualTrustTunnel(); if (sub is null) return; var nodes = VlessParser.ParseSubscription(sub.Source); Data.Subscriptions.Add(sub); ReplaceServers(sub, nodes); Save(); Go("Servers"); });
         ToggleSubscriptionVisibility = new Command(p => { if (p is not Subscription sub) return; sub.Hidden = !sub.Hidden; Save(); RefreshServers(); });
@@ -384,12 +394,40 @@ public sealed partial class MainViewModel : Observable, IDisposable
     }
     private async Task RunScanAsync(bool force)
     {
-        if (Scanning) return; SortIndex = 0; Scanning = true; scan?.Dispose(); scan = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token); var token = scan.Token;
-        var nodes = DisplayServers.ToArray();
+        if (Scanning) return;
+        var mode = (LatencyMode)LatencyIndex;
+        var nodes = DisplayServers.Where(s => s.Supported || mode is LatencyMode.Tcp or LatencyMode.Icmp).ToArray();
+        scan?.Dispose();
+        scan = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+        var token = scan.Token;
+        scanTotal = nodes.Length; scanCompleted = 0; scanFailed = 0; scanStopped = false;
+        SortIndex = 0; Scanning = true; NotifyScan();
+        int next = 0;
         foreach (var node in nodes) if (node.LatencyMs is null) node.Latency = T("В очереди", "Queued");
-        try { await Task.WhenAll(nodes.Select(s => MeasureServerAsync(s, force, token))); RefreshServers(); }
-        catch (OperationCanceledException) { }
-        finally { foreach (var node in nodes.Where(n => n.Latency is "В очереди" or "Queued" or "Проверка…" or "Checking…")) node.Latency = "—"; Scanning = false; }
+        async Task Worker()
+        {
+            while (next < nodes.Length)
+            {
+                token.ThrowIfCancellationRequested();
+                var node = nodes[next++];
+                await MeasureServerAsync(node, force, token);
+                token.ThrowIfCancellationRequested();
+                if (node.LatencyMs is null or < 0) scanFailed++;
+                scanCompleted++; NotifyScan();
+            }
+        }
+        try
+        {
+            var parallel = mode is LatencyMode.Tcp or LatencyMode.Icmp ? 6 : 2;
+            await Task.WhenAll(Enumerable.Range(0, Math.Min(parallel, nodes.Length)).Select(_ => Worker()));
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { scanStopped = true; }
+        finally
+        {
+            foreach (var node in nodes.Where(n => n.Latency is "В очереди" or "Queued" or "Проверка…" or "Checking…")) node.Latency = "—";
+            if (mode != (LatencyMode)LatencyIndex) scanTotal = scanCompleted = scanFailed = 0;
+            Scanning = false; NotifyScan(); RefreshServers();
+        }
     }
     private async Task MeasureServerAsync(Server node, bool force, CancellationToken token)
     {
@@ -398,7 +436,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
         var request = ++latencyRequest;
         latestLatencyRequests[node.Id] = request;
         var identity = ServerRefresh.ConnectionKey(node);
-        latency.DetectCountries = MapLocationEnabled;
+        latency.DetectCountries = MapLocationEnabled && !Scanning;
         bool Current() => generation == latencyGeneration && latestLatencyRequests.GetValueOrDefault(node.Id) == request && (Data.Servers.Contains(node) || ReferenceEquals(SelectedServer, node)) && identity == ServerRefresh.ConnectionKey(node);
         var result = await (testLatency ?? latency.MeasureAsync)(node, mode, force, token, () => { if (Current() && node.LatencyMs is null) node.Latency = T("Проверка…", "Checking…"); });
         token.ThrowIfCancellationRequested();

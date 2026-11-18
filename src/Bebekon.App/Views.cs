@@ -47,14 +47,11 @@ public partial class ServersView : UserControl
 {
     public static readonly DependencyProperty EmbeddedProperty = DependencyProperty.Register(nameof(Embedded), typeof(bool), typeof(ServersView), new PropertyMetadata(false));
     public static readonly DependencyProperty ToolbarOnlyProperty = DependencyProperty.Register(nameof(ToolbarOnly), typeof(bool), typeof(ServersView), new PropertyMetadata(false));
-    public static readonly DependencyProperty CompactProperty = DependencyProperty.Register(nameof(Compact), typeof(bool), typeof(ServersView), new PropertyMetadata(false));
     public bool Embedded { get => (bool)GetValue(EmbeddedProperty); set => SetValue(EmbeddedProperty, value); }
     public bool ToolbarOnly { get => (bool)GetValue(ToolbarOnlyProperty); set => SetValue(ToolbarOnlyProperty, value); }
-    public bool Compact { get => (bool)GetValue(CompactProperty); private set => SetValue(CompactProperty, value); }
     public ServersView()
     {
         InitializeComponent();
-        SizeChanged += (_, _) => Compact = ActualWidth < 780;
     }
 }
 public partial class SubscriptionsView : UserControl { public SubscriptionsView() => InitializeComponent(); }

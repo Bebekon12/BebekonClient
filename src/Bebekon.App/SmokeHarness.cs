@@ -573,11 +573,25 @@ internal static class SmokeHarness
         vm.ListMode = true; vm.SortIndex = 1; vm.PingAll.Execute(null);
         results[fast.Id].SetResult(new(42, LatencyMode.HttpsGet, DateTimeOffset.UtcNow));
         await Task.Delay(250);
-        if (!vm.Scanning || vm.ServerRows[0].Left.Id != fast.Id || vm.SelectedServer?.Id != slow.Id)
+        if (!vm.Scanning || vm.ScanTotal != 2 || vm.ScanCompleted != 1 || vm.ServerRows[0].Left.Id != fast.Id || vm.SelectedServer?.Id != slow.Id)
             throw new InvalidOperationException("Green probes must rise during a running scan without changing the selected server.");
         results[slow.Id].SetResult(new(null, LatencyMode.HttpsGet, DateTimeOffset.UtcNow, true));
-        await vm.StopScansAsync();
-        if (vm.ServerRows[0].Left.Id != fast.Id) throw new InvalidOperationException("Timeouts must stay below successful probes.");
+        using var done = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+        while (vm.Scanning) await Task.Delay(10, done.Token);
+        if (vm.ScanCompleted != 2 || vm.ServerRows[0].Left.Id != fast.Id) throw new InvalidOperationException("Timeouts must stay below successful probes.");
+        int started = 0;
+        using var cancelVm = new MainViewModel(store, new ServiceClient(), null, async (_, mode, _, token, _) =>
+        {
+            started++;
+            await Task.Delay(Timeout.InfiniteTimeSpan, token);
+            return new(null, mode, DateTimeOffset.UtcNow);
+        });
+        cancelVm.PingAll.Execute(null);
+        if (started != 2 || !cancelVm.CancelPing.CanExecute(null)) throw new InvalidOperationException("Scan cancellation must be available.");
+        cancelVm.CancelPing.Execute(null);
+        await cancelVm.StopScansAsync();
+        if (cancelVm.Scanning || cancelVm.ScanCompleted != 0 || cancelVm.CancelPing.CanExecute(null))
+            throw new InvalidOperationException("Canceled probes must leave a stopped scan and accurate counts.");
         report.Add("Live ping sorting: completed green server rises while other probes remain pending; selected server remains unchanged.");
     }
     private static async Task CheckHomeVirtualizationAsync(MainWindow window, MainViewModel vm, List<string> report)
@@ -596,6 +610,7 @@ internal static class SmokeHarness
         foreach (var node in original) vm.Data.Servers.Add(node); vm.RefreshServers(); window.UpdateLayout();
         report.Add("Home: one scroll surface, 1000-server virtualization, empty subscription guidance, matched dock geometry, public and local IP labels.");
     }
+
     private static void CheckNewestRules(MainViewModel vm, List<string> report)
     {
         var prior = vm.ActiveProfile.Rules.ToArray();
