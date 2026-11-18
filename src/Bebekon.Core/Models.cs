@@ -152,6 +152,7 @@ public sealed class Profile : Observable
     public RouteTarget DefaultRoute { get => defaultRoute; set => Set(ref defaultRoute, value); }
     public ObservableCollection<RoutingRule> Rules { get; set; } = [];
     [JsonIgnore] public IEnumerable<RoutingRule> ActiveRules => Rules.Where(rule => rule.Enabled);
+    [JsonIgnore] public bool UsesNetBird => DefaultRoute == RouteTarget.NetBird || ActiveRules.Any(rule => rule.Target == RouteTarget.NetBird);
     [JsonIgnore] public IEnumerable<string> VpnServerIds => ActiveRules
         .Where(rule => rule.Target == RouteTarget.Vpn && rule.ServerId is not null)
         .Select(rule => rule.ServerId!).Distinct(StringComparer.Ordinal);

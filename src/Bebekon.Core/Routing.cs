@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Net;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
 
 namespace Bebekon.Core;
 
@@ -71,7 +72,10 @@ public static class ProfileCodec
         catch (Exception e) when (e is JsonException or NotSupportedException or NullReferenceException) { throw new UserError("Повреждённый файл профиля Bebekon."); }
     }
 }
-public sealed record ConnectSpec(Server Server, Profile Profile, Settings Settings, int ProbePort, string ProbePassword, List<Server>? RuleServers = null, int OriginProbePort = 0, List<Server>? AutoServers = null);
+public sealed record ConnectSpec(Server Server, Profile Profile, Settings Settings, int ProbePort, string ProbePassword, List<Server>? RuleServers = null, int OriginProbePort = 0, List<Server>? AutoServers = null, string? NetBirdPeer = null)
+{
+    [JsonIgnore] public NetBirdRouting? NetBird { get; init; }
+}
 public static class ConfigGenerator
 {
     public const string CoreVersion = "1.14.2";
@@ -96,6 +100,8 @@ public static class ConfigGenerator
         // Direct DNS uses the uplink's own resolver (router / phone hotspot / ISP). Public DoH is
         // throttled on many mobile networks and delayed even the VPN server's address lookup.
         var dnsServers = new JsonArray { new JsonObject { ["type"] = "local", ["tag"] = "direct-dns" }, Dns("vpn-dns", "vpn") };
+        var netBirdRouting = !probeOnly && spec.Profile.UsesNetBird ? spec.NetBird : null;
+        var netBird = new NetBirdConfig(netBirdRouting, outbounds, dnsServers);
         var serverTags = new Dictionary<string, string> { [s.Id] = "vpn" };
         if (!probeOnly)
         {
@@ -112,7 +118,7 @@ public static class ConfigGenerator
         var inbounds = new JsonArray { new JsonObject { ["type"] = "mixed", ["tag"] = "vpn-probe", ["listen"] = "127.0.0.1", ["listen_port"] = spec.ProbePort, ["users"] = new JsonArray { new JsonObject { ["username"] = "bebekon", ["password"] = spec.ProbePassword } } } };
         if (!probeOnly)
         {
-            if (spec.Settings.TunnelMode == TunnelMode.Tun) inbounds.Add(new JsonObject { ["type"] = "tun", ["tag"] = "tun-in", ["interface_name"] = "Bebekon", ["address"] = Strings(["172.29.255.1/30", "fd84:be:be::1/126"]), ["mtu"] = spec.Settings.Mtu, ["auto_route"] = true, ["strict_route"] = spec.Settings.DnsProtection && !spec.Settings.CompatibilityMode, ["dns_mode"] = "hijack", ["stack"] = spec.Settings.CompatibilityMode ? "gvisor" : "mixed" });
+            if (spec.Settings.TunnelMode == TunnelMode.Tun) inbounds.Add(new JsonObject { ["type"] = "tun", ["tag"] = "tun-in", ["interface_name"] = "Bebekon", ["address"] = Strings(["172.29.255.1/30", "fd84:be:be::1/126"]), ["mtu"] = spec.Settings.Mtu, ["auto_route"] = true, ["strict_route"] = spec.Settings.DnsProtection && !spec.Settings.CompatibilityMode, ["dns_mode"] = netBirdRouting is null ? "hijack" : "native", ["stack"] = spec.Settings.CompatibilityMode ? "gvisor" : "mixed" });
             else inbounds.Add(new JsonObject { ["type"] = "mixed", ["tag"] = "proxy-in", ["listen"] = "127.0.0.1", ["listen_port"] = 17890 });
         }
         var routes = new JsonArray {
@@ -136,11 +142,20 @@ public static class ConfigGenerator
         {
             if (rule.Kind is RuleKind.GeoSite or RuleKind.GeoIp)
                 foreach (var value in rule.Values) if (setTags.Add(GeoCatalog.Tag(rule.Kind, value))) sets.Add(GeoCatalog.Inline(rule.Kind, value));
-            var tag = rule.Target == RouteTarget.Vpn && rule.ServerId is { } serverId ? serverTags[serverId] : RouteTag(rule.Target);
+            if (rule.Target == RouteTarget.NetBird && rule.Kind == RuleKind.Site)
+            {
+                foreach (var group in rule.Values.GroupBy(netBird.ForDomain))
+                {
+                    routes.Add(RouteAction(Match(rule, group), group.Key, false));
+                    dnsRules.Add(DnsAction(Match(rule, group), group.Key));
+                }
+                continue;
+            }
+            var tag = rule.Target == RouteTarget.Vpn && rule.ServerId is { } serverId ? serverTags[serverId] : RouteTag(rule.Target, netBird);
             routes.Add(RouteAction(Match(rule), tag, spec.Settings.TlsFragment));
             if (rule.Kind is not (RuleKind.Network or RuleKind.GeoIp)) dnsRules.Add(DnsAction(Match(rule), tag));
         }
-        var finalTag = probeOnly ? "vpn" : RouteTag(spec.Profile.DefaultRoute);
+        var finalTag = probeOnly ? "vpn" : RouteTag(spec.Profile.DefaultRoute, netBird);
         if (finalTag is null)
         {
             routes.Add(RouteAction(new(), null, false));
@@ -164,10 +179,11 @@ public static class ConfigGenerator
     public static List<Server> AutoServers(ConnectSpec spec) => spec.Settings.AutoServer && spec.AutoServers is { } servers
         ? servers.Prepend(spec.Server).Where(AutoEligible).DistinctBy(n => n.Id).Take(64).ToList() : [];
     public static bool AutoEligible(Server n) => n.Supported && n.Type != "trusttunnel" && n.Transport != "xhttp";
-    private static string? RouteTag(RouteTarget target) => target switch
+    private static string? RouteTag(RouteTarget target, NetBirdConfig netBird) => target switch
     {
         RouteTarget.Direct => "direct",
         RouteTarget.Vpn => "vpn",
+        RouteTarget.NetBird => netBird.DefaultTag,
         _ => null
     };
     private static JsonObject RouteAction(JsonObject match, string? tag, bool tlsFragment)
@@ -195,11 +211,11 @@ public static class ConfigGenerator
         var vpn = new JsonObject { ["type"] = "socks", ["tag"] = tag, ["server"] = "127.0.0.1", ["server_port"] = bridge.Port, ["version"] = "5", ["username"] = "bebekon", ["password"] = bridge.Password, ["connect_timeout"] = "4s" };
         if (!s.UdpEnabled) vpn["network"] = "tcp"; return vpn;
     }
-    private static JsonObject Match(RoutingRule r)
+    private static JsonObject Match(RoutingRule r, IEnumerable<string>? values = null)
     {
         var key = r.Kind switch { RuleKind.Site => "domain_suffix", RuleKind.Contains => "domain_keyword", RuleKind.Network => "ip_cidr", _ => "process_name" };
         if (r.Kind is RuleKind.GeoSite or RuleKind.GeoIp) return new JsonObject { ["rule_set"] = Strings(r.Values.Select(v => GeoCatalog.Tag(r.Kind, v))) };
-        if (r.Kind != RuleKind.Application) return new JsonObject { [key] = Strings(r.Values) };
+        if (r.Kind != RuleKind.Application) return new JsonObject { [key] = Strings(values ?? r.Values) };
         var paths = r.Values.Where(Path.IsPathFullyQualified).ToList(); var names = r.Values.Where(v => !Path.IsPathFullyQualified(v)).ToList();
         if (paths.Count > 0 && names.Count > 0) return new JsonObject { ["type"] = "logical", ["mode"] = "or", ["rules"] = new JsonArray { new JsonObject { ["process_path"] = Strings(paths) }, new JsonObject { ["process_name"] = Strings(names) } } };
         return new JsonObject { [paths.Count > 0 ? "process_path" : "process_name"] = Strings(paths.Count > 0 ? paths : names) };

@@ -285,6 +285,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
         _ = RefreshMapOriginAsync();
         WarnSubscription();
         _ = AutoRefreshAsync();
+        if (testProbe is null) _ = MonitorNetBirdAsync();
         if (Settings.AutoConnect && !Connected && SelectedServer is not null) await AutoConnectAsync(systemStartup);
     }
     private readonly Dictionary<string, DateTimeOffset> refreshAttempts = [];
@@ -481,9 +482,10 @@ public sealed partial class MainViewModel : Observable, IDisposable
             catch (TimeoutException) { }
             finally { locatingBeforeTunnel = false; }
             token.ThrowIfCancellationRequested();
+            var netBird = ActiveProfile.UsesNetBird && testProbe is null ? await NetBirdClient.GetStatusAsync(token) : null;
             var ruleServerIds = ActiveProfile.VpnServerIds.ToHashSet(StringComparer.Ordinal);
             spec = new(SelectedServer, ActiveProfile, Settings, LatencyService.FreePort(), Convert.ToHexString(RandomNumberGenerator.GetBytes(24)), Data.Servers.Where(s => ruleServerIds.Contains(s.Id)).ToList(),
-                AutoServers: Settings.AutoServer ? AutoPool : null);
+                AutoServers: Settings.AutoServer ? AutoPool : null, NetBirdPeer: netBird?.PeerAddress);
             if (MapLocationEnabled) {
                 int originPort;
                 do { originPort = LatencyService.FreePort(); } while (originPort == spec.ProbePort || originPort == 17890);
@@ -529,6 +531,21 @@ public sealed partial class MainViewModel : Observable, IDisposable
             catch (Exception e) when ((e is HttpRequestException or TaskCanceledException) && !token.IsCancellationRequested) { failure = e; }
         }
         throw failure!;
+    }
+    private async Task MonitorNetBirdAsync()
+    {
+        try
+        {
+            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(10));
+            while (await timer.WaitForNextTickAsync(lifetime.Token))
+            {
+                var active = spec;
+                if (!Connected || active?.Profile.UsesNetBird != true) continue;
+                var actual = await NetBirdClient.GetStatusAsync(lifetime.Token);
+                if (ReferenceEquals(active, spec) && Connected && active.NetBirdPeer != actual.PeerAddress) QueueApply();
+            }
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
     }
     private async Task UpdateIpAsync(ConnectSpec current, int generation, CancellationToken token)
     {
