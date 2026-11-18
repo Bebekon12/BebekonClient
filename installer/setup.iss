@@ -50,9 +50,6 @@ Root: HKA; Subkey: "Software\Classes\bebekon\shell\open\command"; ValueType: str
 Filename: "{app}\Bebekon.App.exe"; Description: "Открыть Bebekon VPN"; Flags: nowait postinstall skipifsilent runasoriginaluser; Check: NotUpdate
 Filename: "{app}\Bebekon.App.exe"; Flags: nowait runascurrentuser; Check: RestartElevated
 Filename: "{app}\Bebekon.App.exe"; Flags: nowait runasoriginaluser; Check: RestartOriginal
-[UninstallRun]
-Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\uninstall-service.ps1"""; Flags: runhidden waituntilterminated; RunOnceId: "RemoveService"
-
 [Code]
 var OwnerPage: TInputQueryWizardPage; OwnerDataRoot: String; HandoffDone, RestartAsAdmin: Boolean;
 function OpenProcess(Access: LongWord; Inherit: Boolean; Pid: LongWord): THandle; external 'OpenProcess@kernel32.dll stdcall';
@@ -157,8 +154,11 @@ begin
     end;
 end;
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
-var Root: String;
+var Root: String; Code: Integer;
 begin
+  if CurUninstallStep = usUninstall then
+    if not Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\scripts\uninstall-service.ps1') + '"', '', SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then
+      RaiseException('Не удалось снять защиту WFP и удалить службу VPN.');
   if CurUninstallStep = usPostUninstall then
     if (OwnerDataRoot <> '') and (MsgBox('Удалить подписки, правила и настройки владельца VPN?', mbConfirmation, MB_YESNO) = IDYES) then begin
       Root := OwnerDataRoot;

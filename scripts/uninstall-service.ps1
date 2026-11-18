@@ -5,7 +5,25 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
 $service = Get-Service BebekonVPN -ErrorAction SilentlyContinue
 $imagePath = (Get-ItemProperty -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Services\BebekonVPN' -Name ImagePath -ErrorAction SilentlyContinue).ImagePath
 $ownerSid = (Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\BebekonVPN' -Name OwnerSid -ErrorAction SilentlyContinue).OwnerSid
-if ($service) { if ($service.Status -ne 'Stopped') { Stop-Service BebekonVPN; $service.WaitForStatus('Stopped',[TimeSpan]::FromSeconds(20)) }; & sc.exe delete BebekonVPN; if ($LASTEXITCODE -ne 0) { throw 'Could not delete the service.' } }
+if ($service) {
+    if ($service.Status -ne 'Stopped') {
+        Stop-Service BebekonVPN
+        $service.WaitForStatus('Stopped',[TimeSpan]::FromSeconds(20))
+    }
+    if ($imagePath) {
+        $helper = $imagePath.Trim('"')
+        $library = [IO.Path]::ChangeExtension($helper, '.dll')
+        if (Test-Path -LiteralPath $library -PathType Leaf) {
+            $version = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($library).FileVersion
+            if ([version]$version -ge [version]'0.1.25.1') {
+                & $helper --clear-leak-protection
+                if ($LASTEXITCODE -ne 0) { throw 'Could not remove the Bebekon WFP policy.' }
+            }
+        }
+    }
+    & sc.exe delete BebekonVPN
+    if ($LASTEXITCODE -ne 0) { throw 'Could not delete the service.' }
+}
 Remove-Item -LiteralPath 'HKLM:\SOFTWARE\BebekonVPN' -Force -ErrorAction SilentlyContinue
 if ($ownerSid) { $runKey = [Microsoft.Win32.Registry]::Users.OpenSubKey($ownerSid + '\Software\Microsoft\Windows\CurrentVersion\Run', $true); if ($runKey) { try { $runKey.DeleteValue('BebekonVPN', $false) } finally { $runKey.Dispose() } } }
 $portableHelper = [IO.Path]::GetFullPath((Join-Path $env:ProgramFiles 'Bebekon VPN Portable Helper'))

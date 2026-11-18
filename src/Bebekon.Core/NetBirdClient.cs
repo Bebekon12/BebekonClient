@@ -62,7 +62,7 @@ public static class NetBirdClient
         return new(true, state, peer, version, networks);
     }
 
-    private static string? FindExecutable()
+    internal static string? FindExecutable()
     {
         if (!OperatingSystem.IsWindows()) return null;
         try

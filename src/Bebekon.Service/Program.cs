@@ -11,6 +11,19 @@ internal static class Program
 {
     public static void Main(string[] args)
     {
+        if (args is ["--clear-leak-protection"])
+        {
+            KillSwitch.ClearPersistent();
+            return;
+        }
+        if (args is ["--test-wfp"])
+        {
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            var checks = KillSwitch.TestLocalFilteringAsync(deadline.Token).GetAwaiter().GetResult();
+            Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(checks, Json.Options));
+            Environment.ExitCode = checks.All(check => check.Outcome == WfpTestOutcome.Passed) ? 0 : 1;
+            return;
+        }
         if (args.Contains("--console"))
         {
             var sid = WindowsIdentity.GetCurrent().User!.Value;
@@ -73,7 +86,20 @@ internal sealed class VpnService : ServiceBase
     {
         // Exited notification can arrive after a status request. Check before snapshotting.
         if (state == ConnectionState.Connected && core?.Running != true) { state = ConnectionState.Error; error = "Ядро VPN завершилось. Подключитесь заново."; connectedAt = null; File.Delete(Path.Combine(root, "sing-box.json")); }
-        return new(state, error, connectedAt, core?.Pid, state == ConnectionState.Connected ? traffic?.Snapshot : null);
+        return new(state, error, connectedAt, core?.Pid, state == ConnectionState.Connected ? traffic?.Snapshot : null,
+            ReadProtection(), state == ConnectionState.Connected ? last?.NetBird?.InterfaceName : null);
+    }
+    private ProtectionStatus ReadProtection()
+    {
+        try
+        {
+            var persistent = console ? 0 : KillSwitch.PersistentBlockCount();
+            return new(persistent + (killSwitch?.InstalledBlockCount() ?? 0), persistent);
+        }
+        catch (Exception e) when (e is System.ComponentModel.Win32Exception or DllNotFoundException or EntryPointNotFoundException)
+        {
+            return new(0, 0, "Не удалось прочитать состояние фильтров WFP.");
+        }
     }
     private async Task ServeAsync(CancellationToken ct)
     {
@@ -97,23 +123,27 @@ internal sealed class VpnService : ServiceBase
                 try
                 {
                     lastCommand = DateTimeOffset.UtcNow;
+                    WfpTestResult[]? test = null;
                     switch (request.Operation)
                     {
                         case "GetStatus": break;
                         case "StopCore": StopCore(request.KeepBlocking); break;
+                        case "ClearProtection": StopCore(); KillSwitch.ClearPersistent(); break;
+                        case "TestProtection": test = await KillSwitch.TestLocalFilteringAsync(timeout.Token); break;
                         case "Shutdown": if (console) throw new UserError("Console helper must be stopped with Ctrl+C."); StopCore(); break;
                         case "StartCore": if (request.Spec is null) throw new UserError("Не указан сервер."); await StartCoreAsync(request.Spec, timeout.Token); break;
-                        case "RestartCore": var spec = request.Spec ?? last ?? throw new UserError("Сначала выберите сервер."); StopCore(keepBlocking: true); await StartCoreAsync(spec, timeout.Token); break;
+                        case "RestartCore": var spec = request.Spec ?? last ?? throw new UserError("Сначала выберите сервер."); await StartCoreAsync(spec, timeout.Token, restart: true); break;
                         case "ValidateConfig": if (request.Spec is null) throw new UserError("Не указан сервер."); await CoreSession.ValidateAsync(await ResolveNetBirdAsync(request.Spec, timeout.Token), CoreExe, root, timeout.Token); break;
                         case "GetLogs": var lines = Directory.GetFiles(root, "*.log").SelectMany(File.ReadLines).TakeLast(120); result = new(true, Status(), string.Join(Environment.NewLine, lines)); await PipeProtocol.WriteAsync(pipe, result, timeout.Token); continue;
                         default: throw new UserError("Неизвестная команда службы.");
                     }
-                    result = new(true, Status());
+                    result = new(true, Status(), WfpTest: test);
                 }
                 catch (Exception e)
                 {
                     var message = e is UserError ? e.Message : "Не удалось выполнить команду службы. Проверьте параметры подключения.";
-                    if (request.Operation is "StartCore" or "RestartCore") { StopCore(); state = ConnectionState.Error; error = message; }
+                    if (request.Operation is ("StartCore" or "RestartCore") && (state != ConnectionState.Connected || core?.Running != true))
+                    { StopCore(keepBlocking: true); state = ConnectionState.Error; error = message; }
                     log.Write("Command failed: " + request.Operation + "; " + e.GetType().Name); result = new(false, Status(), message);
                 }
                 finally { gate.Release(); }
@@ -128,38 +158,67 @@ internal sealed class VpnService : ServiceBase
     private static async Task<ConnectSpec> ResolveNetBirdAsync(ConnectSpec spec, CancellationToken ct)
     {
         RuleValidation.Validate(spec.Profile);
-        return spec.Profile.UsesNetBird ? spec with { NetBird = await NetBirdRouting.DiscoverAsync(spec.NetBirdPeer, ct) } : spec;
+        if (spec.NetBirdPeer is null || !(spec.Profile.UsesNetBird || spec.Settings.KillSwitch || spec.Profile.HasProtectedRules)) return spec;
+        return spec with { NetBird = await NetBirdRouting.DiscoverAsync(spec.NetBirdPeer, ct) };
     }
-    private async Task StartCoreAsync(ConnectSpec spec, CancellationToken ct)
+    private async Task StartCoreAsync(ConnectSpec spec, CancellationToken ct, bool restart = false)
     {
-        if (core?.Running == true) throw new UserError("VPN уже подключён.");
-        state = ConnectionState.Connecting; error = null; core?.Dispose();
+        if (!restart && core?.Running == true) throw new UserError("VPN уже подключён.");
         spec = await ResolveNetBirdAsync(spec, ct);
-        // Engaged before the core starts and kept through reconnects; StopCore from a user
-        // disconnect releases it. If enabling fails, connect without it rather than not at all.
-        if (spec.Settings.KillSwitch && spec.Settings.TunnelMode == TunnelMode.Tun)
-        {
-            if (killSwitch is null)
-                try { killSwitch = KillSwitch.Enable(new[] { "sing-box.exe", "xray.exe", "trusttunnel_client.exe" }.Select(name => Path.Combine(AppContext.BaseDirectory, "core", name))); log.Write("Leak protection enabled."); }
-                catch (Exception e) when (e is System.ComponentModel.Win32Exception or DllNotFoundException or EntryPointNotFoundException) { log.Write("Leak protection unavailable: " + e.Message); }
-        }
-        else ReleaseKillSwitch();
+        var persistent = spec.Profile.HasProtectedRules || spec.Settings.KillSwitch && spec.Settings.PersistentKillSwitch;
+        var global = spec.Settings.KillSwitch && spec.Settings.TunnelMode == TunnelMode.Tun;
+        if (persistent && spec.Settings.TunnelMode != TunnelMode.Tun) throw new UserError("Для сохранённой защиты WFP требуется режим TUN.");
+        if (persistent && console) throw new UserError("Для сохранённой защиты WFP требуется установленная служба.");
+        if (persistent || global) ApplyProtection(spec, persistent, tunnelReady: false);
+        if (restart) StopCore(keepBlocking: true);
+        state = ConnectionState.Connecting; error = null; core?.Dispose();
         traffic?.Dispose(); traffic = new CoreTraffic();
         var path = Path.Combine(root, "sing-box.json"); core = new(CoreExe, coreLog);
         var launchedCore = core;
         core.Exited += () => { if (ReferenceEquals(core, launchedCore) && state is ConnectionState.Connected or ConnectionState.Connecting) { state = ConnectionState.Error; error = "Ядро VPN завершилось. Подключитесь заново."; connectedAt = null; log.Write("Core exited unexpectedly."); File.Delete(path); } };
-        await core.StartAsync(spec, root, false, ct, traffic.AddToConfig); traffic.Start(); last = spec; connectedAt = DateTimeOffset.UtcNow; state = ConnectionState.Connected;
+        await core.StartAsync(spec, root, false, ct, traffic.AddToConfig);
+        if (persistent || global) ApplyProtection(spec, persistent, tunnelReady: true);
+        if (!persistent && !console && KillSwitch.PersistentBlockCount() > 0) KillSwitch.ClearPersistent();
+        if (!global || persistent) ReleaseKillSwitch();
+        traffic.Start(); last = spec; connectedAt = DateTimeOffset.UtcNow; state = ConnectionState.Connected;
+    }
+    private void ApplyProtection(ConnectSpec spec, bool persistent, bool tunnelReady)
+    {
+        var transports = KillSwitch.TrustedTransports(Path.Combine(AppContext.BaseDirectory, "core"));
+        try
+        {
+            if (persistent)
+            {
+                if (KillSwitch.ApplyPersistent(spec, transports, tunnelReady) == 0)
+                    throw new UserError("Windows не применила фильтры защиты.");
+                return;
+            }
+            var updated = KillSwitch.Enable(transports, spec.NetBird, requireTunnelInterface: true);
+            try
+            {
+                if (updated.InstalledBlockCount() != 4) throw new UserError("Windows не применила фильтры защиты.");
+            }
+            catch { updated.Dispose(); throw; }
+            var old = killSwitch;
+            killSwitch = updated;
+            old?.Dispose();
+        }
+        catch (Exception e) when (e is System.ComponentModel.Win32Exception or DllNotFoundException or EntryPointNotFoundException)
+        {
+            log.Write("WFP protection failed: " + e.GetType().Name);
+            throw new UserError("Не удалось применить защиту WFP. Проверьте службу Base Filtering Engine и права службы VPN.");
+        }
     }
     private void ReleaseKillSwitch() { if (killSwitch is null) return; killSwitch.Dispose(); killSwitch = null; log.Write("Leak protection disabled."); }
     private void StopCore(bool keepBlocking = false)
     {
-        if (!keepBlocking) ReleaseKillSwitch();
         state = ConnectionState.Disconnecting; traffic?.Dispose(); traffic = null; core?.Dispose(); core = null; state = ConnectionState.Disconnected; connectedAt = null; error = null;
+        if (!keepBlocking) ReleaseKillSwitch();
         File.Delete(Path.Combine(root, "sing-box.json")); File.Delete(Path.Combine(root, "xray.json")); log.Write("Core stopped; runtime config removed.");
     }
     private async Task IdleStopAsync(CancellationToken ct)
     {
-        try { while (!ct.IsCancellationRequested) { await Task.Delay(TimeSpan.FromSeconds(15), ct); if (!console && state != ConnectionState.Connected && state != ConnectionState.Connecting && DateTimeOffset.UtcNow - lastCommand > TimeSpan.FromSeconds(45)) { Stop(); return; } } }
+        try { while (!ct.IsCancellationRequested) { await Task.Delay(TimeSpan.FromSeconds(15), ct); if (!console && killSwitch is null && state != ConnectionState.Connected && state != ConnectionState.Connecting && DateTimeOffset.UtcNow - lastCommand > TimeSpan.FromSeconds(45)) { Stop(); return; } } }
         catch (OperationCanceledException) { }
     }
 }

@@ -112,6 +112,7 @@ public sealed class RoutingRule : Observable
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public RouteTarget[]? ForbiddenRoutes { get; set; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public List<string>? FallbackServerIds { get; set; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public RouteTarget? UnavailableRoute { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] public bool SystemProtection { get; set; }
     private bool useVpn = true;
     private bool enabled = true;
     private RouteTarget? destination;
@@ -162,7 +163,9 @@ public sealed class Profile : Observable
     public RouteTarget DefaultRoute { get => defaultRoute; set => Set(ref defaultRoute, value); }
     public ObservableCollection<RoutingRule> Rules { get; set; } = [];
     [JsonIgnore] public IEnumerable<RoutingRule> ActiveRules => Rules.Where(rule => rule.Enabled);
+    [JsonIgnore] public IEnumerable<RoutingRule> RulesByPrecedence => ActiveRules.OrderByDescending(rule => rule.SystemProtection);
     [JsonIgnore] public bool UsesNetBird => DefaultRoute == RouteTarget.NetBird || ActiveRules.Any(rule => rule.Target == RouteTarget.NetBird);
+    [JsonIgnore] public bool HasProtectedRules => ActiveRules.Any(rule => rule.SystemProtection);
     [JsonIgnore] public IEnumerable<string> VpnServerIds => ActiveRules
         .Where(rule => rule.Target == RouteTarget.Vpn)
         .SelectMany(rule => new[] { rule.ServerId }.OfType<string>().Concat(rule.FallbackServerIds ?? []))
@@ -255,6 +258,7 @@ public sealed class Settings
     public bool TlsFragment { get; set; }
     /// <summary>Block traffic outside the tunnel while connected or reconnecting (TUN mode, see KillSwitch).</summary>
     public bool KillSwitch { get; set; }
+    public bool PersistentKillSwitch { get; set; }
     public bool GlowEffects { get; set; } = true;
     public bool PureBlack { get; set; }
     public string AccentColor { get; set; } = "Blue";

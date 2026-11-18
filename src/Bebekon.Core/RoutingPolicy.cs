@@ -14,7 +14,7 @@ public static class RoutingPolicy
     public static RouteAnalysis Analyze(Profile profile, RouteQuery query)
     {
         var conditional = false;
-        foreach (var rule in profile.ActiveRules)
+        foreach (var rule in profile.RulesByPrecedence)
         {
             var match = Matches(rule, query);
             if (match is null) conditional = true;
@@ -29,7 +29,7 @@ public static class RoutingPolicy
     }
 
     public static string RuleSignature(RoutingRule rule) =>
-        string.Join('|', rule.Kind, rule.Target, rule.ServerId, rule.Transport, rule.Port, rule.UnavailableRoute,
+        string.Join('|', rule.Kind, rule.Target, rule.ServerId, rule.Transport, rule.Port, rule.UnavailableRoute, rule.SystemProtection,
             string.Join(',', rule.AllowedRoutes?.Order() ?? Enumerable.Empty<RouteTarget>()),
             string.Join(',', rule.ForbiddenRoutes?.Order() ?? Enumerable.Empty<RouteTarget>()),
             string.Join(',', rule.FallbackServerIds ?? []), string.Join('\n', rule.Values).ToLowerInvariant());

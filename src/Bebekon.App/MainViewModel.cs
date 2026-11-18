@@ -452,9 +452,8 @@ public sealed partial class MainViewModel : Observable, IDisposable
             {
                 token.ThrowIfCancellationRequested();
                 if (!desiredConnected || appliedConfigurationVersion == configurationVersion) return;
-                await StopConnectionCoreAsync(reconnecting: true);
-                // Keep the gate across stop/start; later edits are captured by the new snapshot.
-                if (desiredConnected) await ConnectCoreAsync();
+                // The helper installs a new guard before withdrawing the old tunnel.
+                await ConnectCoreAsync(restart: true);
             }
             finally { connectionGate.Release(); }
         }
@@ -468,8 +467,9 @@ public sealed partial class MainViewModel : Observable, IDisposable
         try { if (desiredConnected && !Connected) await ConnectCoreAsync(); }
         finally { connectionGate.Release(); }
     }
-    private async Task ConnectCoreAsync()
+    private async Task ConnectCoreAsync(bool restart = false)
     {
+        var oldSpec = spec;
         monitorId++; networkDelay?.Cancel();
         connectionAttempt?.Dispose(); connectionAttempt = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
         var token = connectionAttempt.Token;
@@ -486,7 +486,8 @@ public sealed partial class MainViewModel : Observable, IDisposable
             catch (TimeoutException) { }
             finally { locatingBeforeTunnel = false; }
             token.ThrowIfCancellationRequested();
-            var netBird = ActiveProfile.UsesNetBird && testProbe is null ? await NetBirdClient.GetStatusAsync(token) : null;
+            var trackNetBird = ActiveProfile.UsesNetBird || Settings.KillSwitch || ActiveProfile.HasProtectedRules;
+            var netBird = trackNetBird && testProbe is null ? await NetBirdClient.GetStatusAsync(token) : null;
             var ruleServerIds = ActiveProfile.VpnServerIds.ToHashSet(StringComparer.Ordinal);
             spec = new(SelectedServer, ActiveProfile, Settings, LatencyService.FreePort(), Convert.ToHexString(RandomNumberGenerator.GetBytes(24)), Data.Servers.Where(s => ruleServerIds.Contains(s.Id)).ToList(),
                 AutoServers: Settings.AutoServer ? AutoPool : null, NetBirdPeer: netBird?.PeerAddress);
@@ -500,8 +501,16 @@ public sealed partial class MainViewModel : Observable, IDisposable
             store.SaveConnection(spec);
             await EnsureServiceAsync();
             token.ThrowIfCancellationRequested();
-            var reply = await service.SendAsync(new("StartCore", spec), true, token);
-            if (!reply.Ok) throw new UserError(reply.Message ?? reply.Status.Error ?? "Не удалось подключиться.");
+            var reply = await service.SendAsync(new(restart ? "RestartCore" : "StartCore", spec), true, token);
+            if (!reply.Ok)
+            {
+                if (restart && reply.Status.State == ConnectionState.Connected)
+                {
+                    spec = oldSpec;
+                    ApplyStatus(reply.Status);
+                }
+                throw new UserError(reply.Message ?? reply.Status.Error ?? "Не удалось подключиться.");
+            }
             await ProbeConnectionAsync(spec, token);
             token.ThrowIfCancellationRequested();
             if (spec.Settings.TunnelMode == TunnelMode.Proxy && testProbe is null) SystemProxy.Enable();
@@ -513,7 +522,18 @@ public sealed partial class MainViewModel : Observable, IDisposable
         }
         catch
         {
-            try { await service.SendAsync(new("StopCore"), true); } catch { }
+            if (restart && Connected)
+            {
+                _ = MonitorAsync();
+                throw;
+            }
+            try
+            {
+                var keepProtection = desiredConnected && (spec?.Settings.KillSwitch == true || spec?.Profile.HasProtectedRules == true);
+                var stopped = await service.SendAsync(new("StopCore", KeepBlocking: keepProtection), true);
+                if (stopped.Ok) Protection = stopped.Status.Protection;
+            }
+            catch { }
             if (testProbe is null) SystemProxy.Restore();
             SetTraffic(null); State = token.IsCancellationRequested ? ConnectionState.Disconnected : ConnectionState.Error;
             if (!token.IsCancellationRequested) { desiredConnected = false; throw; }
@@ -544,7 +564,8 @@ public sealed partial class MainViewModel : Observable, IDisposable
             while (await timer.WaitForNextTickAsync(lifetime.Token))
             {
                 var active = spec;
-                if (!Connected || active?.Profile.UsesNetBird != true) continue;
+                if (!Connected || active is null ||
+                    !(active.Profile.UsesNetBird || active.Settings.KillSwitch || active.Profile.HasProtectedRules)) continue;
                 var actual = await NetBirdClient.GetStatusAsync(lifetime.Token);
                 if (ReferenceEquals(active, spec) && Connected && active.NetBirdPeer != actual.PeerAddress) QueueApply();
             }
@@ -586,13 +607,32 @@ public sealed partial class MainViewModel : Observable, IDisposable
     private async Task MonitorAsync()
     {
         var id = ++monitorId;
-        try { while (id == monitorId && Monitoring && !lifetime.IsCancellationRequested) { await Task.Delay(1000, lifetime.Token); if (id != monitorId || !Monitoring) break; var response = await service.SendAsync(new("GetStatus"), ct: lifetime.Token); if (id != monitorId) break; var wasConnected = Connected; ApplyStatus(response.Status); if (wasConnected && Blocking) Banner = T("Ядро VPN остановилось, защита от утечек держит интернет вне VPN закрытым. Нажмите кнопку подключения — VPN переподключится (если не выйдет, блокировка снимется).", "The VPN core stopped and leak protection keeps internet outside the VPN closed. Press the connect button to reconnect (if that fails, the block is released)."); _ = RefreshMapOriginAsync(); _ = RefreshMapDestinationAsync(); if (started is { } time) Session = (DateTimeOffset.UtcNow - time).ToString(@"hh\:mm\:ss"); if (!Connected && testProbe is null) SystemProxy.Restore(); } }
+        try
+        {
+            while (id == monitorId && Monitoring && !lifetime.IsCancellationRequested)
+            {
+                await Task.Delay(1000, lifetime.Token);
+                if (id != monitorId || !Monitoring) break;
+                var response = await service.SendAsync(new("GetStatus"), ct: lifetime.Token);
+                if (id != monitorId) break;
+                var wasConnected = Connected;
+                ApplyStatus(response.Status);
+                if (wasConnected && Blocking)
+                    Banner = T("Ядро VPN остановилось. Фильтры защиты WFP действуют.", "The VPN core stopped. WFP protection remains active.");
+                _ = RefreshMapOriginAsync();
+                _ = RefreshMapDestinationAsync();
+                if (started is { } time) Session = (DateTimeOffset.UtcNow - time).ToString(@"hh\:mm\:ss");
+                if (!Connected && testProbe is null) SystemProxy.Restore();
+            }
+        }
         catch (OperationCanceledException) { } catch (Exception e) { if (id == monitorId) { if (testProbe is null) SystemProxy.Restore(); State = ConnectionState.Error; SetTraffic(null); Report(e); } }
     }
     /// <summary>The core stopped while leak protection holds traffic; keep the service (and its block) alive.</summary>
-    private bool Blocking => desiredConnected && Settings.KillSwitch && Settings.TunnelMode == TunnelMode.Tun && State == ConnectionState.Error;
+    private bool Blocking => Protection?.Filters > 0 && State == ConnectionState.Error;
     private bool Monitoring => Connected || Blocking;
-    private void ApplyStatus(ServiceStatus s) { State = s.State; started = s.ConnectedAt; SetTraffic(s.State == ConnectionState.Connected ? s.Traffic : null); if (s.Error is not null) Banner = s.Error; }
+    private ProtectionStatus? protection;
+    public ProtectionStatus? Protection { get => protection; private set => Set(ref protection, value); }
+    private void ApplyStatus(ServiceStatus s) { Protection = s.Protection; State = s.State; started = s.ConnectedAt; SetTraffic(s.State == ConnectionState.Connected ? s.Traffic : null); if (s.Error is not null) Banner = s.Error; }
     private void SetTraffic(TrafficSnapshot? value)
     {
         if (value is null) { DownloadHistory = Array.Empty<double>(); UploadHistory = Array.Empty<double>(); }

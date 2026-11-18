@@ -36,6 +36,9 @@ public static class RuleValidation
         if (rule.FallbackServerIds is { Count: > 0 } backup &&
             (rule.Target != RouteTarget.Vpn || backup.Count > 8 || backup.Any(id => string.IsNullOrWhiteSpace(id) || id.Length > 128 || id.Any(char.IsControl))))
             throw new UserError("Укажите до восьми резервных серверов Bebekon VPN.");
+        if (rule.SystemProtection && (rule.Target == RouteTarget.Direct || rule.UnavailableRoute == RouteTarget.Direct ||
+            rule.Kind is not (RuleKind.Application or RuleKind.Network)))
+            throw new UserError("Защита WFP доступна для полного пути к приложению или IP/CIDR. Выберите VPN либо Block без резерва Direct.");
         for (var i = 0; i < rule.Values.Count; i++)
         {
             var v = rule.Values[i].Trim();
@@ -51,6 +54,8 @@ public static class RuleValidation
                 case RuleKind.Application:
                     if (!v.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) throw new UserError("Выберите приложение .exe.");
                     if (v.Contains('\\') && !Path.IsPathFullyQualified(v)) throw new UserError("Укажите полный путь к приложению.");
+                    if (rule.SystemProtection && (!Path.IsPathFullyQualified(v) || v.StartsWith(@"\\", StringComparison.Ordinal)))
+                        throw new UserError("Для защиты WFP выберите полный локальный путь к исполняемому файлу.");
                     break;
                 case RuleKind.Network:
                     var p = v.Split('/');
@@ -75,6 +80,8 @@ public static class RuleValidation
         if (string.IsNullOrWhiteSpace(profile.Name) || profile.Name.Length > 160 || !Enum.IsDefined(profile.DefaultRoute) || profile.Rules.Count > 5000) throw new UserError("Некорректный профиль.");
         foreach (var rule in profile.Rules) Validate(rule);
         if (profile.Rules.Select(r => r.Id).Distinct().Count() != profile.Rules.Count) throw new UserError("В профиле повторяются идентификаторы правил.");
+        if (profile.ActiveRules.Where(rule => rule.SystemProtection).Sum(rule => rule.Values.Count) > 128)
+            throw new UserError("В профиле можно защитить до 128 путей приложений или подсетей Windows.");
     }
 }
 public static class ProfileCodec
@@ -130,8 +137,8 @@ public static class ConfigGenerator
         // Direct DNS uses the uplink's own resolver (router / phone hotspot / ISP). Public DoH is
         // throttled on many mobile networks and delayed even the VPN server's address lookup.
         var dnsServers = new JsonArray { new JsonObject { ["type"] = "local", ["tag"] = "direct-dns" }, Dns("vpn-dns", "vpn") };
-        var netBirdRouting = !probeOnly && spec.Profile.UsesNetBird ? spec.NetBird : null;
-        var netBird = new NetBirdConfig(netBirdRouting, outbounds, dnsServers);
+        var netBirdRouting = !probeOnly ? spec.NetBird : null;
+        var netBird = new NetBirdConfig(spec.Profile.UsesNetBird ? netBirdRouting : null, outbounds, dnsServers);
         var serverTags = new Dictionary<string, string> { [s.Id] = "vpn" };
         if (!probeOnly)
         {
@@ -164,7 +171,7 @@ public static class ConfigGenerator
             routes.Insert(0, new JsonObject { ["inbound"] = Strings(["origin-probe"]), ["domain"] = Strings(MapLocation.LookupHosts), ["port"] = 443, ["action"] = "route", ["outbound"] = "direct" });
             routes.Insert(1, new JsonObject { ["inbound"] = Strings(["origin-probe"]), ["action"] = "reject" });
         }
-        foreach (var rule in probeOnly ? [] : spec.Profile.ActiveRules)
+        foreach (var rule in probeOnly ? [] : spec.Profile.RulesByPrecedence)
         {
             if (rule.Kind is RuleKind.GeoSite or RuleKind.GeoIp)
                 foreach (var value in rule.Values) if (setTags.Add(GeoCatalog.Tag(rule.Kind, value))) sets.Add(GeoCatalog.Inline(rule.Kind, value));
