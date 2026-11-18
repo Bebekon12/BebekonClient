@@ -59,6 +59,11 @@ object NativeCore {
     }
     fun probe(context: Context, state: SavedState, method: String, url: String = state.preferences.pingTarget.url): BebekonProbeResult =
         bounded(9000) { probeNow(context, state, method, url) }
+    fun checkEndpoint(context: Context, state: SavedState, method: String, target: PingTarget = state.preferences.pingTarget): Int {
+        val response = probe(context, state, method, target.url)
+        check(response.statusCode == 204) { "probe HTTP ${response.statusCode}" }
+        return response.millis
+    }
     private fun probeNow(context: Context, state: SavedState, method: String, url: String): BebekonProbeResult {
         val started = android.os.SystemClock.elapsedRealtime()
         setup(context)
@@ -225,16 +230,16 @@ class BebekonVpnService : VpnService(), CommandServerHandler {
                 override fun writeConnectionEvents(events: ConnectionEvents?) = Unit
             }, CommandClientOptions().apply { addCommand(Libbox.CommandStatus); if (auto.size >= 2) addCommand(Libbox.CommandGroup); if (saved.preferences.routingDiagnostics || BuildConfig.DEBUG && node.host == "10.0.2.2") addCommand(Libbox.CommandLog); statusInterval = 1_000_000_000 }).also { it.connect() }
             // A verified HTTPS response through this outbound confirms usable connectivity.
-            var probe = runCatching { NativeCore.probe(this, saved, "GET") }.recoverCatching {
+            var probe = runCatching { NativeCore.checkEndpoint(this, saved, "GET") }.recoverCatching {
                 if (!desired || generation.get() != version) throw CancellationException()
                 val backup = PingTarget.entries.first { it != saved.preferences.pingTarget }
-                NativeCore.probe(this, saved, "GET", backup.url)
+                NativeCore.checkEndpoint(this, saved, "GET", backup)
             }
             // Auto mode works while any server in the group does; the group itself moves off a
             // failed server, so check a few others before giving up.
             for (other in auto.drop(1).take(3)) {
                 if (probe.isSuccess || !desired || generation.get() != version) break
-                probe = runCatching { NativeCore.probe(this, saved.copy(selected = other.id), "GET") }
+                probe = runCatching { NativeCore.checkEndpoint(this, saved.copy(selected = other.id), "GET") }
             }
             if (BuildConfig.DEBUG && node.host == "10.0.2.2" && probe.isFailure) android.util.Log.w("BebekonDebug", "Fixture HTTPS check failed", probe.exceptionOrNull())
             if (!desired || generation.get() != version) return

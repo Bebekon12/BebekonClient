@@ -156,9 +156,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 val result = withContext(Dispatchers.IO) { runCatching {
                     if (method == PingMethod.TCP) {
                         NativeCore.bounded(8000) { NativeCore.setup(getApplication()); val platform = AndroidPlatform(getApplication()); try { io.nekohasekai.libbox.Libbox.bebekonTCPProbe(node.host, node.port, platform) } finally { platform.close() } }
-                    } else NativeCore.probe(getApplication(), probeState(node, preferences), if (method == PingMethod.HTTPS_HEAD) "HEAD" else "GET").also { check(it.statusCode == 204) { "HTTPS-проверка не вернула ожидаемый ответ 204" } }.millis
+                    } else NativeCore.checkEndpoint(getApplication(), probeState(node, preferences), if (method == PingMethod.HTTPS_HEAD) "HEAD" else "GET")
                 } }
-                repo.pings.value = repo.pings.value + (node.id to result.fold({ PingResult(millis = it.coerceAtLeast(1), method = method, target = target) }, { PingResult(failed = true, method = method, target = target) }))
+                repo.pings.value = repo.pings.value + (node.id to result.fold({ PingResult(millis = it.coerceAtLeast(1), method = method, target = target) }, { PingResult(failed = true, method = method, target = target, failureLabel = probeFailureLabel(it)) }))
                 if (result.isSuccess) detectCountry(node)
             }
         }

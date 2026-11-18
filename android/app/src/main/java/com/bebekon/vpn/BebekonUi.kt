@@ -134,6 +134,9 @@ private fun cleanName(s: String) = s.replace(Regex("[\\x{1F1E6}-\\x{1F1FF}]"), "
                 PingTarget.entries.forEach { target -> FilterChip(saved.preferences.pingTarget == target, { model.preferences(saved.preferences.copy(pingTarget = target)) }, { Text(target.label, fontSize = 11.sp) }) }
             }
         }
+        if (saved.preferences.ping != PingMethod.TCP && nodes.any { ping[it.id]?.failed == true }) item {
+            Text("Если HTTPS-проверка не проходит, выберите другой сайт выше и повторите замер.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
         if (nodes.isEmpty()) item { EmptyState(Icons.Outlined.Public, "Серверов пока нет", "Добавьте подписку или измените фильтр") }
         items(nodes, key = { it.id }) { node -> Column { ServerRow(node, node.id == saved.selected, node.id in saved.favorites, ping[node.id] ?: PingResult(), { model.select(node) }, { model.favorite(node) }, { model.ping(node) }, node.displayCountry(countries)); if (node.config.optString("type") == "trusttunnel") TextButton({ editTrustTunnel(node) }) { Icon(Icons.Outlined.Edit, null, Modifier.size(16.dp)); Text("Изменить TrustTunnel", Modifier.padding(start = 6.dp), fontSize = 12.sp) } } }
         item { Text(if (saved.preferences.ping == PingMethod.TCP) "TCP: соединение с адресом сервера. До 100 мс — зелёный, до 250 — оранжевый. Доступ через VPN этот тест не проверяет." else "HTTPS: DNS, VPN-соединение, TLS и ответ сайта. До 300 мс — зелёный, до 600 — оранжевый. Обычно выше TCP; это разные замеры.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }

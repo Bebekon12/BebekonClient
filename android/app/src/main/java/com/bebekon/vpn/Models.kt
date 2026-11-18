@@ -98,8 +98,18 @@ enum class PingQuality { GOOD, FAIR, POOR, UNKNOWN }
 fun nodesByPing(nodes: List<Node>, pings: Map<String, PingResult>): List<Node> = nodes.sortedWith(compareBy<Node> {
     when (pings[it.id]?.quality) { PingQuality.GOOD -> 0; PingQuality.FAIR -> 1; PingQuality.POOR -> 2; else -> 3 }
 }.thenBy { pings[it.id]?.millis ?: Int.MAX_VALUE })
-data class PingResult(val millis: Int? = null, val running: Boolean = false, val failed: Boolean = false, val method: PingMethod = PingMethod.HTTPS_GET, val queued: Boolean = false, val target: PingTarget = PingTarget.CLOUDFLARE) {
-    val label get() = if (millis != null) "$millis мс" else if (queued) "В очереди" else if (running) "Проверка…" else if (failed) "Таймаут" else "—"
+internal fun probeFailureLabel(error: Throwable): String {
+    val detail = error.message.orEmpty()
+    val http = Regex("probe HTTP ([1-5][0-9]{2})").matchEntire(detail)
+    return when {
+        http != null -> "HTTP " + http.groupValues[1]
+        error is java.net.SocketTimeoutException || detail == "Таймаут" ||
+            detail.contains("timeout", ignoreCase = true) || detail.contains("deadline exceeded", ignoreCase = true) -> "Таймаут"
+        else -> "Нет ответа"
+    }
+}
+data class PingResult(val millis: Int? = null, val running: Boolean = false, val failed: Boolean = false, val method: PingMethod = PingMethod.HTTPS_GET, val queued: Boolean = false, val target: PingTarget = PingTarget.CLOUDFLARE, val failureLabel: String = "Нет ответа") {
+    val label get() = if (millis != null) "$millis мс" else if (queued) "В очереди" else if (running) "Проверка…" else if (failed) failureLabel else "—"
     val quality get() = when {
         millis == null -> if (failed) PingQuality.POOR else PingQuality.UNKNOWN
         method == PingMethod.TCP -> if (millis <= 100) PingQuality.GOOD else if (millis <= 250) PingQuality.FAIR else PingQuality.POOR

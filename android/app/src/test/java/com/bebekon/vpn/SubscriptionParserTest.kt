@@ -60,6 +60,11 @@ class SubscriptionParserTest {
         assertEquals(previous.quality, previous.copy(running = true, queued = true).quality)
         assertEquals(PingQuality.POOR, PingResult(failed = true).quality)
     }
+    @Test fun failedProbeReportsOnlyItsPublicOutcome() {
+        assertEquals("HTTP 403", probeFailureLabel(Exception("probe HTTP 403")))
+        assertEquals("Таймаут", probeFailureLabel(Exception("context deadline exceeded")))
+        assertEquals("Нет ответа", probeFailureLabel(Exception("private.invalid connection refused")))
+    }
     @Test fun existingPreferencesMigrateToCloudflareAndRetainUserSettings() {
         val old = Preferences(theme = ThemeChoice.LIGHT, routing = RoutingMode.RULES, ping = PingMethod.TCP).toJson().apply { remove("pingTarget") }
         val migrated = Preferences.fromJson(old)
