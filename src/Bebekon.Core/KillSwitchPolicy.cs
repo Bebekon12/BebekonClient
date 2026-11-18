@@ -32,7 +32,7 @@ public sealed partial class KillSwitch
         => ApplyPersistent(PolicyProvider, spec.Profile, spec.Global, spec.NetBirdEnabled ? netBird : null, trustedTransports, tunnelReady: false);
 
     private static int ApplyPersistent(Guid providerKey, Profile profile, bool global, NetBirdRouting? netBirdRouting,
-        IEnumerable<string> trustedTransports, bool tunnelReady)
+        IEnumerable<string> trustedTransports, bool tunnelReady, bool allowTransportExceptions = true)
     {
         RuleValidation.Validate(profile);
         using var memory = new NativeMemory();
@@ -62,7 +62,7 @@ public sealed partial class KillSwitch
                     var corporateInterface = rule.Target == RouteTarget.NetBird ? netBird : null;
                     var bebekonInterface = rule.Target == RouteTarget.Vpn || corporateInterface is not null ? vpn : null;
                     var sublayer = AddSublayer(memory, engine, provider);
-                    AddRuleFilters(memory, engine, sublayer, provider, rule, bebekonInterface, corporateInterface, transports, blocked);
+                    AddRuleFilters(memory, engine, sublayer, provider, rule, bebekonInterface, corporateInterface, transports, blocked, allowTransportExceptions);
                 }
             });
             var installed = blocked.Count(id => IsEnabledBlock(engine, id));
@@ -72,6 +72,23 @@ public sealed partial class KillSwitch
         finally { FwpmEngineClose0(engine); }
     }
 
+    private static readonly Guid DestinationProvider = new("6caa6470-8f48-49ec-a47c-ac0ec0325268");
+    public static int DestinationBlockCount() => PersistentBlockCount(DestinationProvider);
+    public static void ClearDestinationFilters() => ClearPersistent(DestinationProvider);
+    private static RoutingRule DestinationScope(List<string> values) => new() { Id = "bebekon-destination-guard", Name = "Destination guard",
+        Kind = RuleKind.Network, Values = values, Destination = RouteTarget.Vpn, SystemProtection = true };
+    public static Task<WfpTestResult[]> TestDestinationFiltersAsync(DestinationGuard guard, CancellationToken ct) =>
+        TestInstalledRuleAsync(DestinationProvider, DestinationScope(guard.FilterNetworks.Distinct().ToList()), ct);
+    public static void ApplyDestinationFilters(IEnumerable<string> networks, bool tunnelReady)
+        => ApplyDestinationFilters(DestinationProvider, networks, tunnelReady);
+    internal static void ApplyDestinationFilters(Guid provider, IEnumerable<string> networks, bool tunnelReady)
+    {
+        var values = networks.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        if (values.Count == 0) { ClearPersistent(provider); return; }
+        var profile = new Profile { Rules = [DestinationScope(values)] };
+        if (ApplyPersistent(provider, profile, false, null, [], tunnelReady, allowTransportExceptions: false) != values.Count)
+            throw new UserError("Windows не подтвердила защиту всех адресов.");
+    }
     public static int PersistentBlockCount() => PersistentBlockCount(PolicyProvider);
 
     internal static int PersistentBlockCount(Guid key)
@@ -111,7 +128,7 @@ public sealed partial class KillSwitch
     }
 
     private static void AddRuleFilters(NativeMemory memory, IntPtr engine, Guid sublayer, IntPtr provider, RoutingRule rule,
-        Condition? tunnelInterface, Condition? corporateInterface, Condition[] trustedTransports, List<ulong> blocked)
+        Condition? tunnelInterface, Condition? corporateInterface, Condition[] trustedTransports, List<ulong> blocked, bool allowTransportExceptions = true)
     {
         foreach (var v4 in new[] { true, false })
         {
@@ -138,7 +155,7 @@ public sealed partial class KillSwitch
                     AddFilter(memory, engine, sublayer, layer, 14, ActionPermit, "Protected rule through NetBird", [.. conditions, corporate], provider);
                 blocked.Add(AddScopeBlock(memory, engine, sublayer, layer, rule, conditions, provider));
             }
-            if (rule.Kind == RuleKind.Network)
+            if (allowTransportExceptions && rule.Kind == RuleKind.Network)
             {
                 AddTransportPermits(memory, engine, sublayer, layer, provider, trustedTransports);
                 AddDhcp(memory, engine, sublayer, layer, v4, provider);

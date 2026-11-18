@@ -129,12 +129,14 @@ public static class ProfileCodec
 }
 public sealed record ConnectSpec(Server Server, Profile Profile, Settings Settings, int ProbePort, string ProbePassword, List<Server>? RuleServers = null, int OriginProbePort = 0, List<Server>? AutoServers = null, string? NetBirdPeer = null, string[]? NetBirdControlHosts = null)
 {
+    [JsonIgnore] public DestinationGuard Guard { get; init; } = DestinationGuard.Empty;
+    [JsonIgnore] public string? GuardCacheFile { get; init; }
     [JsonIgnore] public NetBirdRouting? NetBird { get; init; }
     [JsonIgnore] public bool UseNetBirdIntegration => Settings.EnabledIntegrations is null
         ? Profile.UsesNetBird || NetBirdPeer is not null || NetBird is not null || NetBirdExecutable is not null
         : Settings.NetBirdEnabled;
     [JsonIgnore] public string? NetBirdExecutable { get; init; }
-    [JsonIgnore] public bool AllowsOriginLookup => !Profile.HasProtectedRules && !(Settings.KillSwitch && Settings.TunnelMode == TunnelMode.Tun);
+    [JsonIgnore] public bool AllowsOriginLookup => !Guard.Enabled && !Profile.HasProtectedRules && !(Settings.KillSwitch && Settings.TunnelMode == TunnelMode.Tun);
 
     internal IEnumerable<Server> ResolveRuleServers()
     {
@@ -214,11 +216,6 @@ public static class ConfigGenerator
         if (runtime is not null) { inbounds.Add(new JsonObject { ["type"] = "mixed", ["tag"] = "xray-direct", ["listen"] = "127.0.0.1", ["listen_port"] = runtime.Direct.Port, ["users"] = new JsonArray { new JsonObject { ["username"] = "bebekon", ["password"] = runtime.Direct.Password } } }); routes.Insert(0, new JsonObject { ["inbound"] = Strings(["xray-direct"]), ["action"] = "route", ["outbound"] = "direct" }); }
         trustTunnel?.AddRelays(inbounds, routes);
         var dnsRules = new JsonArray(); var sets = new JsonArray(); var setTags = new HashSet<string>();
-        if (netBirdControlHosts.Length != 0)
-        {
-            // Resolving the control plane must work before the corporate adapter exists.
-            dnsRules.Add(DnsAction(new JsonObject { ["domain"] = Strings(netBirdControlHosts) }, "direct"));
-        }
         var fallbackTags = new Dictionary<string, string>(StringComparer.Ordinal);
         if (!probeOnly && spec.Settings.MapLocation && spec.AllowsOriginLookup && spec.OriginProbePort != 0) {
             // A private authenticated channel only for our opt-in HTTPS location lookup.
@@ -227,6 +224,29 @@ public static class ConfigGenerator
                 ["users"] = new JsonArray { new JsonObject { ["username"] = "bebekon", ["password"] = spec.ProbePassword } } });
             routes.Insert(0, new JsonObject { ["inbound"] = Strings(["origin-probe"]), ["domain"] = Strings(MapLocation.LookupHosts), ["port"] = 443, ["action"] = "route", ["outbound"] = "direct" });
             routes.Insert(1, new JsonObject { ["inbound"] = Strings(["origin-probe"]), ["action"] = "reject" });
+        }
+        if (!probeOnly && spec.Guard.Enabled)
+        {
+            if (spec.Settings.TunnelMode != TunnelMode.Tun) throw new UserError("Для защиты выбранных адресов требуется режим TUN.");
+            // Existing explicit blocks still apply inside the new protected scope.
+            foreach (var denied in spec.Profile.RulesByPrecedence.Where(r => r.Target == RouteTarget.Block))
+            {
+                foreach (var (field, values) in new[] { ("domain_suffix", spec.Guard.Domains), ("ip_cidr", spec.Guard.Networks) })
+                {
+                    if (values.Length == 0) continue;
+                    JsonObject Both(JsonObject match) => new() { ["type"] = "logical", ["mode"] = "and",
+                        ["rules"] = new JsonArray(new JsonObject { [field] = Strings(values) }, match) };
+                    routes.Add(RouteAction(Both(Match(denied, forTraffic: true)), null, false));
+                    if (field == "domain_suffix" && denied.Kind is not (RuleKind.Network or RuleKind.GeoIp) && denied.Port == null && denied.Transport == null)
+                        dnsRules.Add(DnsAction(Both(Match(denied)), null));
+                }
+            }
+            spec.Guard.Configure(routes, dnsServers, dnsRules);
+        }
+        if (netBirdControlHosts.Length != 0)
+        {
+            // Resolving the control plane must work before the corporate adapter exists.
+            dnsRules.Add(DnsAction(new JsonObject { ["domain"] = Strings(netBirdControlHosts) }, "direct"));
         }
         foreach (var rule in probeOnly ? [] : spec.Profile.RulesByPrecedence)
         {
@@ -262,11 +282,15 @@ public static class ConfigGenerator
         else if (spec.Settings.TlsFragment && finalTag == "direct") routes.Add(RouteAction(new(), finalTag, true));
         var route = new JsonObject { ["rules"] = routes, ["final"] = finalTag ?? "vpn", ["auto_detect_interface"] = true, ["default_domain_resolver"] = "direct-dns" };
         if (sets.Count > 0) route["rule_set"] = sets;
-        return new JsonObject {
+        var config = new JsonObject {
             ["log"] = new JsonObject { ["level"] = "info", ["timestamp"] = false, ["disabled"] = false },
             ["dns"] = new JsonObject { ["servers"] = dnsServers, ["rules"] = dnsRules, ["final"] = (finalTag ?? "vpn") + "-dns", ["reverse_mapping"] = true, ["cache_capacity"] = 4096, ["strategy"] = "prefer_ipv4" },
             ["inbounds"] = inbounds, ["outbounds"] = outbounds, ["route"] = route
-        }.ToJsonString(Json.Options);
+        };
+        if (!probeOnly && spec.Guard.Domains.Length > 0 && spec.GuardCacheFile is { } file)
+            config["experimental"] = new JsonObject { ["cache_file"] = new JsonObject {
+                ["enabled"] = true, ["store_fakeip"] = true, ["path"] = file } };
+        return config.ToJsonString(Json.Options);
     }
     /// <summary>
     /// Native sing-box servers only: XHTTP and TrustTunnel need per-server companion processes.

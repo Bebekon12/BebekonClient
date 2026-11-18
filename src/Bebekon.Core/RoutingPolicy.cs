@@ -7,13 +7,23 @@ namespace Bebekon.Core;
 public sealed record RouteQuery(string? Domain = null, IPAddress? Address = null, string? Executable = null,
     RuleTransport? Transport = null, int? Port = null);
 
-public sealed record RouteAnalysis(RoutingRule? Rule, RouteTarget Direction, RouteTarget WhenUnavailable, bool DependsOnConnectionDetails);
+public sealed record RouteAnalysis(RoutingRule? Rule, RouteTarget Direction, RouteTarget WhenUnavailable, bool DependsOnConnectionDetails, bool ProtectedDestination = false);
 
 public static class RoutingPolicy
 {
-    public static RouteAnalysis Analyze(Profile profile, RouteQuery query)
+    public static RouteAnalysis Analyze(Profile profile, RouteQuery query, DestinationGuard? guard = null)
     {
         var conditional = false;
+        if (guard?.Matches(query) == true)
+        {
+            foreach (var rule in profile.RulesByPrecedence.Where(rule => rule.Target == RouteTarget.Block))
+            {
+                var match = Matches(rule, query);
+                if (match is null) conditional = true;
+                if (match == true) return new(rule, RouteTarget.Block, RouteTarget.Block, conditional, true);
+            }
+            return new(null, RouteTarget.Vpn, RouteTarget.Block, conditional, true);
+        }
         foreach (var rule in profile.RulesByPrecedence)
         {
             var match = Matches(rule, query);

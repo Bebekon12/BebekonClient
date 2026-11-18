@@ -27,11 +27,12 @@ public sealed class CoreTraffic : IDisposable
     {
         var document = JsonNode.Parse(config)!;
         fallbackGroups = VpnFallback.ReadGroups(document.AsObject());
-        document["experimental"] = new JsonObject { ["clash_api"] = new JsonObject {
+        document["experimental"] ??= new JsonObject();
+        document["experimental"]!["clash_api"] = new JsonObject {
             ["external_controller"] = "127.0.0.1:" + port, ["secret"] = secret,
             ["access_control_allow_origin"] = new JsonArray("http://localhost"),
             ["access_control_allow_private_network"] = false
-        }};
+        };
         return document.ToJsonString(Json.Options);
     }
     public void Start()

@@ -5,6 +5,11 @@
   <local:SettingRow Icon="Shield" Title="{DynamicResource GlobalGuard}" Description="{DynamicResource GlobalGuardHelp}"><CheckBox Style="{StaticResource Switch}" IsChecked="{Binding KillSwitchEnabled}" AutomationProperties.Name="{DynamicResource GlobalGuard}"/></local:SettingRow>
   <local:SettingRow Icon="Clock" Title="{DynamicResource PersistentWfp}" Description="{DynamicResource PersistentGuardHelp}"><CheckBox Style="{StaticResource Switch}" IsEnabled="{Binding KillSwitchEnabled}" IsChecked="{Binding PersistentProtection}" AutomationProperties.Name="{DynamicResource PersistentWfp}"/></local:SettingRow>
   <Border Style="{StaticResource CardStyle}" Padding="16" Margin="0,0,0,12"><StackPanel>
+   <TextBlock Text="{DynamicResource DestinationGuardTitle}" FontWeight="SemiBold"/>
+   <TextBlock Text="{Binding DestinationDetails}" Style="{StaticResource Subtitle}" TextWrapping="Wrap" Margin="0,5,0,8"/>
+   <WrapPanel><Button Content="{DynamicResource DestinationList}" Command="{Binding EditDestinations}" Style="{StaticResource AccentButton}" Margin="0,0,8,0"/><Button Content="{Binding DestinationToggle}" Command="{Binding ToggleDestinations}"/></WrapPanel>
+  </StackPanel></Border>
+  <Border Style="{StaticResource CardStyle}" Padding="16" Margin="0,0,0,12"><StackPanel>
    <DockPanel><TextBlock DockPanel.Dock="Right" Text="{Binding ProtectedRuleCount}" FontWeight="SemiBold"/><TextBlock Text="{DynamicResource ProtectedRules}" FontWeight="SemiBold"/></DockPanel>
    <TextBlock Text="{DynamicResource SpecificGuardHelp}" Style="{StaticResource Subtitle}" TextWrapping="Wrap" Margin="0,5,0,0"/>
   </StackPanel></Border>

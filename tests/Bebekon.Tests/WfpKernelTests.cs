@@ -75,6 +75,54 @@ public class WfpKernelTests
     }
 
     [Fact]
+    public async Task ProtectedDestinationStillDropsConnectionsAfterIsolatedCoreIsKilled()
+    {
+        if (!IsEnabled(documentationRangeOnly: true)) return;
+        var provider = Guid.NewGuid();
+        var dir = Directory.CreateTempSubdirectory();
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(25));
+        var ct = deadline.Token;
+        var exe = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../core/sing-box.exe"));
+        try
+        {
+            using var core = new CoreProcess(exe, new(dir.FullName, "core"));
+            var file = Path.Combine(dir.FullName, "isolated.json");
+            await File.WriteAllTextAsync(file, ConfigGenerator.Generate(CoreTests.Spec() with { ProbePort = LatencyService.FreePort() }, probeOnly:true), ct);
+            await core.StartAsync(file, ct);
+            KillSwitch.ApplyDestinationFilters(provider, ["192.0.2.87/32", "2001:db8::87/128"], false);
+            using (var child = System.Diagnostics.Process.GetProcessById(core.Pid!.Value))
+            {
+                child.Kill();
+                await child.WaitForExitAsync(ct);
+            }
+            Assert.Equal(2, KillSwitch.PersistentBlockCount(provider));
+            foreach (var address in new[] { IPAddress.Parse("192.0.2.87"), IPAddress.Parse("2001:db8::87") })
+            {
+                using var probe = new Socket(address.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
+                probe.Bind(new IPEndPoint(address.AddressFamily == AddressFamily.InterNetwork ? IPAddress.Any : IPAddress.IPv6Any, 0));
+                var local = (IPEndPoint)probe.LocalEndPoint!;
+                var started = DateTime.UtcNow.ToFileTimeUtc();
+                using var attempt = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                attempt.CancelAfter(TimeSpan.FromSeconds(2));
+                await Assert.ThrowsAnyAsync<Exception>(async () => await probe.ConnectAsync(address, 443, attempt.Token));
+                var dropped = false;
+                for (var retry = 0; retry < 10 && !dropped; retry++)
+                {
+                    dropped = KillSwitch.ObservePersistentDrop(provider, started, local.Port, 443, 6);
+                    if (!dropped) await Task.Delay(100, ct);
+                }
+                Assert.True(dropped, $"No correlated WFP drop for {address.AddressFamily}");
+            }
+            using var unaffected = new TcpListener(IPAddress.Loopback, 0);
+            unaffected.Start();
+            using var ordinary = new TcpClient();
+            await ordinary.ConnectAsync((IPEndPoint)unaffected.LocalEndpoint, ct);
+            using var accepted = await unaffected.AcceptTcpClientAsync(ct);
+        }
+        finally { KillSwitch.ClearPersistent(provider); dir.Delete(true); }
+    }
+
+    [Fact]
     public async Task InstalledRuleProvesFailoverAndKeepsItsProductionFilters()
     {
         if (!IsEnabled(documentationRangeOnly: true)) return;

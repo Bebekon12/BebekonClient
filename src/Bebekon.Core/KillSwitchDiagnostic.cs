@@ -221,10 +221,11 @@ public sealed partial class KillSwitch
                         Marshal.PtrToStringUni(Marshal.ReadIntPtr(filter + 16)) ?? "Bebekon WFP";
             }
 
-            if (ProviderExists(engine, PolicyProvider))
+            foreach (var key in new[] { PolicyProvider, DestinationProvider })
             {
+                if (!ProviderExists(engine,key)) continue;
                 var provider = memory.Alloc(16);
-                WriteGuid(provider, PolicyProvider);
+                WriteGuid(provider, key);
                 ReadProviderFilters(memory, engine, provider, RememberFilter);
             }
             foreach (var id in dynamicPolicy?.blockIds ?? [])

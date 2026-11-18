@@ -15,6 +15,10 @@ internal static class Program
     {
         if (args is ["--clear-leak-protection"])
         {
+            var path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "BebekonVPN");
+            ProtectedServiceStorage.Validate(path);
+            if (File.Exists(Path.Combine(path, "destination-guard.json")) || KillSwitch.DestinationBlockCount() != 0)
+                DestinationPolicy.RemoveAsync(path, CancellationToken.None).GetAwaiter().GetResult();
             KillSwitch.ClearPersistent();
             return;
         }
@@ -97,6 +101,7 @@ internal sealed class VpnService : ServiceBase
     private readonly CancellationTokenSource lifetime = new();
     private CoreSession? core;
     private KillSwitch? killSwitch;
+    private readonly DestinationPolicy destinations;
     private CoreTraffic? traffic;
     private ConnectSpec? last;
     private volatile ConnectionState state;
@@ -128,6 +133,7 @@ internal sealed class VpnService : ServiceBase
             if (console) fileSecurity.AddAccessRule(new(owner, FileSystemRights.FullControl, AccessControlType.Allow));
             new FileInfo(file).SetAccessControl(fileSecurity);
         }
+        destinations = new(root);
         log = new(root, "service"); coreLog = new(root, "core");
     }
     protected override void OnStart(string[] args) { _ = ServeAsync(lifetime.Token); _ = IdleStopAsync(lifetime.Token); log.Write("Service started."); }
@@ -147,15 +153,26 @@ internal sealed class VpnService : ServiceBase
         try
         {
             var persistent = console ? 0 : KillSwitch.PersistentBlockCount();
-            return new(persistent + (killSwitch?.InstalledBlockCount() ?? 0), persistent);
+            var guarded = !console && (destinations.Active || destinations.Error != null) ? KillSwitch.DestinationBlockCount() : 0;
+            var guardError = destinations.Error;
+            if (destinations.Active && guarded != destinations.Current.FilterNetworks.Distinct().Count())
+                guardError ??= "Windows не подтвердила полный набор фильтров для выбранных адресов.";
+            return new(guarded + persistent + (killSwitch?.InstalledBlockCount() ?? 0), persistent + guarded,
+                guardError, destinations.Saved.Entries, guarded, destinations.Active);
         }
         catch (Exception e) when (e is System.ComponentModel.Win32Exception or DllNotFoundException or EntryPointNotFoundException)
         {
-            return new(0, 0, "Не удалось прочитать состояние фильтров WFP.");
+            return new(0, 0, "Не удалось прочитать состояние фильтров WFP.", destinations.Saved.Entries, 0, destinations.Active);
         }
     }
     private async Task ServeAsync(CancellationToken ct)
     {
+        if (!console)
+        {
+            await gate.WaitAsync(ct);
+            try { await destinations.RestoreAsync(ct); }
+            finally { gate.Release(); }
+        }
         while (!ct.IsCancellationRequested)
         {
             try
@@ -182,8 +199,30 @@ internal sealed class VpnService : ServiceBase
                     {
                         case "GetStatus": break;
                         case "StopCore": StopCore(request.KeepBlocking); break;
-                        case "ClearProtection": StopCore(); KillSwitch.ClearPersistent(); break;
+                        case "SetDestinationGuard":
+                            if (console || request.GuardTargets is null) throw new UserError("Для защиты адресов нужна установленная служба.");
+                            var targets = DestinationGuard.Parse(request.GuardTargets);
+                            if (destinations.Error == null && destinations.Active == (request.EnableGuard && targets.Enabled) &&
+                                destinations.Saved.Entries.SequenceEqual(targets.Entries)) break;
+                            if (request.EnableGuard && targets.Enabled && core?.Running == true && last?.Settings.TunnelMode != TunnelMode.Tun)
+                                throw new UserError("Перед включением защиты выберите TUN.");
+                            if (request.EnableGuard && core?.Running == true && last != null) targets.CheckEndpoints(last);
+                            await destinations.SetAsync(targets, request.EnableGuard, core?.Running == true && last?.Settings.TunnelMode == TunnelMode.Tun, timeout.Token);
+                            if (core?.Running == true && last != null)
+                            {
+                                try { await StartCoreAsync(last, timeout.Token, restart: true); }
+                                catch { StopCore(keepBlocking: true); state = ConnectionState.Error; throw; }
+                            }
+                            break;
+                        case "ClearProtection":
+                            StopCore();
+                            if (destinations.Active || destinations.Error != null) await destinations.SetAsync(destinations.Saved, false, false, timeout.Token);
+                            KillSwitch.ClearPersistent();
+                            break;
                         case "TestProtection": test = await KillSwitch.TestLocalFilteringAsync(timeout.Token); break;
+                        case "TestDestinationGuard":
+                            if (!destinations.Active) throw new UserError("Защита выбранных адресов выключена.");
+                            test = await KillSwitch.TestDestinationFiltersAsync(destinations.Current, timeout.Token); break;
                         case "TestRuleProtection":
                             test = await KillSwitch.TestInstalledRuleAsync(request.TestRule ?? throw new UserError("Выберите защищённое правило."), timeout.Token);
                             break;
@@ -231,7 +270,15 @@ internal sealed class VpnService : ServiceBase
     private async Task StartCoreAsync(ConnectSpec spec, CancellationToken ct, bool restart = false)
     {
         if (!restart && core?.Running == true) throw new UserError("VPN уже подключён.");
-        spec = await ResolveNetBirdAsync(spec, ct);
+        if (destinations.Error != null) throw new UserError(destinations.Error);
+        spec = (await ResolveNetBirdAsync(spec, ct)) with { Guard = destinations.Current, GuardCacheFile = Path.Combine(root,"destination-cache.db") };
+        if (spec.Guard.Enabled)
+        {
+            spec.Guard.CheckEndpoints(spec);
+            if (spec.Settings.TunnelMode != TunnelMode.Tun) throw new UserError("Для защиты выбранных адресов требуется TUN.");
+            KillSwitch.ApplyDestinationFilters(spec.Guard.FilterNetworks, false);
+            await destinations.ConfirmDnsAsync(ct);
+        }
         var persistent = spec.Profile.HasProtectedRules || spec.Settings.KillSwitch && spec.Settings.PersistentKillSwitch;
         var global = spec.Settings.KillSwitch && spec.Settings.TunnelMode == TunnelMode.Tun;
         if (persistent && spec.Settings.TunnelMode != TunnelMode.Tun) throw new UserError("Для сохранённой защиты WFP требуется режим TUN.");
@@ -242,12 +289,36 @@ internal sealed class VpnService : ServiceBase
         traffic?.Dispose(); traffic = new CoreTraffic();
         var path = Path.Combine(root, "sing-box.json"); core = new(CoreExe, coreLog);
         var launchedCore = core;
-        core.Exited += () => { if (ReferenceEquals(core, launchedCore) && state is ConnectionState.Connected or ConnectionState.Connecting) { state = ConnectionState.Error; error = "Ядро VPN завершилось. Подключитесь заново."; connectedAt = null; log.Write("Core exited unexpectedly."); File.Delete(path); } };
+        core.Exited += () => _ = OnCoreExitAsync(launchedCore, path);
         await core.StartAsync(spec, root, false, ct, traffic.AddToConfig);
         if (persistent || global) ApplyProtection(spec, persistent, tunnelReady: true);
         if (!persistent && !console && KillSwitch.PersistentBlockCount() > 0) KillSwitch.ClearPersistent();
         if (!global || persistent) ReleaseKillSwitch();
+        if (spec.Guard.Enabled)
+        {
+            if (!KillSwitch.TunnelInterfacePresent()) throw new UserError("Windows не подтвердила интерфейс TUN для защиты адресов.");
+            KillSwitch.ApplyDestinationFilters(spec.Guard.FilterNetworks, true);
+        }
         traffic.Start(); last = spec; connectedAt = DateTimeOffset.UtcNow; state = ConnectionState.Connected;
+    }
+    private async Task OnCoreExitAsync(CoreSession exited, string path)
+    {
+        try
+        {
+            await gate.WaitAsync(lifetime.Token);
+            try
+            {
+                if (!ReferenceEquals(core, exited)) return;
+                state = ConnectionState.Error; error = "Ядро VPN завершилось. Подключитесь заново."; connectedAt = null;
+                traffic?.Dispose(); traffic = null;
+                if (destinations.Active) KillSwitch.ApplyDestinationFilters(destinations.Current.FilterNetworks, false);
+                File.Delete(path);
+                log.Write("Core exited unexpectedly.");
+            }
+            finally { gate.Release(); }
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+        catch (Exception e) { log.Write("Unexpected exit cleanup failed: " + e.GetType().Name); }
     }
     private void ApplyProtection(ConnectSpec spec, bool persistent, bool tunnelReady)
     {
@@ -291,9 +362,15 @@ internal sealed class VpnService : ServiceBase
     private void ReleaseKillSwitch() { if (killSwitch is null) return; killSwitch.Dispose(); killSwitch = null; log.Write("Leak protection disabled."); }
     private void StopCore(bool keepBlocking = false)
     {
-        state = ConnectionState.Disconnecting; traffic?.Dispose(); traffic = null; core?.Dispose(); core = null; state = ConnectionState.Disconnected; connectedAt = null; error = null;
-        if (!keepBlocking) ReleaseKillSwitch();
-        File.Delete(Path.Combine(root, "sing-box.json")); File.Delete(Path.Combine(root, "xray.json")); log.Write("Core stopped; runtime config removed.");
+        try { if (core != null && destinations.Active) KillSwitch.ApplyDestinationFilters(destinations.Current.FilterNetworks, false); }
+        finally
+        {
+            state = ConnectionState.Disconnecting; traffic?.Dispose(); traffic = null;
+            var stopped = core; core = null; stopped?.Dispose();
+            state = ConnectionState.Disconnected; connectedAt = null; error = null;
+            if (!keepBlocking) ReleaseKillSwitch();
+            File.Delete(Path.Combine(root, "sing-box.json")); File.Delete(Path.Combine(root, "xray.json")); log.Write("Core stopped; runtime config removed.");
+        }
     }
     private async Task IdleStopAsync(CancellationToken ct)
     {

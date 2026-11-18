@@ -6,7 +6,7 @@ using System.Windows.Data;
 using System.Windows.Media;
 
 namespace Bebekon.App;
-public static class Dialogs
+public static partial class Dialogs
 {
     public static bool? RoutingMode(bool current)
     {
@@ -243,9 +243,10 @@ public static class Dialogs
         AddAction(I18n.T("Анализ политики", "Analyze policy"), async () =>
         {
             var query = Query();
-            var decision = await Task.Run(() => RoutingPolicy.Analyze(profile, query), token);
+            var guard = vm.ActiveDestinations;
+            var decision = await Task.Run(() => RoutingPolicy.Analyze(profile, query, guard), token);
             var title = draft is null ? I18n.T("Профиль", "Profile") : I18n.T("Черновик", "Draft");
-            var rule = decision.Rule?.Name ?? I18n.T("Маршрут по умолчанию", "Default route");
+            var rule = decision.Rule?.Name ?? (decision.ProtectedDestination ? I18n.T("Защита выбранных адресов","Protected destinations") : I18n.T("Маршрут по умолчанию", "Default route"));
             var route = RouteChoice.NameOf(decision.Direction);
             var dns = query.Domain is null || decision.Rule?.Kind is RuleKind.Network or RuleKind.GeoIp
                 ? I18n.T("Зависит от DNS-имени", "Depends on the DNS name")

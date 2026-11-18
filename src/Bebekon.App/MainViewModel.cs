@@ -723,7 +723,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
     private bool Blocking => Protection?.Filters > 0 && State == ConnectionState.Error;
     private bool Monitoring => Connected || Blocking;
     private ProtectionStatus? protection;
-    public ProtectionStatus? Protection { get => protection; private set { if (Set(ref protection, value)) { Notify(nameof(StatusDetail)); Notify(nameof(ProtectionSummary)); } } }
+    public ProtectionStatus? Protection { get => protection; private set { if (Set(ref protection, value)) { Notify(nameof(StatusDetail)); Notify(nameof(ProtectionSummary)); Notify(nameof(DestinationDetails)); Notify(nameof(DestinationToggle)); CommandManager.InvalidateRequerySuggested(); } } }
     private void ApplyStatus(ServiceStatus s) { Protection = s.Protection; State = s.State; started = s.ConnectedAt; SetTraffic(s.State == ConnectionState.Connected ? s.Traffic : null); if (s.Error is not null) Banner = s.Error; }
     private void SetTraffic(TrafficSnapshot? value)
     {

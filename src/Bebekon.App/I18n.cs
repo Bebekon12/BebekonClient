@@ -9,6 +9,8 @@ public static class I18n
         ("CorporateConnection","Корпоративная сеть · NetBird","Corporate network · NetBird"),
         ("CorporateAddress","Адрес в рабочей сети","Work network address"),
         ("ScanMethod","Метод проверки","Probe method"),("ScanServers","Проверить список","Check list"),("ScanStop","Остановить","Stop"),
+        ("DestinationGuardTitle","Блокировать выбранные адреса без VPN","Block selected destinations outside VPN"),
+        ("DestinationList","Изменить список…","Edit list…"),
         ("GlobalGuard","Блокировать интернет при обрыве VPN","Block internet if VPN drops"),
         ("GlobalGuardHelp","В режиме TUN Windows блокирует внешний трафик вне разрешённых подключений.","In TUN mode Windows blocks external traffic outside permitted connections."),
         ("PersistentGuardHelp","Оставлять блокировку активной после остановки службы и перезапуска Windows.","Keep the block active after the helper stops and Windows restarts."),

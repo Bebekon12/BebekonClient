@@ -73,6 +73,35 @@ public sealed partial class MainViewModel
         _ => T("Системная блокировка сейчас выключена.", "System blocking is currently off.")
     };
     public int ProtectedRuleCount => ActiveProfile.ActiveRules.Count(rule => rule.SystemProtection);
+    internal DestinationGuard ActiveDestinations => Protection is { DestinationGuardEnabled:true, GuardTargets: { } targets }
+        ? DestinationGuard.Parse(targets) : DestinationGuard.Empty;
+    public string DestinationDetails => Protection?.GuardTargets is { Length: > 0 } entries
+        ? T($"Адресов: {entries.Length} · ", $"Targets: {entries.Length} · ") + (Protection.DestinationGuardEnabled ? T("защита включена","protection on") : T("защита выключена","protection off")) + Environment.NewLine + string.Join(", ",entries.Take(3)) + (entries.Length > 3 ? " …" : "")
+        : T("Добавьте домены, IP или подсети, доступные только через VPN.", "Add domains, IPs or networks that should only be reachable through the VPN.");
+    public ICommand EditDestinations { get; private set; } = null!;
+    public ICommand ToggleDestinations { get; private set; } = null!;
+    public string DestinationToggle => Protection?.DestinationGuardEnabled == true ? T("Выключить","Turn off") : T("Включить","Turn on");
+    private async Task ChangeDestinationsAsync(bool edit)
+    {
+        await EnsureServiceAsync();
+        var state = await service.SendAsync(new("GetStatus"), true, lifetime.Token);
+        if (!state.Ok || state.Status.Protection?.GuardTargets is not { } prior)
+            throw new UserError(T("Обновите службу Bebekon для защиты выбранных адресов.", "Update the Bebekon helper for destination protection."));
+        var entries = edit ? Dialogs.Lines(T("Защита выбранных адресов","Protected destinations"),
+            T("Домен с поддоменами, IP или CIDR — по одному в строке. Сохранение включает защиту. Домены используют DNS Windows; для собственного DNS приложения и уже известных реальных адресов добавьте IP/CIDR.",
+              "Enter one domain (including subdomains), IP or CIDR per line. Saving enables protection. Domains use Windows DNS; add IPs for applications with private DNS or previously cached real addresses."),
+            prior, lines => DestinationGuard.Parse(lines).Entries) : prior;
+        if (entries == null) return;
+        var enable = entries.Length > 0 && (edit || !state.Status.Protection.DestinationGuardEnabled);
+        await connectionGate.WaitAsync(lifetime.Token);
+        try
+        {
+            var reply = await service.SendAsync(new("SetDestinationGuard", GuardTargets: entries, EnableGuard: enable), true, lifetime.Token);
+            ApplyStatus(reply.Status);
+            if (!reply.Ok) throw new UserError(reply.Message ?? T("Не удалось изменить защиту адресов.", "Could not apply destination protection."));
+        }
+        finally { connectionGate.Release(); }
+    }
     public ICommand RefreshConnections { get; private set; } = null!;
     public ICommand ChangeNetBird { get; private set; } = null!;
     public ICommand CheckRoute { get; private set; } = null!;
@@ -83,6 +112,8 @@ public sealed partial class MainViewModel
 
     private void InitializeRoutingCommands()
     {
+        EditDestinations = Async(_ => ChangeDestinationsAsync(true), () => !ConnectionBusy);
+        ToggleDestinations = Async(_ => ChangeDestinationsAsync(false), () => !ConnectionBusy && Protection?.GuardTargets is { Length: > 0 });
         RefreshConnections = Async(_ => ReadConnectionsAsync(lifetime.Token));
         ChangeNetBird = Async(async value =>
         {
@@ -207,7 +238,9 @@ public sealed partial class MainViewModel
     internal async Task<string> TestRuleWfpAsync(RouteQuery query, string? expectedRule, CancellationToken ct)
     {
         var profile = Connected && spec is { } active ? active.Profile : ActiveProfile;
-        var decision = RoutingPolicy.Analyze(profile, query);
+        var decision = RoutingPolicy.Analyze(profile, query, ActiveDestinations);
+        if (decision.ProtectedDestination && expectedRule == null)
+            return await TestWfpAsync(null, ct, destination: true);
         var rule = profile.ActiveRules.FirstOrDefault(item => item.Id == decision.Rule?.Id);
         if (rule is null || !rule.SystemProtection || expectedRule is not null && rule.Id != expectedRule)
             return T("Не проверено · для этой цели не найдено соответствующее защищённое правило в применённой политике.",
@@ -217,11 +250,11 @@ public sealed partial class MainViewModel
             await TestWfpAsync(rule, ct));
     }
 
-    private async Task<string> TestWfpAsync(RoutingRule? rule, CancellationToken ct)
+    private async Task<string> TestWfpAsync(RoutingRule? rule, CancellationToken ct, bool destination = false)
     {
         if (testProbe is null && !ServiceInstaller.IsInstalled)
             return T("Для проверки нужна установленная служба Bebekon VPN.", "The installed Bebekon helper is needed for the test.");
-        var response = await service.SendAsync(new(rule is null ? "TestProtection" : "TestRuleProtection", TestRule: rule), true, ct);
+        var response = await service.SendAsync(new(destination ? "TestDestinationGuard" : rule is null ? "TestProtection" : "TestRuleProtection", TestRule: rule), true, ct);
         if (!response.Ok || response.WfpTest is not { Length: > 0 }) return response.Message ?? T("Служба не вернула результат WFP.", "The helper did not return a WFP result.");
         Protection = response.Status.Protection;
         return string.Join(Environment.NewLine, response.WfpTest.Select(check =>
@@ -244,7 +277,7 @@ public sealed partial class MainViewModel
             return T("Не проверено для этих параметров.", "Unverified for these parameters.");
         var profile = Connected && current is not null ? current.Profile : ActiveProfile;
         var target = query with { Port = query.Port ?? 443, Transport = RuleTransport.Tcp };
-        var decision = RoutingPolicy.Analyze(profile, target);
+        var decision = RoutingPolicy.Analyze(profile, target, ActiveDestinations);
         if (decision.Direction == RouteTarget.NetBird && !NetBirdEnabled)
             return T("Интеграция NetBird выключена. Политика блокирует этот маршрут.", "NetBird integration is off. The policy blocks this route.");
         if (decision.Direction == RouteTarget.NetBird && !decision.DependsOnConnectionDetails)
