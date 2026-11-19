@@ -17,6 +17,9 @@ public static class PipeProtocol
 {
     public const string ServiceName = "BebekonVPN";
     public const string PipeName = "BebekonVPN.v1";
+    /// <summary>Commands that replace the TUN core. A slow Wintun teardown/re-creation must not abort a valid start.</summary>
+    public static bool LongRunning(string operation) => operation is "StartCore" or "RestartCore" or "SetDestinationGuard";
+    public static readonly TimeSpan LongRunningDeadline = TimeSpan.FromSeconds(70);
     public static async Task WriteAsync<T>(Stream stream, T value, CancellationToken ct)
     {
         var bytes = JsonSerializer.SerializeToUtf8Bytes(value, Json.Options);
@@ -45,7 +48,7 @@ public sealed class ServiceClient : IServiceClient
             catch (Exception) { throw new UserError("Служба VPN недоступна. Переустановите Setup или scripts/install-service.ps1 от администратора для вашей учётной записи Windows."); }
         }, ct);
         using var pipe = new NamedPipeClientStream(".", PipeProtocol.PipeName, PipeDirection.InOut, PipeOptions.Asynchronous, TokenImpersonationLevel.Impersonation);
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct); timeout.CancelAfter(TimeSpan.FromSeconds(startService ? 25 : 4));
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct); timeout.CancelAfter(TimeSpan.FromSeconds(!startService ? 4 : PipeProtocol.LongRunning(request.Operation) ? 80 : 25));
         await pipe.ConnectAsync(timeout.Token);
         ServiceIdentity.Verify(pipe);
         await PipeProtocol.WriteAsync(pipe, request, timeout.Token); return await PipeProtocol.ReadAsync<ServiceResponse>(pipe, timeout.Token);

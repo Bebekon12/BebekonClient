@@ -62,19 +62,51 @@ internal static class ConnectionChecks
         vm.SelectedServer!.Transport = "xhttp";
         await vm.ConnectAsync(); Require(vm.Connected && service.Last?.Server.Transport == "xhttp", "XHTTP reaches helper without premature sing-box-only generation");
         await vm.DisconnectAsync();
+        vm.SelectedServer!.Transport = "tcp";
+        await StabilityAsync(vm, service, subscription);
+    }
+    /// <summary>Unattended drops: the user asked to stay connected, so the client must come back by itself.</summary>
+    private static async Task StabilityAsync(MainViewModel vm, FakeService service, Subscription subscription)
+    {
+        await vm.ConnectAsync(); var starts = service.Starts; Require(vm.Connected, "Stability baseline");
+
+        // Providers hand out a different front domain for the same node on each download.
+        var rotated = VlessParser.Parse("vless://11111111-1111-1111-1111-111111111111@rotated.example:9?type=tcp&security=none#Renamed");
+        vm.ReplaceServers(subscription, [rotated]); await Task.Delay(1200);
+        Require(service.Starts == starts && vm.Connected && vm.SelectedServer?.Host == "rotated.example", "Rotated dial address keeps the working tunnel and is used next time");
+
+        // A busy helper pipe is not a lost tunnel.
+        service.FailStatus = 3; await Task.Delay(4500);
+        Require(service.Starts == starts && vm.Connected, "Transient status failures do not disconnect");
+
+        // The core exits on its own: reconnect without a click, with the refreshed address.
+        service.Crash(); await Until(() => service.Starts == starts + 1 && vm.Connected, 15);
+        Require(service.Last?.Server.Host == "rotated.example", "Reconnect uses the refreshed server");
+
+        // A settings restart that fails must not leave the VPN off.
+        service.FailStarts = 1; vm.IsWholePc = !vm.IsWholePc;
+        await Until(() => service.Starts == starts + 3 && vm.Connected, 20);
+
+        // A drop followed by a manual off stays off.
+        service.FailStarts = 100; service.Crash(); await Until(() => vm.ReconnectPending, 5);
+        await vm.DisconnectAsync(); var offStarts = service.Starts; await Task.Delay(3000);
+        Require(!vm.Connected && !vm.ReconnectPending && service.Starts == offStarts, "Manual off cancels automatic reconnect");
+        service.FailStarts = 0;
     }
     private static void Require(bool value, string message) { if (!value) throw new InvalidOperationException("Connection regression: " + message); }
-    private static async Task Until(Func<bool> condition)
+    private static async Task Until(Func<bool> condition, int seconds = 5)
     {
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(seconds));
         while (!condition()) await Task.Delay(20, timeout.Token);
     }
     private sealed class FakeService : IServiceClient
     {
-        public int Starts, MaxConcurrentTransitions;
+        public int Starts, MaxConcurrentTransitions, FailStatus, FailStarts;
         private int transitions;
         public bool Running;
+        private bool crashed;
         public ConnectSpec? Last;
+        public void Crash() { Running = false; crashed = true; }
         public async Task<ServiceResponse> SendAsync(ServiceRequest request, bool startService = false, CancellationToken ct = default)
         {
             var transition = request.Operation is "StartCore" or "StopCore" or "RestartCore";
@@ -82,13 +114,16 @@ internal static class ConnectionChecks
             try
             {
                 await Task.Delay(20, ct);
+                if (request.Operation == "GetStatus" && FailStatus > 0) { FailStatus--; throw new TimeoutException("Synthetic busy helper pipe."); }
                 if (request.Operation is "StartCore" or "RestartCore")
                 {
                     if (request.Operation == "StartCore") Require(!Running, "No duplicate start");
-                    Starts++; Running = true; Last = request.Spec;
+                    Starts++; Last = request.Spec;
+                    if (FailStarts > 0) { FailStarts--; Running = false; crashed = true; return new(false, new(ConnectionState.Error, "Synthetic start failure."), "Synthetic start failure."); }
+                    Running = true; crashed = false;
                 }
-                if (request.Operation == "StopCore") Running = false;
-                return new(true, new(Running ? ConnectionState.Connected : ConnectionState.Disconnected,
+                if (request.Operation == "StopCore") { Running = false; crashed = false; }
+                return new(true, new(Running ? ConnectionState.Connected : crashed ? ConnectionState.Error : ConnectionState.Disconnected,
                     ConnectedAt: Running ? DateTimeOffset.UtcNow : null, CorePid: Running ? 123 : null,
                     Traffic: Running ? new(125_000, 250_000, 2_000_000, 4_000_000, DateTimeOffset.UtcNow) : null));
             }

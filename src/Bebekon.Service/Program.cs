@@ -188,6 +188,7 @@ internal sealed class VpnService : ServiceBase
                 if (!authorized) continue;
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct); timeout.CancelAfter(TimeSpan.FromSeconds(30));
                 var request = await PipeProtocol.ReadAsync<ServiceRequest>(pipe, timeout.Token);
+                if (PipeProtocol.LongRunning(request.Operation)) timeout.CancelAfter(PipeProtocol.LongRunningDeadline);
                 await gate.WaitAsync(timeout.Token);
                 ServiceResponse result;
                 try

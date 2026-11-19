@@ -4,10 +4,19 @@ namespace Bebekon.Core;
 
 public static class ServerRefresh
 {
-    public static string ConnectionKey(Server s) => JsonSerializer.Serialize(new {
+    public static string ConnectionKey(Server s) => Key(s, s.Host);
+
+    /// <summary>
+    /// Identity of a running connection apart from its dial address. Some providers hand out a
+    /// different front domain for the same node on every subscription download; a working tunnel
+    /// keeps its address and the rotated one is used by the next connection.
+    /// </summary>
+    public static string SessionKey(Server s) => Key(s, "");
+
+    private static string Key(Server s, string host) => JsonSerializer.Serialize(new {
         s.TrustTunnel,
         s.Type, s.Password, s.Cipher, s.AlterId, s.GlobalPadding, s.AuthenticatedLength, s.Plugin, s.PluginOptions, s.Obfs, s.ObfsPassword, s.UpMbps, s.DownMbps, s.ServerPorts, s.HopIntervalSeconds, s.TlsInsecure, s.CertificatePin, s.VerifyCertificateName, s.XhttpMode, s.XhttpExtra,
-        s.Host, s.Port, s.Uuid, s.Security, s.Sni, s.PublicKey, s.ShortId, s.Fingerprint,
+        Host = host, s.Port, s.Uuid, s.Security, s.Sni, s.PublicKey, s.ShortId, s.Fingerprint,
         s.Alpn, s.Flow, s.PacketEncoding, s.UdpEnabled, s.Transport, s.ServiceName, s.Path, s.TransportHost, s.UnsupportedReason
     });
 

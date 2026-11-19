@@ -52,7 +52,9 @@ public sealed class CoreProcess : IDisposable
         assignedToJob = true;
         process.BeginOutputReadLine(); process.BeginErrorReadLine();
         }
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct); timeout.CancelAfter(TimeSpan.FromSeconds(15));
+        // Re-creating the Wintun adapter right after the previous core exits can take well over
+        // 15 s on some PCs; the caller's deadline still bounds probes and cancelled starts.
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct); timeout.CancelAfter(TimeSpan.FromSeconds(40));
         try { await ready.Task.WaitAsync(timeout.Token); if (!Running) throw new UserError("Ядро завершилось."); }
         catch { Stop(); throw; }
     }

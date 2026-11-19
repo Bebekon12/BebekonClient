@@ -26,6 +26,15 @@ public class ServerRefreshTests
         Assert.Equal("", Assert.Single(ServerRefresh.Merge("a", [old], [moved], old.Id)).DetectedCountry);
     }
     [Fact]
+    public void RotatedFrontDomainKeepsSessionKeyButNotConnectionKey()
+    {
+        var old = CoreTests.Node(); var rotated = CoreTests.Node(); rotated.Host = "front-2.example";
+        Assert.NotEqual(ServerRefresh.ConnectionKey(old), ServerRefresh.ConnectionKey(rotated));
+        Assert.Equal(ServerRefresh.SessionKey(old), ServerRefresh.SessionKey(rotated));
+        var rekeyed = CoreTests.Node(); rekeyed.Host = "front-2.example"; rekeyed.Uuid = Guid.NewGuid().ToString();
+        Assert.NotEqual(ServerRefresh.SessionKey(old), ServerRefresh.SessionKey(rekeyed));
+    }
+    [Fact]
     public void RemovedSelectionStaysAvailableInsteadOfSwitchingServers()
     {
         var selected = CoreTests.Node(); selected.SubscriptionId = "a";

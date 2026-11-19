@@ -1,4 +1,4 @@
-param([string]$InnoCompiler, [switch]$SkipInstaller, [string]$TestSettings, [string]$PublishFolder = 'artifacts\release', [string]$UpdateFeedUrl = 'https://github.com/Bebekon12/BebekonClient/releases/latest/download/update.json', [string]$InstallerUrl, [switch]$SkipUpdateSigning, [string]$ReleaseNotes = 'Добавлена поддержка TrustTunnel: ссылки tt://, TOML/JSON и HTTPS-подписки, HTTP/2 и HTTP/3, импорт файла и выбор протокола сервера. Сохраняются текущие правила, TUN и выбранный сервер.')
+﻿param([string]$InnoCompiler, [switch]$SkipInstaller, [string]$TestSettings, [string]$PublishFolder = 'artifacts\release', [string]$UpdateFeedUrl = 'https://github.com/Bebekon12/BebekonClient/releases/latest/download/update.json', [string]$InstallerUrl, [switch]$SkipUpdateSigning, [string]$ReleaseNotes = 'Добавлена поддержка TrustTunnel: ссылки tt://, TOML/JSON и HTTPS-подписки, HTTP/2 и HTTP/3, импорт файла и выбор протокола сервера. Сохраняются текущие правила, TUN и выбранный сервер.')
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $projectRoot = $PSScriptRoot

@@ -30,6 +30,11 @@ public sealed partial class MainViewModel : Observable, IDisposable
     private CancellationTokenSource? networkDelay;
     private bool recovering;
     private bool desiredConnected;
+    private CancellationTokenSource? reconnectDelay;
+    private int reconnectFailures;
+    /// <summary>Seconds before each automatic reconnect attempt; the last value repeats.</summary>
+    private static readonly int[] ReconnectBackoff = [2, 4, 8, 15, 30];
+    private const int MaxReconnectFailures = 12;
     private CancellationTokenSource? connectionAttempt;
     private string uplinkSignature = UplinkSignature();
     public AppState Data { get; }
@@ -53,14 +58,16 @@ public sealed partial class MainViewModel : Observable, IDisposable
     public GridLength SidebarWidth => new(SidebarCollapsed ? 76 : 200);
     public Visibility NavTextVisibility => SidebarCollapsed ? Visibility.Collapsed : Visibility.Visible;
     private Server? selectedServer;
-    public Server? SelectedServer { get => selectedServer; set { var changed = selectedServer?.Id != value?.Id || (selectedServer is not null && value is not null && ServerRefresh.ConnectionKey(selectedServer) != ServerRefresh.ConnectionKey(value)); if (Set(ref selectedServer, value)) { Data.SelectedServerId = value?.Id; Notify(nameof(ServerLabel)); Notify(nameof(SelectedCountry)); Save(); if (changed) { ResetMapDestination(); QueueApply(); } } } }
+    /// <summary>Set while a subscription download replaces nodes; a rotated dial address alone must not restart a working tunnel.</summary>
+    private bool replacingServers;
+    public Server? SelectedServer { get => selectedServer; set { Func<Server, string> key = replacingServers ? ServerRefresh.SessionKey : ServerRefresh.ConnectionKey; var changed = selectedServer?.Id != value?.Id || (selectedServer is not null && value is not null && key(selectedServer) != key(value)); if (Set(ref selectedServer, value)) { Data.SelectedServerId = value?.Id; Notify(nameof(ServerLabel)); Notify(nameof(SelectedCountry)); Save(); if (changed) { ResetMapDestination(); QueueApply(); } } } }
     public string ServerLabel => AutoActive ? T("Авто", "Auto") + (ActiveAutoServer is { } active ? " · " + active.DisplayName : "") : SelectedServer?.DisplayName ?? T("Выберите сервер", "Choose a server");
     /// <summary>Visible servers urltest may use; the core takes the first one until it has measured them.</summary>
     private bool AutoActive => Settings.AutoServer && DisplayServers.Count(ConfigGenerator.AutoEligible) >= 2;
     /// <summary>Fastest known first, so a large subscription keeps its best 64 servers.</summary>
     private List<Server> AutoPool => DisplayServers.Where(ConfigGenerator.AutoEligible).OrderBy(s => s.LatencyMs is >= 0 ? s.LatencyMs : long.MaxValue).ToList();
     /// <summary>Order-independent identity of the auto pool; a changed pool needs a new core config.</summary>
-    private static string AutoKey(IEnumerable<Server>? servers) => string.Join("\n", (servers ?? []).Where(ConfigGenerator.AutoEligible).Select(ServerRefresh.ConnectionKey).Order(StringComparer.Ordinal));
+    private static string AutoKey(IEnumerable<Server>? servers) => string.Join("\n", (servers ?? []).Where(ConfigGenerator.AutoEligible).Select(ServerRefresh.SessionKey).Order(StringComparer.Ordinal));
     /// <summary>Maps the core's "auto-N" tag back through the list used for the running connection.</summary>
     private Server? ActiveAutoServer => Connected && spec is { } current && traffic?.ActiveOutbound is { } tag && int.TryParse(tag.AsSpan(5), out var index) && ConfigGenerator.AutoServers(current) is { Count: >= 2 } list && index >= 0 && index < list.Count ? list[index] : null;
     public bool KillSwitchEnabled { get => Settings.KillSwitch; set { if (Settings.KillSwitch == value) return; Settings.KillSwitch = value; Notify(); Save(); QueueApply(); } }
@@ -468,7 +475,9 @@ public sealed partial class MainViewModel : Observable, IDisposable
         foreach (var s in Data.Servers.Where(s => s.SubscriptionId == sub.Id).ToArray()) Data.Servers.Remove(s);
         foreach (var s in merged) Data.Servers.Add(s);
         sub.Updated = DateTimeOffset.Now; sub.ServerCount = incoming.Count;
-        SelectedServer = oldId is null ? Data.Servers.FirstOrDefault(s => s.Supported) : Data.Servers.FirstOrDefault(s => s.Id == oldId) ?? SelectedServer;
+        replacingServers = true;
+        try { SelectedServer = oldId is null ? Data.Servers.FirstOrDefault(s => s.Supported) : Data.Servers.FirstOrDefault(s => s.Id == oldId) ?? SelectedServer; }
+        finally { replacingServers = false; }
         RefreshServers(); Notify(nameof(NoSubscriptions)); Data.Subscriptions = new(Data.Subscriptions); Notify(nameof(Data));
     }
     private IEnumerable<Server> DisplayServers => Data.Servers.Where(s => !Data.Subscriptions.Any(sub => sub.Id == s.SubscriptionId && sub.Hidden));
@@ -521,17 +530,20 @@ public sealed partial class MainViewModel : Observable, IDisposable
             }
             finally { connectionGate.Release(); }
         }
-        catch (OperationCanceledException) { } catch (Exception e) { Report(e); }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+        catch (Exception e) { Report(e); if (desiredConnected && !Connected) ScheduleReconnect(); }
     }
     private async Task ToggleSafelyAsync() { try { if (Blocking) await ConnectAsync(); else if (desiredConnected || Connected) await DisconnectAsync(); else await ConnectAsync(); } catch (Exception e) { Report(e); } }
     public async Task ConnectAsync()
     {
+        CancelReconnect();
         desiredConnected = true;
         await connectionGate.WaitAsync(lifetime.Token);
         try { if (desiredConnected && !Connected) await ConnectCoreAsync(); }
         finally { connectionGate.Release(); }
     }
-    private async Task ConnectCoreAsync(bool restart = false)
+    /// <param name="automatic">A reconnect the user did not request: a failure keeps the intent to stay connected.</param>
+    private async Task ConnectCoreAsync(bool restart = false, bool automatic = false)
     {
         var oldSpec = spec;
         monitorId++; networkDelay?.Cancel();
@@ -600,7 +612,13 @@ public sealed partial class MainViewModel : Observable, IDisposable
             catch { }
             if (testProbe is null) SystemProxy.Restore();
             SetTraffic(null); State = token.IsCancellationRequested ? ConnectionState.Disconnected : ConnectionState.Error;
-            if (!token.IsCancellationRequested) { desiredConnected = false; throw; }
+            if (!token.IsCancellationRequested)
+            {
+                // Only a user's own connect gives up at once. A tunnel lost during a settings
+                // restart or recovery is retried, and leak protection keeps blocking meanwhile.
+                if (!restart && !automatic) desiredConnected = false;
+                throw;
+            }
         }
     }
     private async Task ProbeConnectionAsync(ConnectSpec current, CancellationToken token)
@@ -628,7 +646,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
     private async Task MonitorNetBirdAsync()
     {
         ConnectSpec? observed = null;
-        string? previousStamp = null;
+        string? previousStamp = null, candidateStamp = null;
         try
         {
             using var timer = new PeriodicTimer(TimeSpan.FromSeconds(10));
@@ -654,16 +672,25 @@ public sealed partial class MainViewModel : Observable, IDisposable
                 try { routing = await NetBirdRouting.DiscoverAsync(actual.PeerAddress, lifetime.Token); }
                 catch (NetworkInformationException) { continue; }
                 if (!ReferenceEquals(active, spec) || !Connected) continue;
-                var stamp = string.Join('\n', routing?.InterfaceName, routing?.IPv4Index, routing?.IPv6Index, routing?.DefaultResolver,
-                    string.Join(',', actual.Networks.Order(StringComparer.Ordinal)),
-                    string.Join(',', (routing?.Zones ?? []).Select(zone => $"{zone.Domain}|{zone.IncludesSubdomains}|{zone.Resolver}").Order(StringComparer.Ordinal)));
-                if (ReferenceEquals(observed, active) && previousStamp != stamp) QueueApply();
-                observed = active;
-                previousStamp = stamp;
+                var stamp = NetBirdStamp(active, actual, routing);
+                if (!ReferenceEquals(observed, active)) { observed = active; previousStamp = stamp; candidateStamp = null; continue; }
+                if (stamp == previousStamp) { candidateStamp = null; continue; }
+                // NetBird briefly drops routes and resolvers while a peer reconnects. Restart the
+                // tunnel only for a change that is still there on the next check.
+                if (candidateStamp != stamp) { candidateStamp = stamp; continue; }
+                candidateStamp = null; previousStamp = stamp;
+                log.Write("NetBird routing changed; applying.");
+                QueueApply();
             }
         }
         catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
     }
+    /// <summary>Only what the generated config and WFP policy depend on: a profile without NetBird rules uses just the interface (DNS mode and transport exceptions).</summary>
+    internal static string NetBirdStamp(ConnectSpec active, NetBirdStatus actual, NetBirdRouting? routing) => active.Profile.UsesNetBird
+        ? string.Join('\n', routing?.InterfaceName, routing?.IPv4Index, routing?.IPv6Index, routing?.DefaultResolver,
+            string.Join(',', actual.Networks.Order(StringComparer.Ordinal)),
+            string.Join(',', (routing?.Zones ?? []).Select(zone => $"{zone.Domain}|{zone.IncludesSubdomains}|{zone.Resolver}").Order(StringComparer.Ordinal)))
+        : routing is null ? "" : routing.InterfaceName;
     private async Task UpdateIpAsync(ConnectSpec current, int generation, CancellationToken token)
     {
         try { var value = await LatencyService.VpnIpAsync(current, token); if (generation == monitorId && Connected) VpnIp = value; } catch { }
@@ -678,6 +705,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
     }
     public async Task DisconnectAsync()
     {
+        CancelReconnect();
         desiredConnected = false; applyDelay?.Cancel(); networkDelay?.Cancel(); connectionAttempt?.Cancel(); monitorId++;
         await connectionGate.WaitAsync();
         try { await StopConnectionCoreAsync(); }
@@ -699,16 +727,27 @@ public sealed partial class MainViewModel : Observable, IDisposable
     private async Task MonitorAsync()
     {
         var id = ++monitorId;
+        var failures = 0;
         try
         {
             while (id == monitorId && Monitoring && !lifetime.IsCancellationRequested)
             {
                 await Task.Delay(1000, lifetime.Token);
                 if (id != monitorId || !Monitoring) break;
-                var response = await service.SendAsync(new("GetStatus"), ct: lifetime.Token);
+                ServiceResponse response;
+                // The helper answers one request at a time; a busy or briefly unreachable pipe is
+                // not a lost tunnel. Only a sustained loss of the helper counts.
+                try { response = await service.SendAsync(new("GetStatus"), ct: lifetime.Token); failures = 0; }
+                catch (Exception) when (!lifetime.IsCancellationRequested && id == monitorId && ++failures < 5) { continue; }
                 if (id != monitorId) break;
                 var wasConnected = Connected;
                 ApplyStatus(response.Status);
+                if (wasConnected && !Connected && desiredConnected)
+                {
+                    log.Write("Tunnel stopped unexpectedly; reconnecting.");
+                    if (testProbe is null) SystemProxy.Restore();
+                    SetTraffic(null); ScheduleReconnect(); return;
+                }
                 if (wasConnected && Blocking)
                     Banner = T("Ядро VPN остановилось. Фильтры защиты WFP действуют.", "The VPN core stopped. WFP protection remains active.");
                 _ = RefreshMapOriginAsync();
@@ -717,7 +756,65 @@ public sealed partial class MainViewModel : Observable, IDisposable
                 if (!Connected && testProbe is null) SystemProxy.Restore();
             }
         }
-        catch (OperationCanceledException) { } catch (Exception e) { if (id == monitorId) { if (testProbe is null) SystemProxy.Restore(); State = ConnectionState.Error; SetTraffic(null); Report(e); } }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+        catch (Exception e)
+        {
+            if (id != monitorId) return;
+            if (testProbe is null) SystemProxy.Restore();
+            State = ConnectionState.Error; SetTraffic(null); log.Write("Status monitor lost the helper: " + e.GetType().Name);
+            if (desiredConnected) ScheduleReconnect(); else Report(e);
+        }
+    }
+    private void CancelReconnect() { reconnectDelay?.Cancel(); reconnectDelay?.Dispose(); reconnectDelay = null; reconnectFailures = 0; }
+    /// <summary>Like other VPN clients, keep the user's choice to stay connected: retry with backoff until it works or the user disconnects.</summary>
+    private void ScheduleReconnect()
+    {
+        if (!desiredConnected || lifetime.IsCancellationRequested) return;
+        reconnectDelay?.Cancel(); reconnectDelay?.Dispose();
+        reconnectDelay = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+        _ = ReconnectLaterAsync(reconnectDelay.Token);
+    }
+    internal bool ReconnectPending => reconnectDelay is { IsCancellationRequested: false };
+    private async Task ReconnectLaterAsync(CancellationToken token)
+    {
+        try
+        {
+            var delay = ReconnectBackoff[Math.Min(reconnectFailures, ReconnectBackoff.Length - 1)];
+            State = ConnectionState.Connecting;
+            Banner = T($"Связь с VPN прервалась. Переподключение через {delay} с…", $"VPN connection lost. Reconnecting in {delay} s…");
+            await Task.Delay(TimeSpan.FromSeconds(testProbe is null ? delay : 0.2), token);
+            // Offline time is not a failed attempt: wait for an uplink first.
+            while (testProbe is null && !NetworkInterface.GetIsNetworkAvailable()) await Task.Delay(1000, token);
+            await connectionGate.WaitAsync(token);
+            try
+            {
+                if (!desiredConnected || Connected || token.IsCancellationRequested) return;
+                // The tunnel may have survived a status-pipe hiccup; resume monitoring instead of restarting it.
+                try
+                {
+                    var status = await service.SendAsync(new("GetStatus"), ct: token);
+                    if (status.Ok && status.Status.State == ConnectionState.Connected)
+                    {
+                        ApplyStatus(status.Status); _ = MonitorAsync(); reconnectFailures = 0; Banner = null; return;
+                    }
+                }
+                catch (Exception) when (!token.IsCancellationRequested) { }
+                await ConnectCoreAsync(automatic: true);
+                if (Connected) { reconnectFailures = 0; log.Write("Reconnected automatically."); Banner = T("Подключение восстановлено", "Connection restored"); }
+            }
+            finally { connectionGate.Release(); }
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+        catch (Exception e)
+        {
+            if (!desiredConnected || token.IsCancellationRequested) return;
+            reconnectFailures++; log.Write("Automatic reconnect failed: " + e.GetType().Name);
+            if (reconnectFailures >= MaxReconnectFailures)
+            {
+                desiredConnected = false; reconnectFailures = 0; State = ConnectionState.Error; Report(e); return;
+            }
+            ScheduleReconnect();
+        }
     }
     /// <summary>The core stopped while leak protection holds traffic; keep the service (and its block) alive.</summary>
     private bool Blocking => Protection?.Filters > 0 && State == ConnectionState.Error;
@@ -785,11 +882,11 @@ public sealed partial class MainViewModel : Observable, IDisposable
                 }
             }
             await connectionGate.WaitAsync(token);
-            try { if (generation == monitorId && desiredConnected && Connected) { await StopConnectionCoreAsync(reconnecting: true); if (desiredConnected) await ConnectCoreAsync(); } }
+            try { if (generation == monitorId && desiredConnected && Connected) { await StopConnectionCoreAsync(reconnecting: true); if (desiredConnected) await ConnectCoreAsync(automatic: true); } }
             finally { connectionGate.Release(); }
         }
-        catch (OperationCanceledException) { }
-        catch (Exception e) { Report(e); }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+        catch (Exception e) { Report(e); if (desiredConnected && !Connected) ScheduleReconnect(); }
         finally { recovering = false; }
     }
     private static string UplinkSignature()
@@ -803,5 +900,5 @@ public sealed partial class MainViewModel : Observable, IDisposable
         }
         catch (NetworkInformationException) { return ""; }
     }
-    public void Dispose() { Save(); desiredConnected = false; lifetime.Cancel(); updateCancellation?.Cancel(); updater?.Dispose(); connectionAttempt?.Cancel(); scan?.Cancel(); applyDelay?.Cancel(); networkDelay?.Cancel(); SystemEvents.PowerModeChanged -= OnPower; NetworkChange.NetworkAvailabilityChanged -= OnNetwork; NetworkChange.NetworkAddressChanged -= OnAddress; }
+    public void Dispose() { Save(); desiredConnected = false; reconnectDelay?.Cancel(); lifetime.Cancel(); updateCancellation?.Cancel(); updater?.Dispose(); connectionAttempt?.Cancel(); scan?.Cancel(); applyDelay?.Cancel(); networkDelay?.Cancel(); SystemEvents.PowerModeChanged -= OnPower; NetworkChange.NetworkAvailabilityChanged -= OnNetwork; NetworkChange.NetworkAddressChanged -= OnAddress; }
 }

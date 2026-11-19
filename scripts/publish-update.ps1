@@ -1,4 +1,4 @@
-param([switch]$InitializeKey, [string]$Installer, [string]$Version, [string]$Output,
+﻿param([switch]$InitializeKey, [string]$Installer, [string]$Version, [string]$Output,
       [string]$InstallerUrl, [string]$Notes = 'Улучшения и исправления Bebekon VPN.')
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
