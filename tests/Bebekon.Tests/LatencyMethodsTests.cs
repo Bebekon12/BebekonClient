@@ -11,12 +11,24 @@ public sealed class LatencyMethodsTests
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token) => send(request, token);
     }
     [Theory] [InlineData("GET")] [InlineData("HEAD")]
-    public async Task HttpsProbeMeasuresOneCompleteRequestUsingSelectedVerb(string verb)
+    public async Task HttpsProbeWarmsUpThenMeasuresWarmRequestsUsingSelectedVerb(string verb)
     {
         var requests = new List<string>();
         using var http = new HttpClient(new Handler((request, _) => { requests.Add(request.Method.Method); Assert.Equal("https://www.gstatic.com/generate_204", request.RequestUri!.AbsoluteUri); return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NoContent)); }));
         Assert.True(await LatencyService.MeasureHttpAsync(http, new HttpMethod(verb), default) >= 0);
-        Assert.Equal(new[] { verb }, requests);
+        Assert.Equal(Enumerable.Repeat(verb, 1 + LatencyService.WarmSamples), requests);
+    }
+    [Fact] public async Task ColdHandshakeDelayIsNotReportedAsLatency()
+    {
+        var count = 0;
+        using var http = new HttpClient(new Handler(async (_, token) => { if (count++ == 0) await Task.Delay(1500, token); return new HttpResponseMessage(HttpStatusCode.NoContent); }));
+        Assert.True(await LatencyService.MeasureHttpAsync(http, HttpMethod.Get, default) < 1000);
+    }
+    [Fact] public async Task FailedWarmRequestKeepsProvenColdValue()
+    {
+        var count = 0;
+        using var http = new HttpClient(new Handler(async (_, token) => { if (count++ == 0) { await Task.Delay(300, token); return new HttpResponseMessage(HttpStatusCode.NoContent); } return new HttpResponseMessage(HttpStatusCode.BadGateway); }));
+        Assert.True(await LatencyService.MeasureHttpAsync(http, HttpMethod.Get, default) >= 250);
     }
     [Fact] public async Task HttpFailureAndCancellationAreNotSuccessfulLatency()
     {

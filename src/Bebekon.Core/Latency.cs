@@ -129,15 +129,45 @@ public sealed class LatencyService(string executable)
         }
         finally { Directory.Delete(root, true); }
     }
-    internal static async Task<long> MeasureHttpAsync(HttpClient http, HttpMethod method, CancellationToken ct)
+    /// <summary>Warm requests after the first: few enough that a large scan stays fast.</summary>
+    internal const int WarmSamples = 2;
+    internal static async Task<long> MeasureHttpAsync(HttpClient http, HttpMethod method, CancellationToken ct, int warmSamples = WarmSamples)
     {
-        // Measure one complete, cold request, as on Android. Repeating requests both slows
-        // a large scan and reports a warm HTTP connection rather than initial VPN access.
+        // The first request opens the VPN stream, its TLS/Reality handshake and the server's own
+        // connection to the target. One lost packet there costs a 1-3 s TCP retransmission, so a
+        // single cold request jumps between ~200 ms and several seconds. Like "unified delay" in
+        // other clients, it only proves reachability; the reported value is the best warm request
+        // on the same connection, i.e. the round trip through the server.
+        var cold = await RequestAsync(http, method, ct);
+        var best = long.MaxValue;
+        for (var i = 0; i < warmSamples; i++)
+        {
+            try { best = Math.Min(best, await RequestAsync(http, method, ct)); }
+            // Reachability is already proven; a warm request cut by the deadline keeps the cold value.
+            catch (Exception e) when (e is OperationCanceledException or HttpRequestException or IOException) { break; }
+        }
+        return best == long.MaxValue ? cold : best;
+    }
+    private static async Task<long> RequestAsync(HttpClient http, HttpMethod method, CancellationToken ct)
+    {
         var sw = Stopwatch.StartNew();
         using var request = new HttpRequestMessage(method, "https://www.gstatic.com/generate_204");
         using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
         if (response.StatusCode != HttpStatusCode.NoContent) throw new HttpRequestException("HTTPS-проверка не вернула ожидаемый ответ 204.");
         return sw.ElapsedMilliseconds;
+    }
+    /// <summary>A client for repeated checks of the running tunnel. Its pooled connection stays open between checks.</summary>
+    public static HttpClient LiveClient(ConnectSpec spec) => new(new SocketsHttpHandler
+    {
+        Proxy = new WebProxy("socks5://127.0.0.1:" + spec.ProbePort) { Credentials = new NetworkCredential("bebekon", spec.ProbePassword) },
+        UseProxy = true, AllowAutoRedirect = false, PooledConnectionIdleTimeout = TimeSpan.FromMinutes(5), MaxConnectionsPerServer = 1
+    }) { Timeout = Timeout.InfiniteTimeSpan };
+    /// <summary>Round trip of the running connection: no new core, and the reused connection excludes handshakes.</summary>
+    public static async Task<long?> LiveAsync(HttpClient http, CancellationToken ct)
+    {
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct); deadline.CancelAfter(ProbeTimeout);
+        try { return await MeasureHttpAsync(http, HttpMethod.Get, deadline.Token, 1); }
+        catch (Exception e) when (e is HttpRequestException or IOException or ObjectDisposedException or OperationCanceledException && !ct.IsCancellationRequested) { return null; }
     }
     public static HttpClient ProbeClient(ConnectSpec spec) => new(new SocketsHttpHandler { Proxy = new WebProxy("socks5://127.0.0.1:" + spec.ProbePort) { Credentials = new NetworkCredential("bebekon", spec.ProbePassword) }, UseProxy = true, AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(4) };
     public static async Task<string> VpnIpAsync(ConnectSpec spec, CancellationToken ct)

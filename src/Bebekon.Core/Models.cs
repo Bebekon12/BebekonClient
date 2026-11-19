@@ -251,6 +251,9 @@ public sealed class Settings
     [JsonIgnore] public bool NetBirdEnabled => EnabledIntegrations?.Contains("netbird", StringComparer.OrdinalIgnoreCase) == true;
     public int DesignVersion { get; set; }
     public LatencyMode LatencyMode { get; set; } = LatencyMode.HttpsGet;
+    /// <summary>Seconds between automatic checks of the current server; 0 turns them off.</summary>
+    public int AutoPingSeconds { get; set; } = 10;
+    public static readonly int[] AutoPingChoices = [0, 5, 10, 30, 60];
     public bool CheckForUpdates { get; set; } = true;
     public string UpdateSource { get; set; } = "";
     public string Language { get; set; } = "Русский";

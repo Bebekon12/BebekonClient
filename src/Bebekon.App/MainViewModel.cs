@@ -88,7 +88,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
         T("VPN отключён", "VPN is disconnected");
     public string EmptyRulesDetail => T("Маршрут по умолчанию · ", "Default route · ") + RouteChoice.NameOf(DefaultDirection);
     public string FooterLabel => Connected ? T("онлайн", "online") : T("офлайн", "offline");
-    public string FooterMode => Connected ? Settings.TunnelMode == TunnelMode.Tun ? "TUN" : T("Прокси", "Proxy") : T("Нет подключения", "Disconnected");
+    public string FooterMode => Connected ? (Settings.TunnelMode == TunnelMode.Tun ? "TUN" : T("Прокси", "Proxy")) + (livePing is null ? "" : " · " + livePing) : T("Нет подключения", "Disconnected");
     private string vpnIp = "—";
     public string VpnIp { get => vpnIp; private set { if (Set(ref vpnIp, value)) Notify(nameof(PublicIpLabel)); } }
     public string PublicIpLabel => T("Публичный IP VPN", "VPN public IP") + (System.Net.IPAddress.TryParse(VpnIp, out var address) ? " · " + (address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork ? "IPv4" : "IPv6") : "");
@@ -134,6 +134,90 @@ public sealed partial class MainViewModel : Observable, IDisposable
             Settings.ScanOnOpen = value;
             Save(); Notify();
         }
+    }
+    /// <summary>Index into <see cref="Settings.AutoPingChoices"/>: Off, 5, 10, 30 or 60 seconds.</summary>
+    public int AutoPingIndex
+    {
+        get => Math.Max(0, Array.IndexOf(Settings.AutoPingChoices, Settings.AutoPingSeconds));
+        set
+        {
+            if (value < 0 || value >= Settings.AutoPingChoices.Length || Settings.AutoPingSeconds == Settings.AutoPingChoices[value]) return;
+            Settings.AutoPingSeconds = Settings.AutoPingChoices[value]; Save(); Notify(); autoPingWake?.TrySetResult();
+            if (Settings.AutoPingSeconds == 0) { livePing = null; Notify(nameof(FooterMode)); }
+        }
+    }
+    private TaskCompletionSource? autoPingWake;
+    private string? livePing;
+    private int liveFailures;
+    private readonly List<long> liveSamples = [];
+    private HttpClient? liveClient;
+    private ConnectSpec? liveSpec;
+    /// <summary>The server the running tunnel actually uses: the auto-mode pick, else the selection.</summary>
+    private Server? ActiveNode => ActiveAutoServer ?? SelectedServer;
+    /// <summary>
+    /// Keeps the current server's latency on screen. While connected it measures the running tunnel
+    /// through its private probe port: no extra core, and the reused connection reports the round
+    /// trip instead of handshakes. While disconnected it checks the selection less often, since each
+    /// HTTPS check starts a short-lived core.
+    /// </summary>
+    private async Task AutoPingAsync()
+    {
+        var next = DateTimeOffset.MinValue;
+        try
+        {
+            while (!lifetime.IsCancellationRequested)
+            {
+                autoPingWake = new(TaskCreationOptions.RunContinuationsAsynchronously);
+                await Task.WhenAny(Task.Delay(1000, lifetime.Token), autoPingWake.Task);
+                lifetime.Token.ThrowIfCancellationRequested();
+                var interval = Settings.AutoPingSeconds;
+                if (interval <= 0) { ResetLive(); continue; }
+                var connected = Connected && spec is not null;
+                if (!connected) ResetLive();
+                if (DateTimeOffset.UtcNow < next && !(connected && liveSpec is null)) continue;
+                next = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(connected ? interval : Math.Max(interval, 30));
+                try
+                {
+                    if (connected) await MeasureLiveAsync();
+                    else if (State is ConnectionState.Disconnected or ConnectionState.Error && !Scanning && SelectedServer is { } node)
+                        await MeasureServerAsync(node, true, lifetime.Token);
+                }
+                catch (Exception e) when (e is not OperationCanceledException || !lifetime.IsCancellationRequested) { }
+            }
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+        finally { ResetLive(); }
+    }
+    private void ResetLive()
+    {
+        liveClient?.Dispose(); liveClient = null; liveSpec = null; liveSamples.Clear(); liveFailures = 0;
+        if (livePing is not null) { livePing = null; Notify(nameof(FooterMode)); }
+    }
+    private async Task MeasureLiveAsync()
+    {
+        if (spec is not { } current || !Connected) return;
+        if (!ReferenceEquals(liveSpec, current)) { ResetLive(); liveClient = LatencyService.LiveClient(current); liveSpec = current; }
+        var ms = await LatencyService.LiveAsync(liveClient!, lifetime.Token);
+        if (!ReferenceEquals(liveSpec, spec) || !Connected || ActiveNode is not { } node) return;
+        string text;
+        if (ms is { } value)
+        {
+            liveFailures = 0;
+            // Median of the last three checks: one delayed packet does not repaint the value.
+            liveSamples.Add(value); if (liveSamples.Count > 3) liveSamples.RemoveAt(0);
+            var shown = liveSamples.Order().ElementAt(liveSamples.Count / 2);
+            node.Latency = shown + T(" мс", " ms"); node.MeasuredMode = LatencyMode.HttpsGet; node.LatencyMs = shown;
+            text = shown + T(" мс", " ms");
+        }
+        else
+        {
+            // A single lost check is not a dead server.
+            if (++liveFailures < 2) return;
+            liveSamples.Clear();
+            node.Latency = T("Таймаут", "Timeout"); node.MeasuredMode = LatencyMode.HttpsGet; node.LatencyMs = -1;
+            text = T("таймаут", "timeout");
+        }
+        if (livePing != text) { livePing = text; Notify(nameof(FooterMode)); }
     }
     private int latencyIndex = 1;
     public int LatencyIndex { get => latencyIndex; set { if (value is < 0 or > 3) return; if (Set(ref latencyIndex, value)) { latencyGeneration++; scan?.Cancel(); if (!Scanning) { scanTotal = scanCompleted = scanFailed = 0; NotifyScan(); } Settings.LatencyMode = (LatencyMode)value; Save(); foreach (var s in Data.Servers) { s.Latency = "—"; s.LatencyMs = null; } RefreshServers(); if (ScanOnOpen && PageName == "Servers") _ = ScanSafelyAsync(); } } }
@@ -236,7 +320,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
         });
         FavoriteServer = new Command(p => { var s = (Server)p!; s.Favorite = !s.Favorite; Save(); });
         PingAll = Async(_ => ScanAsync(true), () => !Scanning && DisplayServers.Any(s => s.Supported || (LatencyMode)LatencyIndex is LatencyMode.Tcp or LatencyMode.Icmp));
-        PingServer = Async(async p => { if ((p as Server ?? SelectedServer) is { } node) await MeasureServerAsync(node, true, lifetime.Token); }, () => !Scanning);
+        PingServer = Async(async p => { if ((p as Server ?? SelectedServer) is not { } node) return; if (Connected && ReferenceEquals(node, ActiveNode) && testProbe is null) { liveFailures = 1; await MeasureLiveAsync(); } else await MeasureServerAsync(node, true, lifetime.Token); }, () => !Scanning);
         ChangeRoutingMode = new Command(_ => { var mode = Dialogs.RoutingMode(IsWholePc); if (mode is { } all) IsWholePc = all; });
         CancelPing = new Command(_ => { scanGeneration++; scan?.Cancel(); NotifyScan(); }, () => Scanning && scan?.IsCancellationRequested == false);
         RefreshSubscriptions = Async(async _ => { foreach (var sub in Data.Subscriptions.ToArray()) await RefreshSubAsync(sub); });
@@ -330,7 +414,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
         _ = RefreshMapOriginAsync();
         WarnSubscription();
         _ = AutoRefreshAsync();
-        if (liveEnvironment) { _ = MonitorNetBirdAsync(); RefreshConnections.Execute(null); }
+        if (liveEnvironment) { _ = MonitorNetBirdAsync(); RefreshConnections.Execute(null); _ = AutoPingAsync(); }
         if (Settings.AutoConnect && !Connected && SelectedServer is not null) await AutoConnectAsync(systemStartup);
     }
     private readonly Dictionary<string, DateTimeOffset> refreshAttempts = [];
