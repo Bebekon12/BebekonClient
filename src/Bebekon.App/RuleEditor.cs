@@ -163,7 +163,7 @@ internal sealed class RuleEditor : StackPanel
     {
         var (hint, placeholder) = Kind switch {
             RuleKind.Application => (I18n.T("Трафик программы. Укажите имя .exe, полный путь или выберите из списка.", "Application traffic. Enter an .exe name, full path or select from the list."), "Telegram.exe"),
-            RuleKind.GeoSite => (I18n.T("Все домены сервиса из встроенного набора. Выберите доступный набор из списка.", "Service domains from a bundled set. Choose an available set from the list."), "openai, telegram"),
+            RuleKind.GeoSite => (I18n.T("Домены сервиса из встроенного набора или вашей группы ★. В «Списке» → «Мои группы» группы можно создать, открыть, импортировать и отправить другим.", "Service domains from a bundled set or your own ★ group. List → My groups lets you create, open, import and share groups."), "openai, my:hai"),
             RuleKind.Site => (I18n.T("Сайт и все его поддомены. Несколько доменов — через запятую, без https://.", "Website and all subdomains. Separate domains with commas, without https://."), "figma.com"),
             RuleKind.Contains => (I18n.T("Домены, в которых встречается указанное слово. Несколько слов — через запятую.", "Domains containing this keyword. Separate multiple words with commas."), "claude"),
             RuleKind.GeoIp => (I18n.T("IP-подсети страны или Telegram из встроенного набора. Выберите набор из списка.", "Country or Telegram IP networks from a bundled set. Choose from the list."), "telegram, ru"),

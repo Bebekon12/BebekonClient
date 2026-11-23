@@ -57,6 +57,8 @@ public sealed partial class MainViewModel : Observable, IDisposable
     public bool SidebarCollapsed { get => collapsed; set { if (Set(ref collapsed, value)) { Notify(nameof(SidebarWidth)); Notify(nameof(NavTextVisibility)); } } }
     public GridLength SidebarWidth => new(SidebarCollapsed ? 76 : 200);
     public Visibility NavTextVisibility => SidebarCollapsed ? Visibility.Collapsed : Visibility.Visible;
+    /// <summary>The active profile with user domain sets expanded into site rules: what the helper, route checks and exports see.</summary>
+    internal Profile ExpandedProfile => DomainSets.Expand(ActiveProfile, Data.DomainSets);
     private Server? selectedServer;
     /// <summary>Set while a subscription download replaces nodes; a rotated dial address alone must not restart a working tunnel.</summary>
     private bool replacingServers;
@@ -354,7 +356,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
         {
             var dialog = new Microsoft.Win32.SaveFileDialog { Filter = "Bebekon backup (*.json)|*.json", FileName = "bebekon-backup-" + DateTime.Now.ToString("yyyyMMdd") + ".json" };
             if (dialog.ShowDialog() != true) return;
-            File.WriteAllText(dialog.FileName, BackupCodec.Export(Data, ActiveProfile));
+            File.WriteAllText(dialog.FileName, BackupCodec.Export(Data, ExpandedProfile));
             Banner = T("Резервная копия сохранена. В ней ссылки подписок — храните файл в надёжном месте.", "Backup saved. It contains subscription links; keep the file safe.");
         });
         ImportBackup = Async(async _ =>
@@ -396,7 +398,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
         AddApplication = Async(async _ => { var app = await Dialogs.ApplicationAsync(); if (app is null) return; ActiveProfile.Rules.Add(new() { CreatedAt = DateTimeOffset.UtcNow, Kind = RuleKind.Application, Name = app.Name, Values = [app.Path] }); RulesChanged(); });
         AddProfile = new Command(_ => { var name = Dialogs.Text(T("Создать профиль", "Create profile"), T("Название", "Name"), "Работа"); if (string.IsNullOrWhiteSpace(name)) return; var profile = new Profile { Name = name }; Data.Profiles.Add(profile); ActiveProfile = profile; Save(); });
         DeleteProfile = new Command(_ => { if (Data.Profiles.Count <= 1) { Banner = T("Нужен хотя бы один профиль.", "Keep at least one profile."); return; } if (!Dialogs.Confirm(T("Удалить профиль?", "Delete profile?"), ActiveProfile.Name)) return; var old = ActiveProfile; ActiveProfile = Data.Profiles.First(p => p != old); Data.Profiles.Remove(old); Save(); });
-        ExportProfile = new Command(_ => { var dialog = new Microsoft.Win32.SaveFileDialog { Filter = "Bebekon profile (*.json)|*.json", FileName = ActiveProfile.Name + ".json" }; if (dialog.ShowDialog() == true) File.WriteAllText(dialog.FileName, ProfileCodec.Export(ActiveProfile)); });
+        ExportProfile = new Command(_ => { var dialog = new Microsoft.Win32.SaveFileDialog { Filter = "Bebekon profile (*.json)|*.json", FileName = ActiveProfile.Name + ".json" }; if (dialog.ShowDialog() == true) File.WriteAllText(dialog.FileName, ProfileCodec.Export(ExpandedProfile)); });
         ImportProfile = new Command(_ => { var dialog = new Microsoft.Win32.OpenFileDialog { Filter = "Bebekon profile (*.json)|*.json" }; if (dialog.ShowDialog() != true) return; try { var profile = ProfileCodec.Import(File.ReadAllText(dialog.FileName)); Data.Profiles.Add(profile); ActiveProfile = profile; } catch (Exception e) { Report(e); } });
         SaveSettings = new Command(_ => { if (Settings.Mtu is < 1280 or > 9000) { Banner = "MTU: 1280–9000"; return; } I18n.Set(Settings.Language); AutoStart.Set(Settings.StartWithWindows); Save(); NotifyStatus(); QueueApply(); Banner = T("Настройки сохранены", "Settings saved"); });
         ChangeTunnelMode = new Command(p => { if ((string)p! == "DNS") { Go("Settings"); return; } SetTunnelMode((string)p! == "TUN" ? TunnelMode.Tun : TunnelMode.Proxy); });
@@ -405,6 +407,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
         RestartService = Async(async _ => { await EnsureServiceAsync(); var reconnect = Connected; if (reconnect) await DisconnectAsync(); try { await service.SendAsync(new("Shutdown")); await Task.Delay(350); } catch { } var reply = await service.SendAsync(new("GetStatus"), true); if (!reply.Ok) throw new UserError(reply.Message ?? "Service unavailable."); if (reconnect) await ConnectAsync(); Banner = T("Служба перезапущена", "Service restarted"); });
         DismissBanner = new Command(_ => Banner = null);
         I18n.Set(Settings.Language);
+        AttachDomainSets();
         ThemeManager.Apply(Settings);
         InitializeUpdates();
         SystemEvents.PowerModeChanged += OnPower; NetworkChange.NetworkAvailabilityChanged += OnNetwork; NetworkChange.NetworkAddressChanged += OnAddress;
@@ -424,7 +427,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
         _ = RefreshMapOriginAsync();
         WarnSubscription();
         _ = AutoRefreshAsync();
-        if (liveEnvironment) { _ = MonitorNetBirdAsync(); RefreshConnections.Execute(null); _ = AutoPingAsync(); }
+        if (liveEnvironment) { _ = MonitorNetBirdAsync(); RefreshConnections.Execute(null); _ = AutoPingAsync(); _ = AutoConnectNetBirdAsync(); }
         if (Settings.AutoConnect && !Connected && SelectedServer is not null) await AutoConnectAsync(systemStartup);
     }
     private readonly Dictionary<string, DateTimeOffset> refreshAttempts = [];
@@ -673,6 +676,8 @@ public sealed partial class MainViewModel : Observable, IDisposable
     {
         CancelReconnect();
         desiredConnected = true;
+        // NetBird comes up alongside; a later peer change re-applies the tunnel by itself.
+        _ = AutoConnectNetBirdAsync();
         await connectionGate.WaitAsync(lifetime.Token);
         try { if (desiredConnected && !Connected) await ConnectCoreAsync(); }
         finally { connectionGate.Release(); }
@@ -699,7 +704,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
             token.ThrowIfCancellationRequested();
             var netBird = NetBirdEnabled && testProbe is null ? await NetBirdClient.GetStatusAsync(token) : null;
             var ruleServerIds = ActiveProfile.VpnServerIds.ToHashSet(StringComparer.Ordinal);
-            spec = new(SelectedServer, ActiveProfile, Settings, LatencyService.FreePort(), Convert.ToHexString(RandomNumberGenerator.GetBytes(24)), Data.Servers.Where(s => ruleServerIds.Contains(s.Id)).ToList(),
+            spec = new(SelectedServer, ExpandedProfile, Settings, LatencyService.FreePort(), Convert.ToHexString(RandomNumberGenerator.GetBytes(24)), Data.Servers.Where(s => ruleServerIds.Contains(s.Id)).ToList(),
                 AutoServers: Settings.AutoServer ? AutoPool : null, NetBirdPeer: netBird?.PeerAddress,
                 NetBirdControlHosts: netBird?.ControlHosts);
             if (MapLocationEnabled && spec.AllowsOriginLookup) {
@@ -1035,5 +1040,5 @@ public sealed partial class MainViewModel : Observable, IDisposable
         }
         catch (NetworkInformationException) { return ""; }
     }
-    public void Dispose() { Save(); desiredConnected = false; reconnectDelay?.Cancel(); lifetime.Cancel(); updateCancellation?.Cancel(); updater?.Dispose(); connectionAttempt?.Cancel(); scan?.Cancel(); applyDelay?.Cancel(); networkDelay?.Cancel(); SystemEvents.PowerModeChanged -= OnPower; NetworkChange.NetworkAvailabilityChanged -= OnNetwork; NetworkChange.NetworkAddressChanged -= OnAddress; }
+    public void Dispose() { if (ReferenceEquals(Dialogs.Library, this)) { Dialogs.Library = null; RuleValidation.CustomSetExists = null; } Save(); desiredConnected = false; reconnectDelay?.Cancel(); lifetime.Cancel(); updateCancellation?.Cancel(); updater?.Dispose(); connectionAttempt?.Cancel(); scan?.Cancel(); applyDelay?.Cancel(); networkDelay?.Cancel(); SystemEvents.PowerModeChanged -= OnPower; NetworkChange.NetworkAvailabilityChanged -= OnNetwork; NetworkChange.NetworkAddressChanged -= OnAddress; }
 }

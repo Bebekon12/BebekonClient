@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.ComponentModel;
 using System.Net;
 using System.Net.Http;
 using System.Net.NetworkInformation;
@@ -28,7 +30,42 @@ public sealed partial class MainViewModel
             if (liveEnvironment) RefreshConnections.Execute(null);
         }
     }
-    private bool netBirdConnected, netBirdInstalled;
+    private bool netBirdConnected, netBirdInstalled, netBirdConnecting, netBirdLeftOff;
+    public bool NetBirdAutoConnect { get => Settings.NetBirdAutoConnect; set { if (Settings.NetBirdAutoConnect == value) return; Settings.NetBirdAutoConnect = value; Save(); Notify(); if (value) { netBirdLeftOff = false; _ = AutoConnectNetBirdAsync(); } } }
+    /// <summary>
+    /// Brings NetBird up through its service, without the NetBird tray app. When the session expired,
+    /// the sign-in page opens in the default browser and the command waits for the user to finish.
+    /// </summary>
+    private async Task ConnectNetBirdAsync()
+    {
+        if (netBirdConnecting) return;
+        netBirdConnecting = true; NetBirdSummary = T("Подключение", "Connecting");
+        try
+        {
+            await NetBirdClient.ConnectAsync(url => Application.Current.Dispatcher.Invoke(() =>
+            {
+                Banner = T("Войдите в NetBird на открывшейся странице браузера. Окно NetBird открывать не нужно — Bebekon подключится сам.",
+                    "Sign in to NetBird on the page opened in your browser. The NetBird window is not needed; Bebekon connects by itself.");
+                try { Process.Start(new ProcessStartInfo(url.AbsoluteUri) { UseShellExecute = true }); }
+                catch (Win32Exception) { Banner = T("Откройте в браузере страницу входа NetBird: ", "Open the NetBird sign-in page: ") + url.AbsoluteUri; }
+            }), lifetime.Token);
+            Banner = T("NetBird подключён", "NetBird connected");
+        }
+        finally { netBirdConnecting = false; await ReadConnectionsAsync(lifetime.Token); }
+    }
+    /// <summary>At start and on connect: bring NetBird up unless the user turned it off in this session.</summary>
+    private async Task AutoConnectNetBirdAsync()
+    {
+        if (!liveEnvironment || !Settings.NetBirdAutoConnect || !NetBirdEnabled || netBirdLeftOff || netBirdConnecting) return;
+        try
+        {
+            var status = await NetBirdClient.GetStatusAsync(lifetime.Token);
+            if (!status.Installed || status.Connected || status.State is "Unavailable" or "Connecting") return;
+            await ConnectNetBirdAsync();
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+        catch (UserError e) { Banner = e.Message; }
+    }
     public string NetBirdAction => netBirdConnected ? T("Отключить NetBird", "Disconnect NetBird") : T("Подключить NetBird", "Connect NetBird");
     private string? netBirdPeer;
     public string? NetBirdPeer { get => netBirdPeer; private set => Set(ref netBirdPeer, value); }
@@ -127,8 +164,8 @@ public sealed partial class MainViewModel
         ChangeNetBird = Async(async value =>
         {
             if (!NetBirdEnabled) return;
-            await NetBirdClient.SetConnectedAsync(!netBirdConnected, lifetime.Token);
-            await ReadConnectionsAsync(lifetime.Token);
+            if (netBirdConnected) { netBirdLeftOff = true; await NetBirdClient.SetConnectedAsync(false, lifetime.Token); await ReadConnectionsAsync(lifetime.Token); }
+            else { netBirdLeftOff = false; await ConnectNetBirdAsync(); }
         }, () => NetBirdEnabled && netBirdInstalled);
         CheckRoute = new Command(_ => Dialogs.RouteCheck(this));
         RefreshProtection = Async(_ => ReadProtectionAsync(lifetime.Token));
@@ -141,7 +178,7 @@ public sealed partial class MainViewModel
                 if (Connected || ConnectionBusy) return;
                 await EnsureServiceAsync();
                 var netBird = NetBirdEnabled ? await NetBirdClient.GetStatusAsync(lifetime.Token) : null;
-                var policy = new StoredProtectionSpec(ActiveProfile, Settings.KillSwitch && Settings.PersistentKillSwitch, netBird?.PeerAddress, NetBirdEnabled);
+                var policy = new StoredProtectionSpec(ExpandedProfile, Settings.KillSwitch && Settings.PersistentKillSwitch, netBird?.PeerAddress, NetBirdEnabled);
                 var reply = await service.SendAsync(new("ApplyStoredProtection", Protection: policy), true, lifetime.Token);
                 Protection = reply.Status.Protection;
                 if (!reply.Ok) throw new UserError(reply.Message ?? T("Не удалось применить защиту WFP.", "Could not apply WFP protection."));
@@ -246,7 +283,7 @@ public sealed partial class MainViewModel
 
     internal async Task<string> TestRuleWfpAsync(RouteQuery query, string? expectedRule, CancellationToken ct)
     {
-        var profile = Connected && spec is { } active ? active.Profile : ActiveProfile;
+        var profile = Connected && spec is { } active ? active.Profile : ExpandedProfile;
         var decision = RoutingPolicy.Analyze(profile, query, ActiveDestinations);
         if (decision.ProtectedDestination && expectedRule == null)
             return await TestWfpAsync(null, ct, destination: true);
@@ -284,7 +321,7 @@ public sealed partial class MainViewModel
         var current = spec;
         if (testProbe is not null || query.Transport == RuleTransport.Udp || query.Domain is null && query.Address is null)
             return T("Не проверено для этих параметров.", "Unverified for these parameters.");
-        var profile = Connected && current is not null ? current.Profile : ActiveProfile;
+        var profile = Connected && current is not null ? current.Profile : ExpandedProfile;
         var target = query with { Port = query.Port ?? 443, Transport = RuleTransport.Tcp };
         var decision = RoutingPolicy.Analyze(profile, target, ActiveDestinations);
         if (decision.Direction == RouteTarget.NetBird && !NetBirdEnabled)

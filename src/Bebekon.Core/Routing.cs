@@ -9,6 +9,8 @@ namespace Bebekon.Core;
 
 public static class RuleValidation
 {
+    /// <summary>Set only by the desktop app: whether a user domain set exists. The helper leaves it null and rejects <c>my:</c> references.</summary>
+    public static Func<string, bool>? CustomSetExists { get; set; }
     public static bool IsDomainRule(RuleKind kind) => kind is RuleKind.Site or RuleKind.Contains or RuleKind.GeoSite;
     /// <summary>Accepts what users paste: "https://www.example.com/page?q" → "www.example.com".</summary>
     public static string SiteHost(string value, bool dropWww = false)
@@ -75,6 +77,10 @@ public static class RuleValidation
                     for (var part = 0; part < address.Length; part++)
                         address[part] &= (byte)(0xff << (8 - Math.Clamp(bits - part * 8, 0, 8)));
                     v = $"{new IPAddress(address)}/{bits}";
+                    break;
+                case RuleKind.GeoSite when DomainSets.IsReference(v):
+                    if (CustomSetExists?.Invoke(DomainSets.NameOf(v)) != true) throw new UserError("Группа «" + DomainSets.NameOf(v) + "» не найдена. Выберите группу из списка.");
+                    v = DomainSets.Prefix + DomainSets.NameOf(v);
                     break;
                 case RuleKind.GeoSite:
                 case RuleKind.GeoIp:

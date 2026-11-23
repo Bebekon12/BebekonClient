@@ -167,7 +167,7 @@ public sealed class RoutingRule : Observable
         Notify(nameof(RouteLabel));
         Notify(nameof(UseVpn));
     }
-    [JsonIgnore] public string Description => Kind switch { RuleKind.Application => "Программа · " + string.Join(", ", Values.Select(System.IO.Path.GetFileName)), RuleKind.Network => "IP / подсеть · " + string.Join(", ", Values), RuleKind.GeoSite => "Сайты и сервисы · " + string.Join(", ", Values), RuleKind.GeoIp => "IP-адреса набора · " + string.Join(", ", Values), RuleKind.Contains => "Адрес содержит · " + string.Join(", ", Values), _ => "Сайт и поддомены · " + string.Join(", ", Values) };
+    [JsonIgnore] public string Description => Kind switch { RuleKind.Application => "Программа · " + string.Join(", ", Values.Select(System.IO.Path.GetFileName)), RuleKind.Network => "IP / подсеть · " + string.Join(", ", Values), RuleKind.GeoSite => "Сайты и сервисы · " + string.Join(", ", Values.Select(v => DomainSets.IsReference(v) ? "★ " + DomainSets.NameOf(v) : v)), RuleKind.GeoIp => "IP-адреса набора · " + string.Join(", ", Values), RuleKind.Contains => "Адрес содержит · " + string.Join(", ", Values), _ => "Сайт и поддомены · " + string.Join(", ", Values) };
     [JsonIgnore] public string Glyph => Kind switch { RuleKind.Application => "▦", RuleKind.Network => "⌘", _ => "◎" };
 }
 public sealed class Profile : Observable
@@ -255,6 +255,8 @@ public sealed class Settings
 {
     public List<string>? EnabledIntegrations { get; set; }
     [JsonIgnore] public bool NetBirdEnabled => EnabledIntegrations?.Contains("netbird", StringComparer.OrdinalIgnoreCase) == true;
+    /// <summary>Bring NetBird up from Bebekon at start and on connect; SSO sign-in opens in the browser.</summary>
+    public bool NetBirdAutoConnect { get; set; } = true;
     public int DesignVersion { get; set; }
     public LatencyMode LatencyMode { get; set; } = LatencyMode.HttpsGet;
     /// <summary>Seconds between automatic checks of the current server; 0 turns them off.</summary>
@@ -296,6 +298,8 @@ public sealed class AppState
     public ObservableCollection<Subscription> Subscriptions { get; set; } = [];
     public ObservableCollection<Server> Servers { get; set; } = [];
     public ObservableCollection<Profile> Profiles { get; set; } = [new()];
+    /// <summary>User domain sets referenced by GeoSite rules as <c>my:name</c>.</summary>
+    public List<DomainSet> DomainSets { get; set; } = [];
     public string? SelectedServerId { get; set; }
     public string? SelectedProfileId { get; set; }
 }

@@ -245,9 +245,16 @@ internal static class SmokeHarness
             dialogName = "Application"; await Dialogs.ApplicationAsync();
             dialogName = "Confirm"; Dialogs.Confirm("Удалить правило?", "UI test fixture");
             dialogName = "TrustTunnel"; Dialogs.TrustTunnelTransport("http3");
+            vm.AttachDomainSets(); var fixtureSet = DomainSets.Normalize("hai", ["portal.hai.example", "git.hai.example"]); vm.SaveDomainSet(null, fixtureSet);
+            dialogName = "GeoSet"; Dialogs.GeoSet(RuleKind.GeoSite);
+            dialogName = "DomainSetEditor"; Dialogs.DomainSetEditor(fixtureSet);
+            dialogName = "DomainSetExport"; Dialogs.DomainSetExport(fixtureSet);
+            dialogName = "DomainGroups"; Dialogs.DomainGroups(fixtureSet);
+            vm.DeleteDomainSet(fixtureSet);
         }
         finally { Dialogs.RenderObserver = null; }
         if (renderFailure is not null) throw renderFailure;
+        CheckMergeIntoGroup(vm);
         if (routeCheckDraft is not { Kind: RuleKind.Application, Target: RouteTarget.Vpn })
             throw new InvalidOperationException("Route check must receive the unsaved editor rule.");
         if (((UIElement)window.Content).Effect is not null || Dialogs.ModalOpen) throw new InvalidOperationException("Closing dialogs must restore the background.");
@@ -652,6 +659,28 @@ internal static class SmokeHarness
             report.Add("Protected destination and direct-list editors save normalized entries; external profile selection persisted without launching a tool.");
         }
         finally { Dialogs.RenderObserver = null; root.Delete(true); }
+    }
+    /// <summary>Two site rules with the same route become one group rule at the first one's place.</summary>
+    private static void CheckMergeIntoGroup(MainViewModel vm)
+    {
+        Dialogs.RenderObserver = dialog => dialog.Dispatcher.BeginInvoke(new Action(() => Descendants(dialog).OfType<Button>().Single(b => b.IsDefault).RaiseEvent(new RoutedEventArgs(Button.ClickEvent))));
+        var before = new RoutingRule { Name = "before", Values = ["before.example"] };
+        var a = new RoutingRule { Name = "corp", Values = ["a.corp.example"], UseVpn = true };
+        var b = new RoutingRule { Name = "corp-two", Values = ["b.corp.example"], UseVpn = true };
+        try
+        {
+            foreach (var rule in new[] { before, a, b }) vm.ActiveProfile.Rules.Add(rule);
+            vm.RulesChanged(); var position = vm.ActiveProfile.Rules.IndexOf(a);
+            vm.MergeIntoGroup([b, a]);
+            var set = vm.DomainSetList.SingleOrDefault(s => s.Name == "corp") ?? throw new InvalidOperationException("Merging must create a group named after the first rule.");
+            var merged = vm.ActiveProfile.Rules.ElementAtOrDefault(position);
+            if (!set.Domains.SequenceEqual(["a.corp.example", "b.corp.example"]) || merged is not { Kind: RuleKind.GeoSite, Target: RouteTarget.Vpn } || !merged.Values.SequenceEqual(["my:corp"]) ||
+                vm.ActiveProfile.Rules.Contains(a) || vm.ActiveProfile.Rules.Contains(b))
+                throw new InvalidOperationException("Merged rules must become one group rule at the first rule's position.");
+            if (vm.ExpandedProfile.Rules.Count(r => r.Values.Contains("b.corp.example")) != 1) throw new InvalidOperationException("The group rule must expand for the helper.");
+            vm.ActiveProfile.Rules.Remove(merged); vm.ActiveProfile.Rules.Remove(before); vm.RulesChanged(); vm.DeleteDomainSet(set);
+        }
+        finally { Dialogs.RenderObserver = null; }
     }
     private static void CheckNewestRules(MainViewModel vm, List<string> report)
     {

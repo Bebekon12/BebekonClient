@@ -24,7 +24,7 @@ public partial class MainWindow : Window
         IsVisibleChanged += (_, _) => TryShowUpdate();
         StateChanged += (_, _) => TryShowUpdate();
         Dialogs.ModalStateChanged += TryShowUpdate;
-        SourceInitialized += (_, _) => NativeChrome.Apply(this);
+        SourceInitialized += (_, _) => { NativeChrome.Apply(this); NativeChrome.KeepMaximizedInWorkArea(this); };
     }
     private void OnChanged(object? sender, PropertyChangedEventArgs e)
     {

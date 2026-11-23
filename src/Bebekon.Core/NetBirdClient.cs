@@ -32,6 +32,53 @@ public static class NetBirdClient
         }
     }
 
+    /// <summary>
+    /// Connects through the registered NetBird service without its tray app. When the session needs
+    /// SSO sign-in (for example after the daily expiry), the CLI's login URL is handed to
+    /// <paramref name="openLogin"/> instead of relying on the CLI to find a browser; the command then
+    /// waits while the user signs in.
+    /// </summary>
+    public static async Task ConnectAsync(Action<Uri> openLogin, CancellationToken ct)
+    {
+        var executable = FindExecutable() ?? throw new UserError("Служба NetBird не установлена. Установите клиент NetBird; его окно для подключения не понадобится.");
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(TimeSpan.FromMinutes(5));
+        using var process = new Process
+        {
+            StartInfo = new(executable)
+            {
+                UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true,
+                StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8, ArgumentList = { "up", "--no-browser" }
+            }
+        };
+        var opened = 0;
+        void Scan(string? line)
+        {
+            if (line is null || LoginUrl(line) is not { } url || Interlocked.Exchange(ref opened, 1) != 0) return;
+            openLogin(url);
+        }
+        try
+        {
+            if (!process.Start()) throw new IOException("NetBird did not start.");
+            async Task Pump(StreamReader reader) { while (await reader.ReadLineAsync(timeout.Token) is { } line) Scan(line); }
+            await Task.WhenAll(Pump(process.StandardOutput), Pump(process.StandardError), process.WaitForExitAsync(timeout.Token));
+            if (process.ExitCode != 0) throw new IOException("netbird up failed.");
+        }
+        catch (Exception e) when (e is Win32Exception or IOException || e is OperationCanceledException && !ct.IsCancellationRequested)
+        {
+            throw new UserError(opened != 0 && e is OperationCanceledException
+                ? "Вход в NetBird не завершён за 5 минут. Нажмите «Подключить NetBird» ещё раз."
+                : "NetBird не подключился. Проверьте, что служба NetBird запущена.");
+        }
+        finally { if (!process.HasExited) try { process.Kill(); } catch (InvalidOperationException) { } }
+    }
+    /// <summary>The SSO address the CLI prints; only an absolute https URL is accepted.</summary>
+    internal static Uri? LoginUrl(string line)
+    {
+        var match = System.Text.RegularExpressions.Regex.Match(line, @"https://[^\s""'<>]+");
+        return match.Success && Uri.TryCreate(match.Value.TrimEnd('.', ',', ')'), UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps && string.IsNullOrEmpty(uri.UserInfo) ? uri : null;
+    }
+
     public static async Task SetConnectedAsync(bool connected, CancellationToken ct)
     {
         var executable = FindExecutable() ?? throw new UserError("Исполняемый файл службы NetBird недоступен.");

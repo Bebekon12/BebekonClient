@@ -244,7 +244,8 @@ public static partial class Dialogs
         {
             var query = Query();
             var guard = vm.ActiveDestinations;
-            var decision = await Task.Run(() => RoutingPolicy.Analyze(profile, query, guard), token);
+            var sets = vm.Data.DomainSets.ToArray();
+            var decision = await Task.Run(() => RoutingPolicy.Analyze(DomainSets.Expand(profile, sets), query, guard), token);
             var title = draft is null ? I18n.T("Профиль", "Profile") : I18n.T("Черновик", "Draft");
             var rule = decision.Rule?.Name ?? (decision.ProtectedDestination ? I18n.T("Защита выбранных адресов","Protected destinations") : I18n.T("Маршрут по умолчанию", "Default route"));
             var route = RouteChoice.NameOf(decision.Direction);
@@ -267,13 +268,6 @@ public static partial class Dialogs
             I18n.T("Действующая политика", "Active policy") + Environment.NewLine + await vm.VerifyRouteAsync(Query(), token));
         AddAction(I18n.T("Тест Kill Switch", "Kill switch test"), () => vm.TestRuleWfpAsync(Query(), draft?.Id, token));
         window.ShowDialog();
-    }
-    internal static string? GeoSet(RuleKind kind)
-    {
-        var w = Shell(I18n.T("Встроенные наборы", "Bundled sets") + " · " + kind, out var body);
-        var list = new ListBox { ItemsSource = GeoCatalog.Available(kind), Height = 330, SelectedIndex = 0, ItemContainerStyle = (Style)Application.Current.Resources["PickerItem"] };
-        body.Children.Add(list); Submit(body, I18n.T("Выбрать", "Select"), () => w.DialogResult = list.SelectedItem is not null);
-        return w.ShowDialog() == true ? list.SelectedItem as string : null;
     }
     public static Preset? Preset(List<Preset> presets)
     {

@@ -90,6 +90,20 @@ public partial class RulesView : UserControl
     private RoutingRule? source;
     public RulesView() => InitializeComponent();
     private void RulesMode(object sender, RoutedEventArgs e) { if (DataContext is MainViewModel vm) vm.IsWholePc = false; }
+    private RoutingRule[] SelectedRules() => RulesList.SelectedItems.OfType<RoutingRule>().ToArray();
+    private void RulesMenuOpening(object sender, ContextMenuEventArgs e)
+    {
+        if (DataContext is not MainViewModel vm) return;
+        var selected = SelectedRules();
+        MergeMenu.IsEnabled = vm.CanMergeIntoGroup(selected);
+        MergeMenu.Header = I18n.T(selected.Length > 1 ? $"Объединить {selected.Length} правил в группу…" : "Сделать группу из правила…",
+            selected.Length > 1 ? $"Combine {selected.Length} rules into a group…" : "Make a group from this rule…");
+    }
+    private void MergeIntoGroup(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel vm) return;
+        try { vm.MergeIntoGroup(SelectedRules()); } catch (UserError error) { vm.Banner = error.Message; }
+    }
     /// <summary>Dragging starts only from the ⋮⋮ handle, so clicks on the row, switch and buttons never start it.</summary>
     private void BeginDrag(object sender, MouseButtonEventArgs e)
     {
