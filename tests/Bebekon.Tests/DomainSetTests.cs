@@ -165,3 +165,28 @@ public sealed class RecentDestinationTests
         Assert.Equal(["b.example"], log.Snapshot().Select(e => e.Host));
     }
 }
+
+public sealed class UplinkIPv6Tests
+{
+    [Theory]
+    [InlineData("2a02:6b8::feed:0ff", true)]
+    [InlineData("2606:4700::6811:8775", true)]
+    [InlineData("2001:0:14c9:d804:409:fb98:d175:5203", false)] // Teredo
+    [InlineData("2002:c000:204::1", false)]                   // 6to4
+    [InlineData("fd84:be:be::1", false)]                      // ULA
+    [InlineData("fe80::1", false)]
+    [InlineData("192.168.1.11", false)]
+    public void OnlyRealGlobalIPv6Counts(string address, bool global)
+        => Assert.Equal(global, NetworkAddresses.IsGlobalIPv6(System.Net.IPAddress.Parse(address)));
+
+    [Fact]
+    public void WithoutUplinkIPv6TheTunnelOffersIPv4OnlyAndDnsDropsAaaa()
+    {
+        var spec = new ConnectSpec(CoreTests.Node(), new Profile(), new Settings { TunnelMode = TunnelMode.Tun }, 20000, new string('a', 48));
+        var dual = System.Text.Json.Nodes.JsonNode.Parse(ConfigGenerator.Generate(spec))!;
+        var v4 = System.Text.Json.Nodes.JsonNode.Parse(ConfigGenerator.Generate(spec with { UplinkIPv6 = false }))!;
+        string Addresses(System.Text.Json.Nodes.JsonNode config) => config["inbounds"]!.AsArray().First(i => (string?)i!["type"] == "tun")!["address"]!.ToJsonString();
+        Assert.Contains("fd84:be:be::1/126", Addresses(dual)); Assert.Equal("prefer_ipv4", (string?)dual["dns"]!["strategy"]);
+        Assert.DoesNotContain("fd84", Addresses(v4)); Assert.Equal("ipv4_only", (string?)v4["dns"]!["strategy"]);
+    }
+}

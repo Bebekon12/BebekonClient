@@ -142,6 +142,12 @@ public sealed record ConnectSpec(Server Server, Profile Profile, Settings Settin
         ? Profile.UsesNetBird || NetBirdPeer is not null || NetBird is not null || NetBirdExecutable is not null
         : Settings.NetBirdEnabled;
     [JsonIgnore] public string? NetBirdExecutable { get; init; }
+    /// <summary>
+    /// Whether the real uplink can reach the IPv6 internet. Set by the helper at connect time; when
+    /// false the tunnel offers no IPv6 and DNS answers only A records, so applications never pick an
+    /// IPv6 address that a direct route cannot reach.
+    /// </summary>
+    [JsonIgnore] public bool UplinkIPv6 { get; init; } = true;
     [JsonIgnore] public bool AllowsOriginLookup => !Guard.Enabled && !Profile.HasProtectedRules && !(Settings.KillSwitch && Settings.TunnelMode == TunnelMode.Tun);
 
     internal IEnumerable<Server> ResolveRuleServers()
@@ -199,7 +205,7 @@ public static class ConfigGenerator
         var inbounds = new JsonArray { new JsonObject { ["type"] = "mixed", ["tag"] = "vpn-probe", ["listen"] = "127.0.0.1", ["listen_port"] = spec.ProbePort, ["users"] = new JsonArray { new JsonObject { ["username"] = "bebekon", ["password"] = spec.ProbePassword } } } };
         if (!probeOnly)
         {
-            if (spec.Settings.TunnelMode == TunnelMode.Tun) inbounds.Add(new JsonObject { ["type"] = "tun", ["tag"] = "tun-in", ["interface_name"] = "Bebekon", ["address"] = Strings(["172.29.255.1/30", "fd84:be:be::1/126"]), ["mtu"] = spec.Settings.Mtu, ["auto_route"] = true, ["strict_route"] = spec.Settings.DnsProtection && !spec.Settings.CompatibilityMode, ["dns_mode"] = netBirdRouting is null ? "hijack" : "native", ["stack"] = spec.Settings.CompatibilityMode ? "gvisor" : "mixed" });
+            if (spec.Settings.TunnelMode == TunnelMode.Tun) inbounds.Add(new JsonObject { ["type"] = "tun", ["tag"] = "tun-in", ["interface_name"] = "Bebekon", ["address"] = Strings(spec.UplinkIPv6 ? ["172.29.255.1/30", "fd84:be:be::1/126"] : ["172.29.255.1/30"]), ["mtu"] = spec.Settings.Mtu, ["auto_route"] = true, ["strict_route"] = spec.Settings.DnsProtection && !spec.Settings.CompatibilityMode, ["dns_mode"] = netBirdRouting is null ? "hijack" : "native", ["stack"] = spec.Settings.CompatibilityMode ? "gvisor" : "mixed" });
             else inbounds.Add(new JsonObject { ["type"] = "mixed", ["tag"] = "proxy-in", ["listen"] = "127.0.0.1", ["listen_port"] = 17890 });
         }
         var routes = new JsonArray {
@@ -291,7 +297,7 @@ public static class ConfigGenerator
         if (sets.Count > 0) route["rule_set"] = sets;
         var config = new JsonObject {
             ["log"] = new JsonObject { ["level"] = "info", ["timestamp"] = false, ["disabled"] = false },
-            ["dns"] = new JsonObject { ["servers"] = dnsServers, ["rules"] = dnsRules, ["final"] = (finalTag ?? "vpn") + "-dns", ["reverse_mapping"] = true, ["cache_capacity"] = 4096, ["strategy"] = "prefer_ipv4" },
+            ["dns"] = new JsonObject { ["servers"] = dnsServers, ["rules"] = dnsRules, ["final"] = (finalTag ?? "vpn") + "-dns", ["reverse_mapping"] = true, ["cache_capacity"] = 4096, ["strategy"] = spec.UplinkIPv6 || probeOnly ? "prefer_ipv4" : "ipv4_only" },
             ["inbounds"] = inbounds, ["outbounds"] = outbounds, ["route"] = route
         };
         if (!probeOnly && spec.Guard.Domains.Length > 0 && spec.GuardCacheFile is { } file)

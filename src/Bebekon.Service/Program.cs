@@ -274,7 +274,8 @@ internal sealed class VpnService : ServiceBase
     {
         if (!restart && core?.Running == true) throw new UserError("VPN уже подключён.");
         if (destinations.Error != null) throw new UserError(destinations.Error);
-        spec = (await ResolveNetBirdAsync(spec, ct)) with { Guard = destinations.Current, GuardCacheFile = Path.Combine(root,"destination-cache.db") };
+        spec = (await ResolveNetBirdAsync(spec, ct)) with { Guard = destinations.Current, GuardCacheFile = Path.Combine(root,"destination-cache.db"), UplinkIPv6 = NetworkAddresses.HasIPv6Uplink() };
+        if (!spec.UplinkIPv6) log.Write("Uplink has no IPv6; tunnel offers IPv4 only.");
         if (spec.Guard.Enabled)
         {
             spec.Guard.CheckEndpoints(spec);

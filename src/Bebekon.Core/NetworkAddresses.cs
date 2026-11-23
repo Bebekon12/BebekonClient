@@ -15,6 +15,30 @@ public static class NetworkAddresses
             ? bytes[0] == 10 || bytes[0] == 172 && bytes[1] is >= 16 and <= 31 || bytes[0] == 192 && bytes[1] == 168
             : (bytes[0] & 0xfe) == 0xfc;
     }
+    /// <summary>
+    /// True when a physical uplink has a global IPv6 address and an IPv6 gateway. Without that,
+    /// IPv6 offered by the tunnel would only lead to connections the direct route cannot complete.
+    /// </summary>
+    public static bool HasIPv6Uplink()
+    {
+        try
+        {
+            return NetworkInterface.GetAllNetworkInterfaces().Any(n =>
+                n.OperationalStatus == OperationalStatus.Up && n.Name != "Bebekon" &&
+                n.NetworkInterfaceType is not (NetworkInterfaceType.Loopback or NetworkInterfaceType.Tunnel) &&
+                n.GetIPProperties() is var properties &&
+                properties.GatewayAddresses.Any(g => g.Address.AddressFamily == AddressFamily.InterNetworkV6 && !g.Address.Equals(IPAddress.IPv6Any)) &&
+                properties.UnicastAddresses.Any(a => IsGlobalIPv6(a.Address)));
+        }
+        catch (NetworkInformationException) { return true; }
+    }
+    /// <summary>Global unicast 2000::/3, excluding Teredo (2001::/32) and 6to4 (2002::/16) relays.</summary>
+    public static bool IsGlobalIPv6(IPAddress address)
+    {
+        if (address.AddressFamily != AddressFamily.InterNetworkV6) return false;
+        var b = address.GetAddressBytes();
+        return (b[0] & 0xE0) == 0x20 && !(b[0] == 0x20 && b[1] == 0x01 && b[2] == 0 && b[3] == 0) && !(b[0] == 0x20 && b[1] == 0x02);
+    }
     public static LocalAddressSnapshot Read()
     {
         try
