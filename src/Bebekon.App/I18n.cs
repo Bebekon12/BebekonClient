@@ -24,6 +24,7 @@ public static class I18n
         ("ProfileNameLabel","Профиль","Profile"),
         ("Unmatched","Остальной трафик","Other traffic"),
         ("NetBirdIntegration","Дополнительные клиенты · NetBird","Additional clients · NetBird"),
+        ("RecentDomains","Недавние домены","Recent domains"),("SearchRecent","Поиск домена или программы","Search domain or app"),("AddToGroup","В группу","Add to group"),
         ("MyGroups","Мои группы доменов","My domain groups"),("MyGroupsHint","Мои группы доменов: создать, посмотреть, поделиться","My domain groups: create, inspect, share"),("MyGroupsMenu","Мои группы доменов…","My domain groups…"),("MergeIntoGroup","Объединить в группу…","Combine into group…"),
         ("NetBirdAutoConnect","Подключать NetBird автоматически","Connect NetBird automatically"),("NetBirdAutoConnectHelp","При запуске Bebekon и при подключении VPN включает NetBird через его службу — окно NetBird не нужно. Если сеанс истёк, страница входа откроется в браузере.","On Bebekon start and VPN connect, brings NetBird up through its service — no NetBird window needed. If the session expired, the sign-in page opens in your browser."),
         ("DragToReorder","Перетащите, чтобы изменить приоритет","Drag to change priority"),("PriorityNumber","Номер в порядке проверки: меньше — раньше","Position in check order: lower is checked first"),("MoveUp","Выше по приоритету","Move up in priority"),("MoveDown","Ниже по приоритету","Move down in priority"),

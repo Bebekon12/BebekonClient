@@ -55,7 +55,16 @@ public partial class ServersView : UserControl
     }
 }
 public partial class SubscriptionsView : UserControl { public SubscriptionsView() => InitializeComponent(); }
-public partial class ConnectionsView : UserControl { public ConnectionsView() => InitializeComponent(); }
+public partial class ConnectionsView : UserControl
+{
+    public ConnectionsView() => InitializeComponent();
+    private void AddRecentToGroup(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel vm) return;
+        try { vm.AddDomainsToGroup(RecentList.SelectedItems.OfType<RecentRow>().Select(row => row.Entry).ToList()); }
+        catch (UserError error) { vm.Banner = error.Message; }
+    }
+}
 public partial class ProtectionView : UserControl { public ProtectionView() => InitializeComponent(); }
 public partial class SettingsView : UserControl
 {

@@ -109,6 +109,10 @@ public sealed class RoutingRule : Observable
     [JsonIgnore] public int Priority { get => priority; set => Set(ref priority, value); }
     [JsonIgnore] public bool CanMoveUp { get => canMoveUp; set => Set(ref canMoveUp, value); }
     [JsonIgnore] public bool CanMoveDown { get => canMoveDown; set => Set(ref canMoveDown, value); }
+    private string? groupIcon;
+    /// <summary>For a rule with a user group: that group's icon; otherwise the rule kind's.</summary>
+    [JsonIgnore] public string? GroupIcon { get => groupIcon; set { if (Set(ref groupIcon, value)) Notify(nameof(DisplayIcon)); } }
+    [JsonIgnore] public string DisplayIcon => groupIcon ?? Kind.ToString();
     public RuleKind Kind { get; set; }
     public List<string> Values { get; set; } = [];
     public string? ServerId { get; set; }

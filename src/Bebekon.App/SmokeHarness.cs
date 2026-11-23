@@ -249,7 +249,12 @@ internal static class SmokeHarness
             dialogName = "GeoSet"; Dialogs.GeoSet(RuleKind.GeoSite);
             dialogName = "DomainSetEditor"; Dialogs.DomainSetEditor(fixtureSet);
             dialogName = "DomainSetExport"; Dialogs.DomainSetExport(fixtureSet);
+            vm.SetRecentDomainsForTest([new("git.hai.example", 443, "chrome.exe", "NetBird", DateTimeOffset.UtcNow, 2), new("cdn.hai.example", 443, "chrome.exe", "NetBird", DateTimeOffset.UtcNow, 1), new("www.youtube.com", 443, "chrome.exe", "VPN", DateTimeOffset.UtcNow, 5)]);
+            fixtureSet = DomainSets.Normalize("hai", fixtureSet.Domains, fixtureSet.Id, new() { Color = "Violet", Icon = "Briefcase" }); vm.SaveDomainSet(vm.DomainSetList.Single(), fixtureSet);
             dialogName = "DomainGroups"; Dialogs.DomainGroups(fixtureSet);
+            dialogName = "AddToGroup"; Dialogs.AddToGroup(["www.youtube.com"], vm.SuggestRelated(["git.hai.example"]));
+            dialogName = "ImportLink"; Dialogs.DomainSetImport(DomainSets.ToLink(fixtureSet));
+            vm.SetRecentDomainsForTest([]);
             vm.DeleteDomainSet(fixtureSet);
         }
         finally { Dialogs.RenderObserver = null; }

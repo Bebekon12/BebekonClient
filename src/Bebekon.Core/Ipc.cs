@@ -12,7 +12,7 @@ public sealed record ServiceRequest(string Operation, ConnectSpec? Spec = null, 
 public sealed record ProtectionStatus(int Filters, int PersistentFilters, string? Error = null, string[]? GuardTargets = null, int DestinationFilters = 0, bool DestinationGuardEnabled = false);
 public sealed record ServiceStatus(ConnectionState State, string? Error = null, DateTimeOffset? ConnectedAt = null, int? CorePid = null,
     TrafficSnapshot? Traffic = null, ProtectionStatus? Protection = null, string? NetBirdInterface = null, bool HasHealthyFallback = false);
-public sealed record ServiceResponse(bool Ok, ServiceStatus Status, string? Message = null, WfpTestResult[]? WfpTest = null, WfpBlockEvent[]? BlockEvents = null);
+public sealed record ServiceResponse(bool Ok, ServiceStatus Status, string? Message = null, WfpTestResult[]? WfpTest = null, WfpBlockEvent[]? BlockEvents = null, RecentDestination[]? Recent = null);
 public static class PipeProtocol
 {
     public const string ServiceName = "BebekonVPN";

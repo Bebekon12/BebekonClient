@@ -1,3 +1,5 @@
+using System.Net.Http;
+using System.Collections.ObjectModel;
 using System.Windows.Input;
 namespace Bebekon.App;
 
@@ -79,6 +81,115 @@ public sealed partial class MainViewModel : IDomainSetLibrary
         }
         else Banner = T($"Группа «{made.Name}» создана. Её можно выбрать в правиле GeoSite.", $"Group ‘{made.Name}’ created. Choose it in a GeoSite rule.");
     }
+    // ---- Recent domains, lookup, links and followed URLs ----
+    private RecentDestination[] recentDomains = [];
+    public IReadOnlyList<RecentDestination> RecentDomains => recentDomains;
+    public ObservableCollection<RecentRow> RecentRows { get; } = [];
+    private string recentSearch = "";
+    public string RecentSearch { get => recentSearch; set { if (Set(ref recentSearch, value)) ShowRecent(); } }
+    public string RecentSummary => !Connected ? T("Подключите VPN — здесь появятся домены, к которым обращаются приложения.", "Connect VPN to see the domains your apps reach.")
+        : recentDomains.Length == 0 ? T("Пока пусто. Откройте нужный сайт или программу и нажмите «Обновить».", "Nothing yet. Open the site or app, then press Refresh.")
+        : T($"Последние 15 минут · {recentDomains.Length}. Выделите домены и нажмите «В группу».", $"Last 15 minutes · {recentDomains.Length}. Select domains and press Add to group.");
+    public ICommand RefreshRecent => refreshRecent ??= Async(_ => RefreshRecentDomainsAsync());
+    private ICommand? refreshRecent;
+    /// <summary>Asks the helper for domains the running tunnel carried recently (memory only, cleared on disconnect).</summary>
+    public async Task RefreshRecentDomainsAsync()
+    {
+        if (testProbe is null && Connected)
+        {
+            try { var reply = await service.SendAsync(new("RecentDestinations"), ct: lifetime.Token); if (reply.Ok) recentDomains = reply.Recent ?? []; }
+            catch (Exception e) when (e is not OperationCanceledException || !lifetime.IsCancellationRequested) { }
+        }
+        else if (!Connected) recentDomains = [];
+        ShowRecent();
+    }
+    internal void SetRecentDomainsForTest(RecentDestination[] value) { recentDomains = value; ShowRecent(); }
+    private void ShowRecent()
+    {
+        RecentRows.Clear();
+        foreach (var entry in recentDomains.Where(e => recentSearch.Length == 0 || e.Host.Contains(recentSearch, StringComparison.OrdinalIgnoreCase) || (e.Process ?? "").Contains(recentSearch, StringComparison.OrdinalIgnoreCase)))
+        {
+            var groups = GroupsContaining(entry.Host).Select(set => set.Name).ToArray();
+            var ago = DateTimeOffset.UtcNow - entry.LastSeen;
+            var when = ago < TimeSpan.FromMinutes(1) ? T("только что", "just now") : T($"{(int)ago.TotalMinutes} мин назад", $"{(int)ago.TotalMinutes} min ago");
+            RecentRows.Add(new(entry, entry.Route switch { "VPN" => "Shield", "NetBird" => "Network", "Block" => "Close", _ => "Servers" },
+                string.Join(" · ", new[] { entry.Process, entry.Port > 0 ? T("порт ", "port ") + entry.Port : null, when }.OfType<string>()),
+                groups.Length == 0 ? null : "★ " + string.Join(", ", groups)));
+        }
+        Notify(nameof(RecentSummary));
+    }
+    private static bool Covers(string domain, string host) => host.Equals(domain, StringComparison.OrdinalIgnoreCase) || host.EndsWith("." + domain, StringComparison.OrdinalIgnoreCase);
+    internal IEnumerable<DomainSet> GroupsContaining(string host) => Data.DomainSets.Where(set => set.Domains.Any(d => Covers(d, host)));
+    /// <summary>Registrable-looking root (last two labels; three for short second-level zones like co.uk).</summary>
+    internal static string Root(string host)
+    {
+        var labels = host.ToLowerInvariant().Split('.', StringSplitOptions.RemoveEmptyEntries);
+        var take = labels.Length >= 3 && labels[^2].Length <= 3 && labels[^1].Length == 2 ? 3 : 2;
+        return string.Join('.', labels.TakeLast(Math.Min(take, labels.Length)));
+    }
+    /// <summary>Recent domains related to <paramref name="domains"/> (same root or same app) that the list does not cover yet.</summary>
+    public IReadOnlyList<string> SuggestRelated(IReadOnlyCollection<string> domains, IEnumerable<string>? processes = null)
+    {
+        var roots = domains.Select(Root).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var apps = (processes ?? []).Where(p => p.Length > 0).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return recentDomains.Where(e => (roots.Contains(Root(e.Host)) || e.Process is { } p && apps.Contains(p)) && !domains.Any(d => Covers(d, e.Host)))
+            .Select(e => e.Host).Distinct(StringComparer.OrdinalIgnoreCase).Take(24).ToList();
+    }
+    /// <summary>"git.hai.example → ★ hai → rule #3 → NetBird": which groups and which rule decide this domain.</summary>
+    public string DescribeDomain(string text)
+    {
+        string host;
+        try { host = RuleValidation.SiteHost(text.Trim(), dropWww: false).ToLowerInvariant(); } catch (UserError) { return ""; }
+        if (!host.Contains('.') || host.Contains(' ')) return "";
+        var groups = GroupsContaining(host).Select(set => "★ " + set.Name).ToArray();
+        RouteAnalysis decision;
+        try { decision = RoutingPolicy.Analyze(ExpandedProfile, new RouteQuery(Domain: host)); } catch (UserError e) { return e.Message; }
+        var rule = decision.Rule is { } matched ? ActiveProfile.Rules.FirstOrDefault(r => matched.Id == r.Id || matched.Id == r.Id + "-my") : null;
+        var parts = new List<string> { host };
+        parts.Add(groups.Length == 0 ? T("не входит в ваши группы", "not in your groups") : T("в группах ", "in groups ") + string.Join(", ", groups));
+        parts.Add(rule is null ? T("правило не найдено — «Остальной трафик»", "no rule — Other traffic") : T($"правило №{rule.Priority} «{rule.Name}»", $"rule #{rule.Priority} ‘{rule.Name}’"));
+        parts.Add(RouteChoice.NameOf(decision.Direction));
+        return string.Join(" → ", parts);
+    }
+    public async Task<DomainSet> SubscribeDomainSetAsync(string name, string url)
+    {
+        using var http = new HttpClient();
+        var domains = await DomainSets.FetchAsync(url, http, lifetime.Token);
+        var set = DomainSets.Normalize(name, domains, style: new() { SourceUrl = url.Trim(), Updated = DateTimeOffset.Now, Icon = "Link", Color = "Cyan" });
+        SaveDomainSet(null, set); return set;
+    }
+    public async Task RefreshDomainSetAsync(DomainSet set)
+    {
+        if (set.SourceUrl is not { } url) return;
+        using var http = new HttpClient();
+        var domains = await DomainSets.FetchAsync(url, http, lifetime.Token);
+        var current = Data.DomainSets.FirstOrDefault(s => s.Id == set.Id) ?? set;
+        SaveDomainSet(current, DomainSets.Normalize(current.Name, domains, current.Id, new() { SourceUrl = url, Updated = DateTimeOffset.Now, Icon = current.Icon, Color = current.Color }));
+    }
+    /// <summary>Groups that follow a URL refresh at start and every six hours; a failure keeps the old domains.</summary>
+    private async Task AutoRefreshDomainSetsAsync()
+    {
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(30), lifetime.Token);
+            while (!lifetime.IsCancellationRequested)
+            {
+                foreach (var set in Data.DomainSets.Where(s => s.SourceUrl is not null && (s.Updated is null || DateTimeOffset.Now - s.Updated > TimeSpan.FromHours(6))).ToArray())
+                    try { await RefreshDomainSetAsync(set); log.Write("Domain group refreshed."); }
+                    catch (UserError) { log.Write("Domain group refresh failed."); }
+                await Task.Delay(TimeSpan.FromMinutes(30), lifetime.Token);
+            }
+        }
+        catch (OperationCanceledException) { }
+    }
+    /// <summary>From Connections: puts the chosen domains into an existing or a new group.</summary>
+    internal void AddDomainsToGroup(IReadOnlyList<RecentDestination> picked)
+    {
+        if (picked.Count == 0) { Banner = T("Выделите домены в списке.", "Select domains in the list."); return; }
+        var hosts = picked.Select(p => p.Host).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var related = SuggestRelated(hosts, picked.Select(p => p.Process ?? ""));
+        if (Dialogs.AddToGroup(hosts, related) is { } group) { Banner = T($"Добавлено в группу «{group.Name}».", $"Added to group ‘{group.Name}’."); ShowRecent(); }
+    }
     public void DeleteDomainSet(DomainSet set)
     {
         var used = DomainSets.RulesUsing(Data.Profiles, set).Select(rule => rule.Name).Distinct().ToList();
@@ -87,4 +198,11 @@ public sealed partial class MainViewModel : IDomainSetLibrary
                 T(". Сначала измените или удалите их.", ". Change or delete them first."));
         Data.DomainSets.Remove(set); Save();
     }
+}
+
+public sealed record RecentRow(RecentDestination Entry, string Icon, string Detail, string? Groups)
+{
+    public string Host => Entry.Host;
+    public string Route => Entry.Route;
+    public bool InGroup => Groups is not null;
 }

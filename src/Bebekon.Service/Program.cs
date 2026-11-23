@@ -196,6 +196,7 @@ internal sealed class VpnService : ServiceBase
                     lastCommand = DateTimeOffset.UtcNow;
                     WfpTestResult[]? test = null;
                     WfpBlockEvent[]? blockEvents = null;
+                    RecentDestination[]? recent = null;
                     switch (request.Operation)
                     {
                         case "GetStatus": break;
@@ -228,6 +229,7 @@ internal sealed class VpnService : ServiceBase
                             test = await KillSwitch.TestInstalledRuleAsync(request.TestRule ?? throw new UserError("Выберите защищённое правило."), timeout.Token);
                             break;
                         case "ProtectionEvents": blockEvents = KillSwitch.RecentPolicyBlocks(killSwitch); break;
+                        case "RecentDestinations": recent = state == ConnectionState.Connected ? traffic?.Recent.Snapshot() ?? [] : []; break;
                         case "ApplyStoredProtection":
                             await ApplyStoredProtectionAsync(request.Protection ?? throw new UserError("Не указана политика WFP."), timeout.Token);
                             break;
@@ -238,7 +240,7 @@ internal sealed class VpnService : ServiceBase
                         case "GetLogs": var lines = Directory.GetFiles(root, "*.log").SelectMany(File.ReadLines).TakeLast(120); result = new(true, Status(), string.Join(Environment.NewLine, lines)); await PipeProtocol.WriteAsync(pipe, result, timeout.Token); continue;
                         default: throw new UserError("Неизвестная команда службы.");
                     }
-                    result = new(true, Status(), WfpTest: test, BlockEvents: blockEvents);
+                    result = new(true, Status(), WfpTest: test, BlockEvents: blockEvents, Recent: recent);
                 }
                 catch (Exception e)
                 {

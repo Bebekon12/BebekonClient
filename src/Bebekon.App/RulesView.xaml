@@ -52,7 +52,7 @@
         <TextBlock Text="{Binding Priority}" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource Muted}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
        </Border>
        <Border Grid.Column="2" Style="{StaticResource IconBadge}" Width="32" Height="32" VerticalAlignment="Center">
-        <local:IconView Icon="{Binding Kind}" Width="17" Height="17" Foreground="{DynamicResource Accent}"/>
+        <local:IconView Icon="{Binding DisplayIcon}" Width="17" Height="17" Foreground="{DynamicResource Accent}"/>
        </Border>
        <StackPanel Grid.Column="3" Margin="11,0,10,0" VerticalAlignment="Center">
         <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="14" TextTrimming="CharacterEllipsis"/>

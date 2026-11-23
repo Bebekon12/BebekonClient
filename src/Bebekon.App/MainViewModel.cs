@@ -427,7 +427,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
         _ = RefreshMapOriginAsync();
         WarnSubscription();
         _ = AutoRefreshAsync();
-        if (liveEnvironment) { _ = MonitorNetBirdAsync(); RefreshConnections.Execute(null); _ = AutoPingAsync(); _ = AutoConnectNetBirdAsync(); }
+        if (liveEnvironment) { _ = MonitorNetBirdAsync(); RefreshConnections.Execute(null); _ = AutoPingAsync(); _ = AutoConnectNetBirdAsync(); _ = AutoRefreshDomainSetsAsync(); }
         if (Settings.AutoConnect && !Connected && SelectedServer is not null) await AutoConnectAsync(systemStartup);
     }
     private readonly Dictionary<string, DateTimeOffset> refreshAttempts = [];
@@ -473,6 +473,13 @@ public sealed partial class MainViewModel : Observable, IDisposable
     /// <summary>Prefills a provider's bebekon:// link; adding it still takes the user's click.</summary>
     public void OfferImport(string text)
     {
+        // bebekon://group/… only opens an import preview; nothing is saved without the user's click.
+        if (DomainSets.IsLink(text))
+        {
+            Go("Rules");
+            if (Dialogs.DomainSetImport(text.Trim()) is { } group) { RefreshRules(); Banner = T($"Группа «{group.Name}» добавлена. Выберите её в правиле GeoSite или откройте «Мои группы».", $"Group ‘{group.Name}’ added. Use it in a GeoSite rule or open My groups."); }
+            return;
+        }
         if (ImportLink.Decode(text) is not { } link) { Banner = T("Ссылка Bebekon повреждена или ведёт не на подписку.", "The Bebekon link is damaged or does not point to a subscription."); return; }
         QuickSource = link; Go("Subscriptions");
         Banner = T("Проверьте ссылку от провайдера и нажмите «Добавить».", "Check the provider's link and press Add.");
@@ -480,7 +487,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
     public void Go(string name)
     {
         scanGeneration++; scan?.Cancel(); PageName = name; Page = name switch { "Servers" => new ServersPage(this), "Rules" => new RulesPage(this), "Subscriptions" => new SubscriptionsPage(this), "Settings" => new SettingsPage(this), "Connections" => new ConnectionsPage(this), "Protection" => new ProtectionPage(this), _ => new HomePage(this) };
-        if (liveEnvironment && name == "Connections") RefreshConnections.Execute(null);
+        if (liveEnvironment && name == "Connections") { RefreshConnections.Execute(null); _ = RefreshRecentDomainsAsync(); }
         if (liveEnvironment && name == "Protection") RefreshProtection.Execute(null);
         if (ScanOnOpen && name == "Servers" && Data.Servers.Count > 0) _ = ScanSafelyAsync();
     }
@@ -606,6 +613,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
         {
             var rule = ordered[i];
             rule.Priority = i + 1;
+            rule.GroupIcon = rule.Kind == RuleKind.GeoSite && rule.Values.FirstOrDefault(DomainSets.IsReference) is { } reference ? DomainSets.Find(Data.DomainSets, reference)?.Icon : null;
             rule.CanMoveUp = i > 0 && RuleGroup(ordered[i - 1]) == RuleGroup(rule);
             rule.CanMoveDown = i + 1 < ordered.Count && RuleGroup(ordered[i + 1]) == RuleGroup(rule);
         }

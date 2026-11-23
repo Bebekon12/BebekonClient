@@ -17,6 +17,8 @@ public sealed class CoreTraffic : IDisposable
     private readonly int port = LatencyService.FreePort();
     private readonly string secret = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
     private TrafficSnapshot? snapshot;
+    /// <summary>Recently carried domains, kept only in memory for the life of this core.</summary>
+    public RecentDestinationLog Recent { get; } = new();
     private Task? loop;
     private VpnFallback.Group[] fallbackGroups = [];
     private HttpClient? fallbackController;
@@ -63,6 +65,7 @@ public sealed class CoreTraffic : IDisposable
                 using var data = JsonDocument.Parse(await response.Content.ReadAsStringAsync(stop.Token));
                 var up = data.RootElement.GetProperty("uploadTotal").GetInt64();
                 var down = data.RootElement.GetProperty("downloadTotal").GetInt64();
+                Recent.Observe(data.RootElement, DateTimeOffset.UtcNow);
                 // Auto mode: which server the urltest group currently uses (only a tag, never addresses).
                 if (tick++ % 5 == 0)
                 {

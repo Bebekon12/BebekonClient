@@ -87,3 +87,81 @@ public sealed class NetBirdLoginTests
     public void OnlyHttpsLoginAddressesAreOpened(string line, string? expected)
         => Assert.Equal(expected, NetBirdClient.LoginUrl(line)?.AbsoluteUri);
 }
+
+public sealed class DomainGroupSharingTests
+{
+    private sealed class Handler(string body) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
+            => Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StringContent(body) });
+    }
+
+    [Fact]
+    public void LinkRoundTripKeepsDomainsColorAndIcon()
+    {
+        var set = DomainSets.Normalize("hai", ["portal.hai.example", "git.hai.example"], style: new() { Color = "Rose", Icon = "Briefcase" });
+        var link = DomainSets.ToLink(set);
+        Assert.StartsWith(DomainSets.LinkPrefix, link); Assert.DoesNotContain("portal", link);
+        var back = DomainSets.Import("смотри: " + link + " — добавь");
+        Assert.Equal(set.Domains, back.Domains); Assert.Equal("Rose", back.Color); Assert.Equal("Briefcase", back.Icon);
+        Assert.Throws<UserError>(() => DomainSets.FromLink(DomainSets.LinkPrefix + "not-deflate"));
+        // Unknown looks fall back to defaults instead of failing.
+        Assert.Equal("Blue", DomainSets.Normalize("x", ["a.example"], style: new() { Color = "Neon" }).Color);
+    }
+
+    [Fact]
+    public async Task FetchAcceptsPlainListsV2flyEntriesAndSharedGroups()
+    {
+        using var plain = new HttpClient(new Handler("# corp\nportal.hai.example\ndomain:git.hai.example\nfull:sso.hai.example\nregexp:.*bad\nkeyword:skip\n"));
+        Assert.Equal(["portal.hai.example", "git.hai.example", "sso.hai.example"], await DomainSets.FetchAsync("https://lists.example/hai.txt", plain, default));
+        using var shared = new HttpClient(new Handler(DomainSets.Export(DomainSets.Normalize("hai", ["a.hai.example"]))));
+        Assert.Equal(["a.hai.example"], await DomainSets.FetchAsync("https://lists.example/hai.json", shared, default));
+        await Assert.ThrowsAsync<UserError>(() => DomainSets.FetchAsync("http://lists.example/hai.txt", plain, default));
+        using var empty = new HttpClient(new Handler("# nothing\n"));
+        await Assert.ThrowsAsync<UserError>(() => DomainSets.FetchAsync("https://lists.example/empty.txt", empty, default));
+    }
+
+    [Fact]
+    public void BundledSetCopiesExactAndSuffixDomains()
+    {
+        var (domains, skipped) = GeoCatalog.Domains("openai");
+        Assert.Contains("openai.com", domains); Assert.True(skipped >= 0);
+        Assert.All(domains, d => Assert.False(d.StartsWith('.')));
+        DomainSets.Normalize("openai-my", domains);
+    }
+}
+
+public sealed class RecentDestinationTests
+{
+    private static System.Text.Json.JsonElement Connections(params object[] items)
+        => System.Text.Json.JsonSerializer.SerializeToElement(new { connections = items });
+    private static object Connection(string id, string host, string chain, string type = "tun/tun-in", string process = "C:\\Apps\\chrome.exe", int port = 443)
+        => new { id, metadata = new { host, destinationPort = port.ToString(), processPath = process.Replace("\\\\", "\\"), type }, chains = new[] { chain } };
+
+    [Fact]
+    public void KeepsOnlyUserDomainsWithFriendlyRoutes()
+    {
+        var log = new RecentDestinationLog(); var now = DateTimeOffset.UtcNow;
+        log.Observe(Connections(
+            Connection("1", "portal.hai.example", "netbird-corp"),
+            Connection("2", "www.youtube.com", "vpn"),
+            Connection("3", "example.org", "direct"),
+            Connection("4", "93.184.216.34", "direct"),
+            Connection("5", "www.gstatic.com", "vpn", type: "mixed/vpn-probe"),
+            Connection("6", "ads.example", "block")), now);
+        var seen = log.Snapshot().ToDictionary(e => e.Host, e => e.Route);
+        Assert.Equal(new Dictionary<string, string> { ["portal.hai.example"] = "NetBird", ["www.youtube.com"] = "VPN", ["example.org"] = "Direct", ["ads.example"] = "Block" }, seen);
+        Assert.Equal("chrome.exe", log.Snapshot()[0].Process);
+    }
+
+    [Fact]
+    public void CountsNewConnectionsAndForgetsOldDomains()
+    {
+        var log = new RecentDestinationLog(); var start = DateTimeOffset.UtcNow;
+        log.Observe(Connections(Connection("1", "a.example", "vpn")), start);
+        log.Observe(Connections(Connection("1", "a.example", "vpn"), Connection("2", "a.example", "vpn")), start.AddSeconds(1));
+        Assert.Equal(2, log.Snapshot().Single().Connections);
+        log.Observe(Connections(Connection("9", "b.example", "vpn")), start + RecentDestinationLog.Window + TimeSpan.FromMinutes(1));
+        Assert.Equal(["b.example"], log.Snapshot().Select(e => e.Host));
+    }
+}

@@ -13,6 +13,20 @@ public static class GeoCatalog
     private static string KindPrefix(RuleKind kind) => kind switch { RuleKind.GeoSite => "geosite-", RuleKind.GeoIp => "geoip-", _ => throw new ArgumentOutOfRangeException(nameof(kind)) };
     public static string Tag(RuleKind kind, string value) => KindPrefix(kind) + value.ToLowerInvariant();
     public static bool Contains(RuleKind kind, string value) => Resources.ContainsKey(Tag(kind, value));
+    /// <summary>Exact and suffix domains of a bundled GeoSite set; patterns a group cannot express are counted, not copied.</summary>
+    public static (List<string> Domains, int Skipped) Domains(string value)
+    {
+        var rules = Inline(RuleKind.GeoSite, value)["rules"]!.AsArray();
+        var domains = new List<string>(); var skipped = 0;
+        foreach (var rule in rules.OfType<JsonObject>())
+            foreach (var (key, list) in rule)
+            {
+                var items = list switch { JsonArray array => array.Select(v => v?.GetValue<string>()).OfType<string>().ToArray(), JsonValue one when one.TryGetValue<string>(out var text) => [text], _ => [] };
+                if (key is "domain" or "domain_suffix") domains.AddRange(items.Select(d => d.TrimStart('.')));
+                else skipped += items.Length;
+            }
+        return (domains.Distinct(StringComparer.OrdinalIgnoreCase).ToList(), skipped);
+    }
     public static JsonObject Inline(RuleKind kind, string value)
     {
         var tag = Tag(kind, value);

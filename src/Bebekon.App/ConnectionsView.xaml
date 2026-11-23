@@ -18,6 +18,37 @@
    </StackPanel>
   </DockPanel></Border>
   <WrapPanel Margin="0,3,0,12"><Button Content="{DynamicResource CheckRouteNow}" Command="{Binding CheckRoute}" Style="{StaticResource AccentButton}" Margin="0,0,8,0"/><Button Content="{DynamicResource Update}" Command="{Binding RefreshConnections}"/></WrapPanel>
+  <Border Style="{StaticResource CardStyle}" Padding="18" Margin="0,0,0,10">
+   <StackPanel>
+    <DockPanel>
+     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Top">
+      <Button Command="{Binding RefreshRecent}" Style="{StaticResource IconButton}" ToolTip="{DynamicResource Update}" Margin="0,0,8,0"><local:IconView Icon="Refresh" Width="17" Height="17"/></Button>
+      <Button Command="{Binding OpenGroups}" Style="{StaticResource IconButton}" ToolTip="{DynamicResource MyGroupsHint}" Margin="0,0,8,0"><local:IconView Icon="Folder" Width="17" Height="17"/></Button>
+      <Button Click="AddRecentToGroup" Style="{StaticResource AccentButton}"><StackPanel Orientation="Horizontal"><local:IconView Icon="Plus" Width="15" Height="15" Margin="0,0,7,0"/><TextBlock Text="{DynamicResource AddToGroup}" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" FontWeight="SemiBold"/></StackPanel></Button>
+     </StackPanel>
+     <StackPanel Orientation="Horizontal"><Border Style="{StaticResource IconBadge}" Width="32" Height="32" Margin="0,0,10,0"><local:IconView Icon="Site" Width="17" Height="17" Foreground="{DynamicResource Accent}"/></Border>
+      <StackPanel VerticalAlignment="Center"><TextBlock Text="{DynamicResource RecentDomains}" FontSize="16" FontWeight="SemiBold"/><TextBlock Text="{Binding RecentSummary}" Style="{StaticResource Subtitle}" TextWrapping="Wrap" MaxWidth="420" Margin="0,2,0,0"/></StackPanel></StackPanel>
+    </DockPanel>
+    <TextBox Tag="{DynamicResource SearchRecent}" Text="{Binding RecentSearch, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource SearchBox}" Margin="0,12,0,8"/>
+    <ListBox x:Name="RecentList" ItemsSource="{Binding RecentRows}" SelectionMode="Extended" MaxHeight="320" MinHeight="60">
+     <ListBox.ItemTemplate><DataTemplate>
+      <Grid Margin="2,6"><Grid.ColumnDefinitions><ColumnDefinition Width="34"/><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+       <Border x:Name="RouteIcon" Width="28" Height="28" CornerRadius="9" Background="{DynamicResource CardHover}" VerticalAlignment="Center"><local:IconView Icon="{Binding Icon}" Width="14" Height="14" Foreground="{DynamicResource Muted}"/></Border>
+       <StackPanel Grid.Column="1" Margin="8,0,8,0" VerticalAlignment="Center"><TextBlock Text="{Binding Host}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/><TextBlock Text="{Binding Detail}" Style="{StaticResource Subtitle}" FontSize="11" TextTrimming="CharacterEllipsis"/></StackPanel>
+       <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+        <TextBlock Text="{Binding Groups}" Foreground="{DynamicResource Accent}" FontSize="11" Margin="0,0,8,0" VerticalAlignment="Center" MaxWidth="160" TextTrimming="CharacterEllipsis"/>
+        <Border x:Name="Badge" Background="{DynamicResource CardHover}" CornerRadius="11" Padding="9,3"><TextBlock x:Name="RouteText" Text="{Binding Route}" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource Muted}"/></Border>
+       </StackPanel>
+      </Grid>
+      <DataTemplate.Triggers>
+       <DataTrigger Binding="{Binding Route}" Value="VPN"><Setter TargetName="RouteText" Property="Foreground" Value="{DynamicResource Accent}"/><Setter TargetName="Badge" Property="Background" Value="{DynamicResource AccentSoft}"/></DataTrigger>
+       <DataTrigger Binding="{Binding Route}" Value="NetBird"><Setter TargetName="RouteText" Property="Foreground" Value="#BEA7FF"/><Setter TargetName="Badge" Property="Background" Value="#35274F"/></DataTrigger>
+       <DataTrigger Binding="{Binding Route}" Value="Block"><Setter TargetName="RouteText" Property="Foreground" Value="{DynamicResource Danger}"/><Setter TargetName="Badge" Property="Background" Value="#44252E"/></DataTrigger>
+      </DataTemplate.Triggers>
+     </DataTemplate></ListBox.ItemTemplate>
+    </ListBox>
+   </StackPanel>
+  </Border>
   <Expander Header="{DynamicResource NetworkSnapshot}" Style="{StaticResource DetailsPanel}">
    <StackPanel><TextBlock Text="{Binding WindowsNetwork}" TextWrapping="Wrap" Style="{StaticResource Subtitle}"/>
     <TextBlock Text="{Binding NetBirdInterfaceInfo}" Visibility="{Binding NetBirdEnabled, Converter={StaticResource BoolVisibility}}" TextWrapping="Wrap" Style="{StaticResource Subtitle}" Margin="0,8,0,0"/>
