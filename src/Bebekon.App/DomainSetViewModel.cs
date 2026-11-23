@@ -7,6 +7,7 @@ namespace Bebekon.App;
 public sealed partial class MainViewModel : IDomainSetLibrary
 {
     public IReadOnlyList<DomainSet> DomainSetList => Data.DomainSets;
+    public IReadOnlyList<RoutingRule> CurrentRules => ActiveProfile.Rules;
     public ICommand OpenGroups => openGroups ??= new Command(_ => { Dialogs.DomainGroups(); RefreshRules(); });
     private ICommand? openGroups;
     internal void AttachDomainSets()
@@ -46,6 +47,8 @@ public sealed partial class MainViewModel : IDomainSetLibrary
     private IEnumerable<string>? GroupableDomains(RoutingRule rule) => rule.Kind switch
     {
         RuleKind.Site => rule.Values,
+        RuleKind.Contains => rule.Values.Select(v => DomainSets.KeywordPrefix + v),
+        RuleKind.Network => rule.Values,
         RuleKind.GeoSite when rule.Values.All(DomainSets.IsReference) => rule.Values.SelectMany(v => DomainSets.Find(Data.DomainSets, v)?.Domains ?? []),
         _ => null
     };
@@ -56,7 +59,7 @@ public sealed partial class MainViewModel : IDomainSetLibrary
     /// </summary>
     internal void MergeIntoGroup(IReadOnlyCollection<RoutingRule> rules)
     {
-        if (!CanMergeIntoGroup(rules)) throw new UserError(T("В группу можно объединить правила «По суффиксу» и правила с вашими группами.", "Only site rules and rules with your groups can be combined."));
+        if (!CanMergeIntoGroup(rules)) throw new UserError(T("В группу можно объединить правила с сайтами, словами «Адрес содержит», IP-адресами и вашими группами. Программы и встроенные наборы — нельзя.", "Site, keyword, IP and your-group rules can be combined. Applications and bundled sets cannot."));
         var ordered = rules.OrderBy(rule => ActiveProfile.Rules.IndexOf(rule)).ToList();
         var domains = ordered.SelectMany(rule => GroupableDomains(rule)!).ToList();
         var suggested = new string(ordered[0].Name.Where(c => char.IsLetterOrDigit(c) || c is '-' or '_' or '.').Take(40).ToArray());
@@ -119,7 +122,12 @@ public sealed partial class MainViewModel : IDomainSetLibrary
         Notify(nameof(RecentSummary));
     }
     private static bool Covers(string domain, string host) => host.Equals(domain, StringComparison.OrdinalIgnoreCase) || host.EndsWith("." + domain, StringComparison.OrdinalIgnoreCase);
-    internal IEnumerable<DomainSet> GroupsContaining(string host) => Data.DomainSets.Where(set => set.Domains.Any(d => Covers(d, host)));
+    internal IEnumerable<DomainSet> GroupsContaining(string host) => Data.DomainSets.Where(set => set.Domains.Any(d => DomainSets.KindOf(d) switch
+    {
+        RuleKind.Site => Covers(d, host),
+        RuleKind.Contains => host.Contains(DomainSets.ValueOf(d), StringComparison.OrdinalIgnoreCase),
+        _ => false
+    }));
     /// <summary>Registrable-looking root (last two labels; three for short second-level zones like co.uk).</summary>
     internal static string Root(string host)
     {
@@ -130,9 +138,9 @@ public sealed partial class MainViewModel : IDomainSetLibrary
     /// <summary>Recent domains related to <paramref name="domains"/> (same root or same app) that the list does not cover yet.</summary>
     public IReadOnlyList<string> SuggestRelated(IReadOnlyCollection<string> domains, IEnumerable<string>? processes = null)
     {
-        var roots = domains.Select(Root).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var roots = domains.Where(d => DomainSets.KindOf(d) == RuleKind.Site).Select(Root).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var apps = (processes ?? []).Where(p => p.Length > 0).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        return recentDomains.Where(e => (roots.Contains(Root(e.Host)) || e.Process is { } p && apps.Contains(p)) && !domains.Any(d => Covers(d, e.Host)))
+        return recentDomains.Where(e => (roots.Contains(Root(e.Host)) || e.Process is { } p && apps.Contains(p)) && !domains.Any(d => DomainSets.KindOf(d) == RuleKind.Site && Covers(d, e.Host)))
             .Select(e => e.Host).Distinct(StringComparer.OrdinalIgnoreCase).Take(24).ToList();
     }
     /// <summary>"git.hai.example → ★ hai → rule #3 → NetBird": which groups and which rule decide this domain.</summary>
@@ -144,7 +152,7 @@ public sealed partial class MainViewModel : IDomainSetLibrary
         var groups = GroupsContaining(host).Select(set => "★ " + set.Name).ToArray();
         RouteAnalysis decision;
         try { decision = RoutingPolicy.Analyze(ExpandedProfile, new RouteQuery(Domain: host)); } catch (UserError e) { return e.Message; }
-        var rule = decision.Rule is { } matched ? ActiveProfile.Rules.FirstOrDefault(r => matched.Id == r.Id || matched.Id == r.Id + "-my") : null;
+        var rule = decision.Rule is { } matched ? ActiveProfile.Rules.FirstOrDefault(r => matched.Id == r.Id || matched.Id.StartsWith(r.Id + "-", StringComparison.Ordinal)) : null;
         var parts = new List<string> { host };
         parts.Add(groups.Length == 0 ? T("не входит в ваши группы", "not in your groups") : T("в группах ", "in groups ") + string.Join(", ", groups));
         parts.Add(rule is null ? T("правило не найдено — «Остальной трафик»", "no rule — Other traffic") : T($"правило №{rule.Priority} «{rule.Name}»", $"rule #{rule.Priority} ‘{rule.Name}’"));

@@ -127,7 +127,7 @@ public sealed partial class MainViewModel
         var entries = edit ? Dialogs.Lines(T("Защита выбранных адресов","Protected destinations"),
             T("Домен с поддоменами, IP или CIDR — по одному в строке. Сохранение включает защиту. Домены используют DNS Windows; для собственного DNS приложения и уже известных реальных адресов добавьте IP/CIDR.",
               "Enter one domain (including subdomains), IP or CIDR per line. Saving enables protection. Domains use Windows DNS; add IPs for applications with private DNS or previously cached real addresses."),
-            prior, lines => DestinationGuard.Parse(lines).Entries) : prior;
+            prior, lines => DestinationGuard.Parse(lines).Entries, pick: () => Dialogs.PickFromRules(keywords: false)) : prior;
         if (entries == null) return;
         var enable = entries.Length > 0 && (edit || !state.Status.Protection.DestinationGuardEnabled);
         await connectionGate.WaitAsync(lifetime.Token);
@@ -149,13 +149,20 @@ public sealed partial class MainViewModel
     public ICommand ClearProtection { get; private set; } = null!;
     public ICommand ApplyStoredProtection { get; private set; } = null!;
 
+    /// <summary>From the throttling check: a site blocked outright goes through VPN with one click.</summary>
+    private void RouteSiteViaVpn(string host)
+    {
+        var rule = new RoutingRule { CreatedAt = DateTimeOffset.UtcNow, Name = host, Kind = RuleKind.Site, Values = [host], UseVpn = true };
+        RuleValidation.Validate(rule);
+        ActiveProfile.Rules.Insert(0, rule); RulesChanged();
+    }
     private void InitializeRoutingCommands()
     {
         EditDestinations = Async(_ => ChangeDestinationsAsync(true), () => !ConnectionBusy);
         ToggleDestinations = Async(_ => ChangeDestinationsAsync(false), () => !ConnectionBusy && Protection?.GuardTargets is { Length: > 0 });
         ConfigureDirectTraffic = new Command(_ =>
         {
-            var policy = Dialogs.DirectPolicyEditor(Settings.DirectPolicy, Settings.ObhodFolder);
+            var policy = Dialogs.DirectPolicyEditor(Settings.DirectPolicy, Settings.ObhodFolder, RouteSiteViaVpn);
             if (policy == null) return;
             Settings.DirectPolicy = policy; Save(); if (TlsFragmentEnabled) QueueApply();
         });

@@ -5,29 +5,137 @@ namespace Bebekon.App;
 
 public static partial class Dialogs
 {
-    internal static DirectTrafficPolicy? DirectPolicyEditor(DirectTrafficPolicy? current, string folder)
+    /// <summary>
+    /// Settings for splitting TLS handshakes of direct connections: where it applies, how, the lists,
+    /// and a check that finds what the user's provider actually needs for a site.
+    /// </summary>
+    internal static DirectTrafficPolicy? DirectPolicyEditor(DirectTrafficPolicy? current, string folder, Action<string>? routeViaVpn = null)
     {
         current ??= new();
-        var window = Shell(I18n.T("Прямой трафик", "Direct traffic"), out var body);
+        var window = Shell(I18n.T("Обход замедления сайтов", "Bypass site throttling"), out var body);
+        window.Width = 600;
+        body.Children.Add(MutedText(I18n.T(
+            "Дробление начала TLS-соединения помогает, когда провайдер замедляет сайт по имени. Оно касается только прямых соединений, VPN не меняется. Каждое раздробленное соединение открывается чуть дольше, поэтому включайте его только там, где оно нужно.",
+            "Splitting the start of a TLS connection helps when a provider slows a site down by name. It only affects direct connections; VPN is unchanged. Each split connection opens a little slower, so apply it only where needed.")));
+
+        // Where.
+        body.Children.Add(new TextBlock { Text = I18n.T("Где применять", "Where"), FontWeight = FontWeights.SemiBold, Margin = new(0, 4, 0, 6) });
+        var scope = new ComboBox { MinHeight = 40 };
+        foreach (var (value, label) in new[] {
+            (FragmentScope.Auto, I18n.T("Авто · YouTube, Discord, X, Instagram, Facebook, TikTok и ваш список", "Auto · YouTube, Discord, X, Instagram, Facebook, TikTok and your list")),
+            (FragmentScope.ListOnly, I18n.T("Только ваш список ниже", "Only your list below")),
+            (FragmentScope.AllDirect, I18n.T("Все прямые сайты · может ломать часть сайтов", "All direct sites · may break some sites")) })
+            scope.Items.Add(new ComboBoxItem { Content = label, Tag = value });
+        scope.SelectedItem = scope.Items.OfType<ComboBoxItem>().First(i => (FragmentScope)i.Tag == current.Scope);
+        body.Children.Add(scope);
+        body.Children.Add(MutedText(I18n.T("Ваши правила с маршрутом Direct дробятся всегда (кроме исключений). Для сервисов «Авто» QUIC отключается, чтобы браузер шёл по TCP — иначе дробление не сработает.",
+            "Your own Direct rules are always split (except exclusions). For Auto services QUIC is refused so the browser uses TCP — otherwise splitting has no effect.")));
+
+        // How.
+        body.Children.Add(new TextBlock { Text = I18n.T("Способ", "Method"), FontWeight = FontWeights.SemiBold, Margin = new(0, 4, 0, 6) });
+        var method = new ComboBox { MinHeight = 40 };
+        foreach (var (value, label) in new[] {
+            (FragmentMethod.Records, I18n.T("Записи TLS · быстро, +≈50 мс", "TLS records · fast, +≈50 ms")),
+            (FragmentMethod.Split, I18n.T("Сегменты TCP · +≈0,5 с на соединение", "TCP segments · +≈0.5 s per connection")),
+            (FragmentMethod.Both, I18n.T("Оба · надёжнее, +≈0,5 с", "Both · most robust, +≈0.5 s")) })
+            method.Items.Add(new ComboBoxItem { Content = label, Tag = value });
+        method.SelectedItem = method.Items.OfType<ComboBoxItem>().First(i => (FragmentMethod)i.Tag == current.Method);
+        body.Children.Add(method);
+
+        // Check a site.
+        var checkCard = new Border { CornerRadius = new(12), Padding = new(14), Margin = new(0, 14, 0, 4), BorderThickness = new(1) };
+        checkCard.SetResourceReference(Border.BackgroundProperty, "CardHover"); checkCard.SetResourceReference(Border.BorderBrushProperty, "Border");
+        var check = new StackPanel(); checkCard.Child = check;
+        check.Children.Add(new TextBlock { Text = I18n.T("Проверить сайт на вашем провайдере", "Check a site on your provider"), FontWeight = FontWeights.SemiBold });
+        check.Children.Add(MutedText(I18n.T("Bebekon откроет сайт напрямую, в обход VPN, без дробления и каждым способом, и подскажет, что работает. Около 30–60 секунд.",
+            "Bebekon opens the site directly, bypassing VPN, without splitting and with each method, then tells you what works. About 30–60 seconds.")));
+        var checkRow = new Grid(); checkRow.ColumnDefinitions.Add(new()); checkRow.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
+        var site = new TextBox { Text = "youtube.com", MinHeight = 40, VerticalContentAlignment = VerticalAlignment.Center, Tag = "youtube.com" };
+        var run = new Button { Content = IconText("Bolt", I18n.T("Проверить", "Check")), Style = (Style)Application.Current.Resources["AccentButton"], MinHeight = 40, Margin = new(8, 0, 0, 0), Padding = new(14, 0, 14, 0) };
+        Grid.SetColumn(run, 1); checkRow.Children.Add(site); checkRow.Children.Add(run); check.Children.Add(checkRow);
+        var table = new StackPanel { Margin = new(0, 10, 0, 0) }; check.Children.Add(table);
+        var verdict = new TextBlock { TextWrapping = TextWrapping.Wrap, FontWeight = FontWeights.SemiBold, Margin = new(0, 8, 0, 0) }; check.Children.Add(verdict);
+        var verdictActions = new WrapPanel { Margin = new(0, 8, 0, 0) }; check.Children.Add(verdictActions);
+        body.Children.Add(checkCard);
+        CancellationTokenSource? checking = null;
+        window.Closed += (_, _) => checking?.Cancel();
+        string Label(FragmentMethod? m) => m switch
+        {
+            null => I18n.T("Без дробления", "No splitting"), FragmentMethod.Records => I18n.T("Записи TLS", "TLS records"),
+            FragmentMethod.Split => I18n.T("Сегменты TCP", "TCP segments"), _ => I18n.T("Оба способа", "Both")
+        };
+        run.Click += async (_, _) =>
+        {
+            if (checking is not null) { checking.Cancel(); return; }
+            checking = new(); var token = checking.Token;
+            table.Children.Clear(); verdict.Text = ""; verdictActions.Children.Clear();
+            run.Content = IconText("Close", I18n.T("Остановить", "Stop"));
+            try
+            {
+                var uplink = System.Net.IPAddress.TryParse(NetworkAddresses.Read().Address, out var address) ? address : null;
+                var host = RuleValidation.SiteHost(site.Text.Trim(), dropWww: false);
+                var rows = new Dictionary<FragmentMethod?, TextBlock>();
+                foreach (var m in ThrottleProbe.Variants)
+                {
+                    var line = new TextBlock { Text = Label(m) + " · " + I18n.T("ожидает", "waiting"), FontSize = 12, Margin = new(0, 2, 0, 2) };
+                    line.SetResourceReference(TextBlock.ForegroundProperty, "Muted"); rows[m] = line; table.Children.Add(line);
+                }
+                var results = await Task.Run(() => ThrottleProbe.TestAsync(Path.Combine(AppContext.BaseDirectory, "core", "sing-box.exe"), host, uplink, 3, token,
+                    m => Application.Current.Dispatcher.Invoke(() => rows[m].Text = Label(m) + " · " + I18n.T("проверка…", "checking…"))), token);
+                foreach (var r in results)
+                {
+                    rows[r.Method].Text = Label(r.Method) + " · " + (r.Succeeded == 0 ? I18n.T("не открылся", "did not open") : $"{r.Succeeded}/{r.Attempts}, " + r.MedianMs + I18n.T(" мс", " ms"));
+                    rows[r.Method].SetResourceReference(TextBlock.ForegroundProperty, r.Works ? "Success" : r.Succeeded == 0 ? "Danger" : "Warning");
+                }
+                var plain = results.First(r => r.Method is null);
+                var best = ThrottleProbe.Recommend(results);
+                if (plain.Works)
+                {
+                    verdict.Text = I18n.T($"{host} открывается напрямую без дробления — для него обход не нужен.", $"{host} opens directly without splitting — no bypass needed.");
+                }
+                else if (best is { } chosen)
+                {
+                    verdict.Text = I18n.T($"Работает «{Label(chosen)}». Выберите его и добавьте сайт в список, если он не из «Авто».", $"‘{Label(chosen)}’ works. Use it and add the site to your list unless Auto covers it.");
+                    var use = new Button { Content = IconText("Check", I18n.T("Использовать этот способ", "Use this method")), MinHeight = 36, Margin = new(0, 0, 8, 0), Padding = new(12, 0, 12, 0) };
+                    use.Click += (_, _) => method.SelectedItem = method.Items.OfType<ComboBoxItem>().First(i => (FragmentMethod)i.Tag == chosen);
+                    verdictActions.Children.Add(use);
+                }
+                else
+                {
+                    verdict.Text = I18n.T($"{host} у вашего провайдера заблокирован полностью: ни один способ дробления не помог. Откройте его через VPN.",
+                        $"{host} is fully blocked by your provider: no splitting method helped. Use VPN for it.");
+                    if (routeViaVpn is not null)
+                    {
+                        var vpn = new Button { Content = IconText("Shield", I18n.T("Добавить правило «через VPN»", "Add a VPN rule")), Style = (Style)Application.Current.Resources["AccentButton"], MinHeight = 36, Padding = new(12, 0, 12, 0) };
+                        vpn.Click += (_, _) => { routeViaVpn(host); verdict.Text = I18n.T($"Правило «{host} → VPN» добавлено.", $"Rule ‘{host} → VPN’ added."); vpn.IsEnabled = false; };
+                        verdictActions.Children.Add(vpn);
+                    }
+                }
+            }
+            catch (OperationCanceledException) { verdict.Text = I18n.T("Проверка остановлена.", "Check stopped."); }
+            catch (UserError e) { verdict.Text = e.Message; }
+            finally { checking.Dispose(); checking = null; run.Content = IconText("Bolt", I18n.T("Проверить", "Check")); }
+        };
+
+        // Lists.
+        var lists = new Expander { Header = I18n.T("Ваш список, исключения и QUIC", "Your list, exclusions and QUIC"), Margin = new(0, 12, 0, 0), IsExpanded = current.Include.Length + current.Exclude.Length > 0, Style = (Style)Application.Current.Resources["DetailsPanel"] };
+        var listBody = new StackPanel(); lists.Content = listBody; body.Children.Add(lists);
         TextBox ListField(string label, string[] entries)
         {
-            var field = Field(body, label, string.Join(Environment.NewLine, entries));
+            var field = Field(listBody, label, string.Join(Environment.NewLine, entries));
             field.AcceptsReturn = true; field.MinHeight = 70; field.MaxHeight = 130; field.MaxLength = 512 * 1024;
             field.VerticalContentAlignment = VerticalAlignment.Top; field.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
             return field;
         }
-        var include = ListField(I18n.T("Применять к доменам и IP/CIDR · пусто — все прямые маршруты", "Apply to domains and IP/CIDR · empty includes all direct routes"), current.Include ?? []);
-        var exclude = ListField(I18n.T("Исключения · имеют приоритет", "Exclusions · take priority"), current.Exclude ?? []);
-        var preferTcp = new CheckBox { Content = I18n.T("Предпочитать TCP для HTTPS", "Prefer TCP for HTTPS"), IsChecked = current.PreferTcp, Margin = new(0,10,0,3) };
-        body.Children.Add(preferTcp);
-        body.Children.Add(new TextBlock { TextWrapping = TextWrapping.Wrap, Style = (Style)Application.Current.Resources["Subtitle"],
-            Text = I18n.T("Для выбранных адресов Bebekon отклоняет QUIC на UDP/443. Браузер с поддержкой TCP может повторить запрос по HTTPS. Эти настройки действуют при включённом обходе замедления.",
-                "Bebekon rejects QUIC on UDP/443 for the selected addresses. Browsers supporting TCP can retry over HTTPS. Enable the direct TLS option to apply these settings.") });
-        var import = new Button { Content = I18n.T("Добавить списки из Obhod…", "Import Obhod lists…"), Margin = new(0,10,0,0) };
-        body.Children.Add(import);
-        var error = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new(0,5,0,0) }; error.SetResourceReference(TextBlock.ForegroundProperty, "Warning");
+        var include = ListField(I18n.T("Ваш список: домены и IP/CIDR · ^имя — только точное имя", "Your list: domains and IP/CIDR · ^name — exact name only"), current.Include ?? []);
+        var exclude = ListField(I18n.T("Исключения · никогда не дробить, имеют приоритет", "Exclusions · never split, take priority"), current.Exclude ?? []);
+        var preferTcp = new CheckBox { Content = I18n.T("Отключать QUIC и для вашего списка (браузер перейдёт на TCP)", "Also refuse QUIC for your list (browsers switch to TCP)"), IsChecked = current.PreferTcp, Margin = new(0, 10, 0, 3) };
+        listBody.Children.Add(preferTcp);
+        var import = new Button { Content = IconText("Folder", I18n.T("Добавить списки из Obhod…", "Import Obhod lists…")), Margin = new(0, 10, 0, 0) };
+        listBody.Children.Add(import);
+        var error = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new(0, 5, 0, 0) }; error.SetResourceReference(TextBlock.ForegroundProperty, "Warning");
         body.Children.Add(error);
-        import.Click += (_,_) =>
+        import.Click += (_, _) =>
         {
             var picker = new Microsoft.Win32.OpenFolderDialog { Title = I18n.T("Папка Obhod или lists", "Obhod or lists folder") };
             if (Path.IsPathFullyQualified(folder ?? "") && Directory.Exists(folder)) picker.InitialDirectory = folder;
@@ -35,25 +143,25 @@ public static partial class Dialogs
             try
             {
                 var root = picker.FolderName;
-                if (Directory.Exists(Path.Combine(root,"lists"))) root = Path.Combine(root,"lists");
-                if (!File.Exists(Path.Combine(root,"list-general.txt")) && !File.Exists(Path.Combine(root,"list-general-user.txt")))
+                if (Directory.Exists(Path.Combine(root, "lists"))) root = Path.Combine(root, "lists");
+                if (!File.Exists(Path.Combine(root, "list-general.txt")) && !File.Exists(Path.Combine(root, "list-general-user.txt")))
                     throw new UserError(I18n.T("В этой папке нет списков Obhod.", "No Obhod site lists in this folder."));
                 string Load(string existing, params string[] names)
                 {
                     var lines = existing.Split('\n').AsEnumerable();
                     foreach (var name in names)
                     {
-                        var file = new FileInfo(Path.Combine(root,name));
+                        var file = new FileInfo(Path.Combine(root, name));
                         if (!file.Exists) continue;
-                        if (file.Length > 4*1024*1024) throw new UserError(I18n.T("Слишком большой список.", "List is too large."));
+                        if (file.Length > 4 * 1024 * 1024) throw new UserError(I18n.T("Слишком большой список.", "List is too large."));
                         if (name == "ipset-all.txt" && file.Length == 0)
                             lines = lines.Concat(new[] { "0.0.0.0/0", "::/0" });
                         else lines = lines.Concat(File.ReadAllLines(file.FullName));
                     }
-                    return string.Join(Environment.NewLine,DirectTrafficPolicy.ParseList(lines).Entries);
+                    return string.Join(Environment.NewLine, DirectTrafficPolicy.ParseList(lines).Entries);
                 }
-                var included = Load(include.Text, "list-general.txt","list-general-user.txt","list-google.txt","ipset-all.txt");
-                var excluded = Load(exclude.Text, "list-exclude.txt","list-exclude-user.txt","ipset-exclude.txt","ipset-exclude-user.txt");
+                var included = Load(include.Text, "list-general.txt", "list-general-user.txt", "list-google.txt", "ipset-all.txt");
+                var excluded = Load(exclude.Text, "list-exclude.txt", "list-exclude-user.txt", "ipset-exclude.txt", "ipset-exclude-user.txt");
                 include.Text = included; exclude.Text = excluded;
                 error.Text = I18n.T("Списки добавлены. Проверьте их и нажмите «Сохранить».", "Lists imported. Review and save.");
             }
@@ -61,14 +169,19 @@ public static partial class Dialogs
             { error.Text = e is UserError ? e.Message : I18n.T("Не удалось прочитать списки.", "Could not read the lists."); }
         };
         DirectTrafficPolicy? result = null;
-        Submit(body,I18n.T("Сохранить","Save"),() =>
+        Submit(body, I18n.T("Сохранить", "Save"), () =>
         {
             try
             {
-                result = new() { Include = DirectTrafficPolicy.ParseList(include.Text.Split('\n')).Entries,
-                    Exclude = DirectTrafficPolicy.ParseList(exclude.Text.Split('\n')).Entries, PreferTcp = preferTcp.IsChecked == true };
+                result = new()
+                {
+                    Include = DirectTrafficPolicy.ParseList(include.Text.Split('\n')).Entries,
+                    Exclude = DirectTrafficPolicy.ParseList(exclude.Text.Split('\n')).Entries, PreferTcp = preferTcp.IsChecked == true,
+                    Scope = (FragmentScope)((ComboBoxItem)scope.SelectedItem).Tag, Method = (FragmentMethod)((ComboBoxItem)method.SelectedItem).Tag
+                };
                 window.DialogResult = true;
-            } catch (UserError e) { error.Text = e.Message; }
+            }
+            catch (UserError e) { error.Text = e.Message; }
         });
         return window.ShowDialog() == true ? result : null;
     }

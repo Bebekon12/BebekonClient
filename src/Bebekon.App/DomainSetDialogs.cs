@@ -17,6 +17,7 @@ internal interface IDomainSetLibrary
     IReadOnlyList<string> SuggestRelated(IReadOnlyCollection<string> domains, IEnumerable<string>? processes = null);
     Task<DomainSet> SubscribeDomainSetAsync(string name, string url);
     Task RefreshDomainSetAsync(DomainSet set);
+    IReadOnlyList<RoutingRule> CurrentRules { get; }
 }
 
 public static partial class Dialogs
@@ -292,6 +293,58 @@ public static partial class Dialogs
     private static string Count(int domains) => I18n.English ? domains + (domains == 1 ? " domain" : " domains")
         : domains + (domains % 10 == 1 && domains % 100 != 11 ? " домен" : domains % 10 is >= 2 and <= 4 && domains % 100 is < 12 or > 14 ? " домена" : " доменов");
 
+    /// <summary>
+    /// Pick entries from the user's groups and current rules: domains, keyword:word and IP/CIDR.
+    /// Returns the chosen entries, or null when cancelled. Keywords are left out where they cannot apply.
+    /// </summary>
+    internal static List<string>? PickFromRules(bool keywords)
+    {
+        if (Library is not { } library) return null;
+        var w = Shell(I18n.T("Из групп и правил", "From groups and rules"), out var body);
+        body.Children.Add(MutedText(I18n.T("Отметьте группы и правила — их домены" + (keywords ? ", слова" : "") + " и адреса будут добавлены.",
+            "Check groups and rules — their domains" + (keywords ? ", words" : "") + " and addresses will be added.")));
+        var search = new TextBox { Style = (Style)Application.Current.Resources["SearchBox"], Tag = I18n.T("Поиск", "Search"), Margin = new(0, 0, 0, 8) };
+        body.Children.Add(search);
+        var items = new StackPanel();
+        body.Children.Add(new ScrollViewer { Content = items, MaxHeight = 380, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
+        var choices = new List<(CheckBox Box, string Text, List<string> Entries)>();
+        void Add(string icon, string title, string detail, List<string> entries)
+        {
+            entries = entries.Where(e => keywords || DomainSets.KindOf(e) != RuleKind.Contains).ToList();
+            if (entries.Count == 0) return;
+            var label = IconText(icon, title + " · " + detail); label.HorizontalAlignment = HorizontalAlignment.Left;
+            var box = new CheckBox { Content = label, Margin = new(0, 4, 0, 4) };
+            items.Children.Add(box); choices.Add((box, title + " " + string.Join(" ", entries), entries));
+        }
+        foreach (var set in library.DomainSetList.OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase))
+            Add(set.Icon, "★ " + set.Name, Count(set.Domains.Count), set.Domains);
+        foreach (var rule in library.CurrentRules)
+        {
+            var entries = rule.Kind switch
+            {
+                RuleKind.Site => rule.Values.ToList(),
+                RuleKind.Contains => rule.Values.Select(v => DomainSets.KeywordPrefix + v).ToList(),
+                RuleKind.Network => rule.Values.ToList(),
+                RuleKind.GeoSite => rule.Values.Where(DomainSets.IsReference).SelectMany(v => DomainSets.Find(library.DomainSetList, v)?.Domains ?? []).ToList(),
+                _ => []
+            };
+            Add(rule.DisplayIcon, rule.Name, RouteChoice.NameOf(rule.Target) + " · " + string.Join(", ", entries.Take(3)) + (entries.Count > 3 ? "…" : ""), entries);
+        }
+        if (choices.Count == 0) items.Children.Add(MutedText(I18n.T("Нет подходящих групп и правил.", "No suitable groups or rules.")));
+        search.TextChanged += (_, _) =>
+        {
+            foreach (var (box, text, _) in choices)
+                box.Visibility = search.Text.Trim().Length == 0 || text.Contains(search.Text.Trim(), StringComparison.OrdinalIgnoreCase) ? Visibility.Visible : Visibility.Collapsed;
+        };
+        List<string>? result = null;
+        Submit(body, I18n.T("Добавить", "Add"), () =>
+        {
+            result = choices.Where(c => c.Box.IsChecked == true).SelectMany(c => c.Entries).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            w.DialogResult = true;
+        });
+        return w.ShowDialog() == true ? result : null;
+    }
+
     private static TextBox Lines(StackPanel body, string label, string value, bool readOnly = false, double height = 220)
     {
         body.Children.Add(new TextBlock { Text = label, Margin = new(0, 10, 0, 6), Foreground = (Brush)Application.Current.Resources["Muted"], TextWrapping = TextWrapping.Wrap });
@@ -311,8 +364,17 @@ public static partial class Dialogs
         var w = Shell(old is null ? I18n.T("Новая группа доменов", "New domain group") : I18n.T("Изменить группу", "Edit group"), out var body);
         var name = Field(body, I18n.T("Название — в правиле группа выглядит как my:название", "Name — a rule shows the group as my:name"), old?.Name ?? suggestedName);
         name.Tag = "hai";
-        var domains = Lines(body, I18n.T("Домены — по одному в строке или через запятую. Поддомены включаются автоматически, https:// и пути убираются сами.", "Domains — one per line or comma-separated. Subdomains are included; https:// and paths are removed."),
+        var domains = Lines(body, I18n.T("По одной записи в строке: домен (с поддоменами), keyword:слово — как «Адрес содержит», или IP / подсеть. https:// и пути убираются сами.",
+            "One entry per line: a domain (with subdomains), keyword:word — like ‘Address contains’, or an IP / network. https:// and paths are removed."),
             string.Join(Environment.NewLine, old?.Domains ?? prefill ?? []));
+        var fromRules = new Button { Content = IconText("Rules", I18n.T("Добавить из групп и правил…", "Add from groups and rules…")), MinHeight = 38, Margin = new(0, 8, 0, 0) };
+        fromRules.Click += (_, _) =>
+        {
+            if (PickFromRules(keywords: true) is not { Count: > 0 } picked) return;
+            var existing = domains.Text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            domains.Text = string.Join(Environment.NewLine, existing.Concat(picked.Where(p => !existing.Contains(p))));
+        };
+        body.Children.Add(fromRules);
         var error = ErrorLine(body);
         DomainSet? result = null;
         Submit(body, I18n.T("Сохранить", "Save"), () =>

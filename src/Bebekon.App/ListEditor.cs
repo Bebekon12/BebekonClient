@@ -3,7 +3,7 @@ namespace Bebekon.App;
 public static partial class Dialogs
 {
     internal static string[]? Lines(string title, string description, IEnumerable<string> initial,
-        Func<string[], string[]> validate, int maxLength = 65536)
+        Func<string[], string[]> validate, int maxLength = 65536, Func<List<string>?>? pick = null)
     {
         var window = Shell(title, out var body);
         body.Children.Add(new TextBlock { Text = description, TextWrapping = TextWrapping.Wrap,
@@ -12,6 +12,17 @@ public static partial class Dialogs
             VerticalContentAlignment = VerticalAlignment.Top, MinHeight = 150, MaxHeight = 240,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto, MaxLength = maxLength, Margin = new(0,10,0,6) };
         body.Children.Add(field);
+        if (pick is not null)
+        {
+            var add = new Button { Content = IconText("Rules", I18n.T("Добавить из групп и правил…", "Add from groups and rules…")), MinHeight = 38, Margin = new(0, 0, 0, 6) };
+            add.Click += (_, _) =>
+            {
+                if (pick() is not { Count: > 0 } picked) return;
+                var existing = field.Text.Replace("\r", "").Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                field.Text = string.Join(Environment.NewLine, existing.Concat(picked.Where(p => !existing.Contains(p))));
+            };
+            body.Children.Add(add);
+        }
         var error = new TextBlock { TextWrapping = TextWrapping.Wrap };
         error.SetResourceReference(TextBlock.ForegroundProperty, "Danger"); body.Children.Add(error);
         string[]? result = null;

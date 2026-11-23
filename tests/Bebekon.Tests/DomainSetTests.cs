@@ -190,3 +190,34 @@ public sealed class UplinkIPv6Tests
         Assert.DoesNotContain("fd84", Addresses(v4)); Assert.Equal("ipv4_only", (string?)v4["dns"]!["strategy"]);
     }
 }
+
+public sealed class MixedGroupTests
+{
+    [Fact]
+    public void GroupsHoldDomainsKeywordsAndNetworks()
+    {
+        var set = DomainSets.Normalize("work", ["portal.hai.example", "keyword:Hai", "10.20.0.0/16", "192.0.2.7", "https://git.hai.example/x"]);
+        Assert.Equal(["git.hai.example", "portal.hai.example", "keyword:hai", "10.20.0.0/16", "192.0.2.7/32"], set.Domains);
+        Assert.Equal(RuleKind.Site, DomainSets.KindOf("10.20")); // not a full address
+        Assert.Throws<UserError>(() => DomainSets.Normalize("bad", ["keyword:"]));
+        Assert.Throws<UserError>(() => DomainSets.Normalize("bad", ["10.0.0.0/99"]));
+    }
+
+    [Fact]
+    public void MixedGroupExpandsIntoOneRulePerTypeWithTheSameRoute()
+    {
+        var set = DomainSets.Normalize("work", ["portal.hai.example", "keyword:hai", "10.20.0.0/16"]);
+        var rule = new RoutingRule { Name = "Work", Kind = RuleKind.GeoSite, Values = ["my:work"], UseVpn = true, Destination = RouteTarget.NetBird };
+        var expanded = DomainSets.Expand(new Profile { Rules = [rule] }, [set]);
+        Assert.Equal([RuleKind.Site, RuleKind.Contains, RuleKind.Network], expanded.Rules.Select(r => r.Kind));
+        Assert.Equal(["hai"], expanded.Rules[1].Values);
+        Assert.All(expanded.Rules, r => Assert.Equal(RouteTarget.NetBird, r.Target));
+        Assert.Equal(rule.Id, expanded.Rules[0].Id);
+        Assert.Equal(3, expanded.Rules.Select(r => r.Id).Distinct().Count());
+        RuleValidation.Validate(expanded);
+        var config = ConfigGenerator.Generate(CoreTests.Spec(expanded));
+        var routes = System.Text.Json.Nodes.JsonNode.Parse(config)!["route"]!["rules"]!.AsArray();
+        Assert.Contains(routes, r => (string?)r!["domain_keyword"]?[0] == "hai");
+        Assert.Contains(routes, r => (string?)r!["ip_cidr"]?[0] == "10.20.0.0/16");
+    }
+}

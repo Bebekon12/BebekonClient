@@ -36,22 +36,50 @@ public static class DomainSets
     public static string Reference(DomainSet set) => Prefix + set.Name;
     public static string NameOf(string reference) => reference[Prefix.Length..];
 
-    /// <summary>Validates and canonicalizes a set: a short name and normalized, de-duplicated domains.</summary>
+    public const string KeywordPrefix = "keyword:";
+    /// <summary>What a group entry means: a domain with subdomains, a word in the address, or an IP/CIDR.</summary>
+    public static RuleKind KindOf(string entry) =>
+        entry.StartsWith(KeywordPrefix, StringComparison.OrdinalIgnoreCase) ? RuleKind.Contains :
+        LooksLikeAddress(entry) ? RuleKind.Network : RuleKind.Site;
+    private static bool LooksLikeAddress(string entry)
+    {
+        var address = entry.Split('/')[0];
+        // "10.20" parses as an IPv4 address in .NET; require the full dotted form or an IPv6 colon.
+        return System.Net.IPAddress.TryParse(address, out _) && (address.Contains(':') || address.Count(c => c == '.') == 3);
+    }
+    public static string ValueOf(string entry) => KindOf(entry) == RuleKind.Contains ? entry[KeywordPrefix.Length..] : entry;
+
+    /// <summary>
+    /// Validates and canonicalizes a group: a short name and normalized, de-duplicated entries —
+    /// domains, keyword:word entries and IP/CIDR — each checked like the matching rule type.
+    /// </summary>
     public static DomainSet Normalize(string name, IEnumerable<string> domains, string? id = null, DomainSet? style = null)
     {
         name = name.Trim();
         if (name.Length is < 1 or > 40 || !name.All(c => char.IsLetterOrDigit(c) || c is '-' or '_' or '.'))
             throw new UserError("Название группы: 1–40 символов, буквы, цифры, «-», «_» или «.» без пробелов.");
-        var values = domains.SelectMany(d => d.Split([',', ';', ' ', '\t', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-            .Where(d => !d.StartsWith('#')).Select(d => RuleValidation.SiteHost(d, dropWww: true)).ToList();
-        if (values.Count == 0) throw new UserError("Добавьте в группу хотя бы один домен.");
-        if (values.Count > MaxDomains) throw new UserError($"В группе может быть до {MaxDomains} доменов.");
-        // Reuse the rule validator: same IDN, host and format rules as an ordinary site rule.
-        var probe = new RoutingRule { Name = name, Kind = RuleKind.Site, Values = values };
-        RuleValidation.Validate(probe);
+        var raw = domains.SelectMany(d => d.Split([',', ';', ' ', '\t', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            .Where(d => !d.StartsWith('#')).ToList();
+        if (raw.Count == 0) throw new UserError("Добавьте в группу хотя бы один домен, слово или адрес.");
+        if (raw.Count > MaxDomains) throw new UserError($"В группе может быть до {MaxDomains} записей.");
+        var entries = new List<string>();
+        foreach (var group in raw.GroupBy(KindOf))
+        {
+            var values = group.Select(entry => group.Key switch
+            {
+                RuleKind.Contains => entry[KeywordPrefix.Length..].Trim().ToLowerInvariant(),
+                RuleKind.Site => RuleValidation.SiteHost(entry, dropWww: true),
+                _ => entry
+            }).ToList();
+            // Reuse the rule validator: the same checks as an ordinary rule of that type.
+            var probe = new RoutingRule { Name = name, Kind = group.Key, Values = values };
+            RuleValidation.Validate(probe);
+            entries.AddRange(probe.Values.Select(v => group.Key == RuleKind.Contains ? KeywordPrefix + v : v));
+        }
         return new()
         {
-            Id = id ?? Guid.NewGuid().ToString("N"), Name = name, Domains = probe.Values.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList(),
+            Id = id ?? Guid.NewGuid().ToString("N"), Name = name,
+            Domains = entries.Distinct(StringComparer.Ordinal).OrderBy(e => KindOf(e) switch { RuleKind.Site => 0, RuleKind.Contains => 1, _ => 2 }).ThenBy(e => e, StringComparer.Ordinal).ToList(),
             Color = Colors.Contains(style?.Color) ? style!.Color : "Blue", Icon = Icons.Contains(style?.Icon) ? style!.Icon : "Folder",
             SourceUrl = style?.SourceUrl, Updated = style?.Updated
         };
@@ -76,14 +104,23 @@ public static class DomainSets
         {
             if (rule.Kind != RuleKind.GeoSite || !rule.Values.Any(IsReference)) { copy.Rules.Add(Clone(rule)); continue; }
             var bundled = rule.Values.Where(v => !IsReference(v)).ToList();
-            var domains = new List<string>();
+            var entries = new List<string>();
             foreach (var reference in rule.Values.Where(IsReference))
-                domains.AddRange((Find(sets, reference) ?? throw new UserError($"Группа «{NameOf(reference)}» удалена. Измените правило «{rule.Name}»."))
+                entries.AddRange((Find(sets, reference) ?? throw new UserError($"Группа «{NameOf(reference)}» удалена. Измените правило «{rule.Name}»."))
                     .Domains);
-            if (bundled.Count > 0) { var geo = Clone(rule); geo.Values = bundled; copy.Rules.Add(geo); }
-            var site = Clone(rule); site.Kind = RuleKind.Site; site.Values = domains.Distinct(StringComparer.Ordinal).ToList();
-            if (bundled.Count > 0) site.Id = rule.Id + "-my";
-            copy.Rules.Add(site);
+            var first = true;
+            void Add(RuleKind kind, List<string> values, string suffix)
+            {
+                if (values.Count == 0) return;
+                var part = Clone(rule); part.Kind = kind; part.Values = values;
+                if (!first) part.Id = rule.Id + suffix;
+                first = false; copy.Rules.Add(part);
+            }
+            // One rule per entry type, in a fixed order, all with the original route and options.
+            Add(RuleKind.GeoSite, bundled, "-geo");
+            Add(RuleKind.Site, entries.Where(e => KindOf(e) == RuleKind.Site).Distinct(StringComparer.Ordinal).ToList(), "-my");
+            Add(RuleKind.Contains, entries.Where(e => KindOf(e) == RuleKind.Contains).Select(ValueOf).Distinct(StringComparer.Ordinal).ToList(), "-kw");
+            Add(RuleKind.Network, entries.Where(e => KindOf(e) == RuleKind.Network).Distinct(StringComparer.Ordinal).ToList(), "-net");
         }
         return copy;
     }

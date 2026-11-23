@@ -254,6 +254,8 @@ internal static class SmokeHarness
             dialogName = "DomainGroups"; Dialogs.DomainGroups(fixtureSet);
             dialogName = "AddToGroup"; Dialogs.AddToGroup(["www.youtube.com"], vm.SuggestRelated(["git.hai.example"]));
             dialogName = "ImportLink"; Dialogs.DomainSetImport(DomainSets.ToLink(fixtureSet));
+            dialogName = "PickFromRules"; Dialogs.PickFromRules(keywords: true);
+            dialogName = "DirectPolicy"; Dialogs.DirectPolicyEditor(new() { Include = ["example.org"] }, "");
             vm.SetRecentDomainsForTest([]);
             vm.DeleteDomainSet(fixtureSet);
         }
@@ -646,8 +648,12 @@ internal static class SmokeHarness
             if (settings.ObhodProfile != "general (ALT).bat") throw new InvalidOperationException("Profile choice was not retained.");
             Dialogs.RenderObserver = w => w.Dispatcher.BeginInvoke(new Action(() =>
             {
+                foreach (var expander in Descendants(w).OfType<Expander>()) expander.IsExpanded = true;
+                w.UpdateLayout();
+                // Site to check, then the user's list and the exclusions.
                 var inputs = Descendants(w).OfType<TextBox>().ToArray();
-                inputs[0].Text = "^exact.example\n192.0.2.1"; inputs[1].Text = "exclude.example";
+                if (inputs.Length != 3 || inputs[0].Text != "youtube.com") { w.Close(); throw new InvalidOperationException("Bypass editor must offer a site check and both lists."); }
+                inputs[1].Text = "^exact.example\n192.0.2.1"; inputs[2].Text = "exclude.example";
                 w.UpdateLayout(); Capture(w,"Direct-Lists");
                 Descendants(w).OfType<Button>().Single(b => b.IsDefault).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             }));

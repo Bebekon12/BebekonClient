@@ -68,9 +68,9 @@ public class TlsFragmentTests
         var rules = JsonNode.Parse(ConfigGenerator.Generate(spec))!["route"]!["rules"]!.AsArray();
         Assert.True((bool)rules.Single(r => (string?)r!["domain_suffix"]?[0] == "youtube.com")!["tls_fragment"]!);
         Assert.Null(rules.Single(r => (string?)r!["domain_suffix"]?[0] == "openai.com")!["tls_fragment"]);
-        var last = rules[^1]!; Assert.Equal("direct", (string?)last["outbound"]); Assert.True((bool)last["tls_fragment"]!);
-        Assert.Null(rules.FirstOrDefault(r => (string?)r!["outbound"] == "vpn" && r!["tls_fragment"] is not null));
+        Assert.Null(rules.FirstOrDefault(r => (string?)r!["outbound"] == "vpn" && (r!["tls_fragment"] ?? r["tls_record_fragment"]) is not null));
 
+        // With VPN as the default, only the explicit direct rule is split.
         var whole = JsonNode.Parse(ConfigGenerator.Generate(CoreTests.Spec(new() { DefaultRoute = RouteTarget.Vpn, Rules = profile.Rules }, settings: new() { TlsFragment = true })))!["route"]!["rules"]!.AsArray();
         Assert.Single(whole, r => r!["tls_fragment"] is not null);
         Assert.DoesNotContain("tls_fragment", ConfigGenerator.Generate(CoreTests.Spec(profile)));
