@@ -90,16 +90,77 @@ public partial class RulesView : UserControl
     private RoutingRule? source;
     public RulesView() => InitializeComponent();
     private void RulesMode(object sender, RoutedEventArgs e) { if (DataContext is MainViewModel vm) vm.IsWholePc = false; }
+    /// <summary>Dragging starts only from the ⋮⋮ handle, so clicks on the row, switch and buttons never start it.</summary>
     private void BeginDrag(object sender, MouseButtonEventArgs e)
     {
-        if (DataContext is not MainViewModel { RuleSortIndex: 1 }) { source = null; return; }
-        dragStart = e.GetPosition(this);
-        var original = e.OriginalSource as DependencyObject;
-        while (original is not null) { if (original is System.Windows.Controls.Primitives.ButtonBase) { source = null; return; } if (original is ListBoxItem item) { source = item.DataContext as RoutingRule; return; } original = VisualTreeHelper.GetParent(original); }
         source = null;
+        if (DataContext is not MainViewModel { PriorityView: true }) return;
+        dragStart = e.GetPosition(this);
+        for (var element = e.OriginalSource as DependencyObject; element is not null; element = VisualTreeHelper.GetParent(element))
+        {
+            if (element is FrameworkElement { Tag: "DragHandle" } handle) { source = handle.DataContext as RoutingRule; return; }
+            if (element is ListBoxItem) return;
+        }
     }
-    private void MoveDrag(object sender, System.Windows.Input.MouseEventArgs e) { if (e.LeftButton != MouseButtonState.Pressed || source is null || (e.GetPosition(this) - dragStart).Length < 10) return; var rule = source; source = null; System.Windows.DragDrop.DoDragDrop(this, rule, DragDropEffects.Move); }
-    private void DropRule(object sender, System.Windows.DragEventArgs e) { var element = e.OriginalSource as DependencyObject; while (element is not null && element is not ListBoxItem) element = VisualTreeHelper.GetParent(element); if (element is ListBoxItem { DataContext: RoutingRule target } && e.Data.GetData(typeof(RoutingRule)) is RoutingRule origin && DataContext is MainViewModel { RuleSortIndex: 1 } vm) vm.Reorder(origin, target); }
+    private void MoveDrag(object sender, System.Windows.Input.MouseEventArgs e)
+    {
+        if (e.LeftButton != MouseButtonState.Pressed || source is null || (e.GetPosition(this) - dragStart).Length < 6) return;
+        var rule = source; source = null;
+        if (RulesList.ItemContainerGenerator.ContainerFromItem(rule) is ListBoxItem origin) origin.Tag = "source";
+        try { System.Windows.DragDrop.DoDragDrop(RulesList, rule, DragDropEffects.Move); }
+        finally { ClearDropMarks(); }
+    }
+    private (ListBoxItem Item, RoutingRule Target, bool After)? DropPoint(System.Windows.DragEventArgs e)
+    {
+        var element = e.OriginalSource as DependencyObject;
+        while (element is not null && element is not ListBoxItem) element = VisualTreeHelper.GetParent(element);
+        if (element is not ListBoxItem { DataContext: RoutingRule target } item) return null;
+        return (item, target, e.GetPosition(item).Y > item.ActualHeight / 2);
+    }
+    private void DragOverRule(object sender, System.Windows.DragEventArgs e)
+    {
+        e.Handled = true; e.Effects = DragDropEffects.None;
+        AutoScroll(e);
+        var point = DropPoint(e);
+        if (point is not { } p || e.Data.GetData(typeof(RoutingRule)) is not RoutingRule origin || DataContext is not MainViewModel vm || !vm.CanDrop(origin, p.Target))
+        { ClearDropMarks(keepSource: true); return; }
+        e.Effects = DragDropEffects.Move;
+        var mark = p.After ? "after" : "before";
+        foreach (var item in Containers()) if (!ReferenceEquals(item, p.Item) && item.Tag is "before" or "after") item.Tag = null;
+        if (!Equals(p.Item.Tag, mark) && !Equals(p.Item.Tag, "source")) p.Item.Tag = mark;
+    }
+    private void DragLeaveRule(object sender, System.Windows.DragEventArgs e)
+    {
+        var position = e.GetPosition(RulesList);
+        if (position.X < 0 || position.Y < 0 || position.X > RulesList.ActualWidth || position.Y > RulesList.ActualHeight) ClearDropMarks(keepSource: true);
+    }
+    private void DropRule(object sender, System.Windows.DragEventArgs e)
+    {
+        var point = DropPoint(e);
+        ClearDropMarks();
+        if (point is { } p && e.Data.GetData(typeof(RoutingRule)) is RoutingRule origin && DataContext is MainViewModel vm) vm.Reorder(origin, p.Target, p.After);
+    }
+    /// <summary>Scrolls a long list while the pointer is held near its top or bottom edge.</summary>
+    private void AutoScroll(System.Windows.DragEventArgs e)
+    {
+        if (FindScroll(RulesList) is not { } scroll || Environment.TickCount64 - lastScroll < 90) return;
+        var y = e.GetPosition(RulesList).Y;
+        if (y < 40) { scroll.LineUp(); lastScroll = Environment.TickCount64; }
+        else if (y > RulesList.ActualHeight - 40) { scroll.LineDown(); lastScroll = Environment.TickCount64; }
+    }
+    private long lastScroll;
+    private static ScrollViewer? FindScroll(DependencyObject root)
+    {
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child is ScrollViewer viewer) return viewer;
+            if (FindScroll(child) is { } nested) return nested;
+        }
+        return null;
+    }
+    private IEnumerable<ListBoxItem> Containers() => RulesList.Items.Cast<object>().Select(RulesList.ItemContainerGenerator.ContainerFromItem).OfType<ListBoxItem>();
+    private void ClearDropMarks(bool keepSource = false) { foreach (var item in Containers()) if (!(keepSource && item.Tag is "source")) item.Tag = null; }
 }
 public sealed class SelectionConverter : IMultiValueConverter
 {

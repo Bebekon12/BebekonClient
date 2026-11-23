@@ -658,13 +658,27 @@ internal static class SmokeHarness
         var prior = vm.ActiveProfile.Rules.ToArray();
         var first = new RoutingRule { Name = "First dated rule", Values = ["first.example.com"], CreatedAt = DateTimeOffset.UtcNow.AddMinutes(-1) };
         var newest = new RoutingRule { Name = "Newest dated rule", Values = ["newest.example.com"], CreatedAt = DateTimeOffset.UtcNow };
+        if (vm.RuleSortIndex != 1) throw new InvalidOperationException("Rules must open in priority order.");
+        vm.RuleSortIndex = 0;
         vm.ActiveProfile.Rules.Add(first); vm.ActiveProfile.Rules.Add(newest); vm.RulesChanged();
         if (!ReferenceEquals(vm.VisibleRules[0], newest) || !vm.ActiveProfile.Rules.Take(prior.Length).SequenceEqual(prior)) throw new InvalidOperationException("Newest display must not change rule execution order.");
         var editor = new RuleEditor(newest, vm.Data.Servers); editor.NameField.Text = "Edited newest";
         if (editor.Build().CreatedAt != newest.CreatedAt) throw new InvalidOperationException("Editing must preserve creation time.");
         vm.RuleSortIndex = 1;
-        if (!vm.VisibleRules.SequenceEqual(vm.ActiveProfile.Rules)) throw new InvalidOperationException("Priority view must show execution order.");
-        vm.ActiveProfile.Rules.Remove(first); vm.ActiveProfile.Rules.Remove(newest); vm.RuleSortIndex = 0; vm.RulesChanged();
+        if (!vm.VisibleRules.SequenceEqual(vm.ActiveProfile.Rules.OrderBy(r => r.SystemProtection ? 0 : 1))) throw new InvalidOperationException("Priority view must show execution order.");
+        int At(RoutingRule rule) => vm.ActiveProfile.Rules.IndexOf(rule);
+        if (newest.Priority != vm.VisibleRules.Count || !first.CanMoveDown || newest.CanMoveDown) throw new InvalidOperationException("Priority numbers and arrow availability must follow execution order.");
+        vm.MoveRule(newest, -1);
+        if (At(newest) != At(first) - 1 || newest.Priority != first.Priority - 1) throw new InvalidOperationException("Arrow move must swap neighbours.");
+        vm.Reorder(newest, first, after: true);
+        if (At(newest) != At(first) + 1) throw new InvalidOperationException("Dropping below a rule must place it right after that rule.");
+        var guarded = new RoutingRule { Name = "Protected fixture", Kind = RuleKind.Application, Values = ["fixture.exe"], SystemProtection = true };
+        vm.ActiveProfile.Rules.Add(guarded); vm.RulesChanged();
+        if (!ReferenceEquals(vm.VisibleRules[0], guarded) || guarded.CanMoveDown && vm.VisibleRules[1].SystemProtection == false) throw new InvalidOperationException("Protected rules must form the first group.");
+        var before = vm.ActiveProfile.Rules.ToArray(); vm.Reorder(guarded, newest, after: true);
+        if (!vm.ActiveProfile.Rules.SequenceEqual(before)) throw new InvalidOperationException("A rule must not move across precedence groups.");
+        vm.ActiveProfile.Rules.Remove(guarded); vm.RulesChanged();
+        vm.ActiveProfile.Rules.Remove(first); vm.ActiveProfile.Rules.Remove(newest); vm.RuleSortIndex = 1; vm.RulesChanged();
         report.Add("Newest-first display, independent priority order and preserved creation time on edit passed.");
     }
     private static void CheckRuleEditor(Window dialog, MainViewModel vm)

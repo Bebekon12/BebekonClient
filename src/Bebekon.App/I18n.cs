@@ -24,6 +24,7 @@ public static class I18n
         ("ProfileNameLabel","Профиль","Profile"),
         ("Unmatched","Остальной трафик","Other traffic"),
         ("NetBirdIntegration","Дополнительные клиенты · NetBird","Additional clients · NetBird"),
+        ("DragToReorder","Перетащите, чтобы изменить приоритет","Drag to change priority"),("PriorityNumber","Номер в порядке проверки: меньше — раньше","Position in check order: lower is checked first"),("MoveUp","Выше по приоритету","Move up in priority"),("MoveDown","Ниже по приоритету","Move down in priority"),
         ("AutoPing","Автопинг текущего сервера","Auto-ping current server"),
         ("AutoPingHelp","Обновлять задержку выбранного сервера на главной и внизу боковой панели. При подключении замер идёт через работающий туннель и почти не расходует трафик; без подключения — не чаще раза в 30 секунд.","Keep the selected server latency current on Home and in the sidebar. While connected it measures the running tunnel with negligible traffic; while disconnected at most every 30 seconds."),
         ("AutoPingOff","Выключен","Off"),("AutoPing5","Каждые 5 с","Every 5 s"),("AutoPing10","Каждые 10 с","Every 10 s"),("AutoPing30","Каждые 30 с","Every 30 s"),("AutoPing60","Каждую минуту","Every minute"),

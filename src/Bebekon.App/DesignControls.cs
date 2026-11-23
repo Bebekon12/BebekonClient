@@ -34,6 +34,7 @@ public sealed class IconView : FrameworkElement
             ["Close"] = "M6,6 L18,18 M18,6 L6,18",
             ["Chevron"] = "M9,5 L16,12 L9,19",
             ["Down"] = "M5,9 L12,16 L19,9",
+            ["Up"] = "M5,15 L12,8 L19,15",
             ["Download"] = "M12,3 V15 M7,10 L12,15 L17,10 M4,16 V21 H20 V16",
             ["Upload"] = "M12,16 V3 M7,8 L12,3 L17,8 M4,16 V21 H20 V16",
             ["Edit"] = "M4,16 L16,4 L20,8 L8,20 L3,21 Z M13,7 L17,11",

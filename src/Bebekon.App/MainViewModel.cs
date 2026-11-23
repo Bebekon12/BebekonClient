@@ -118,11 +118,17 @@ public sealed partial class MainViewModel : Observable, IDisposable
     private string serverSearch = "", ruleSearch = "";
     public string ServerSearch { get => serverSearch; set { if (Set(ref serverSearch, value)) RefreshServers(); } }
     public string RuleSearch { get => ruleSearch; set { if (Set(ref ruleSearch, value)) RefreshRules(); } }
-    private int ruleSortIndex;
-    public int RuleSortIndex { get => ruleSortIndex; set { if (Set(ref ruleSortIndex, value)) { RefreshRules(); Notify(nameof(RulesOrderHint)); } } }
-    public string RulesOrderHint => RuleSortIndex == 0 ? T("Сначала новые. Для изменения порядка выберите «По приоритету».", "Newest first. Choose ‘By priority’ to change rule order.") :
-        T("Сначала системная защита, затем обычные правила. Перетащите строки, чтобы изменить порядок внутри группы.",
-            "System protection takes precedence. Drag rows to change the order within each group.");
+    // Priority is the order that decides routing, so it is the default view.
+    private int ruleSortIndex = 1;
+    public int RuleSortIndex { get => ruleSortIndex; set { if (Set(ref ruleSortIndex, value)) { RefreshRules(); Notify(nameof(RulesOrderHint)); Notify(nameof(PriorityView)); } } }
+    public bool PriorityView => RuleSortIndex == 1;
+    public string RulesOrderHint => RuleSortIndex == 0
+        ? T("Сначала новые — это не порядок проверки. Приоритет меняется в режиме «По приоритету».", "Newest first, not check order. Switch to ‘By priority’ to reorder.")
+        : T("Сверху вниз, срабатывает первое подходящее. Порядок — стрелками или за ⋮⋮.",
+            "Top to bottom; the first match wins. Reorder with arrows or ⋮⋮.");
+    public string PriorityHelp => T(
+        "Как работает приоритет\n\nДля каждого соединения Bebekon проверяет правила по номерам: 1, 2, 3… Срабатывает первое подходящее, остальные не проверяются. Если не подошло ни одно, действует маршрут «Остальной трафик».\n\nПример: правило «youtube.com → VPN» стоит выше правила «Google → Напрямую». Тогда YouTube пойдёт через VPN, а остальные сервисы Google — напрямую. Если поменять их местами, YouTube тоже пойдёт напрямую.\n\nПравила с системной защитой WFP (значок щита) всегда проверяются первыми, поэтому они стоят отдельной группой вверху. Переместить правило можно только внутри его группы. Выключенные правила пропускаются, но сохраняют своё место.",
+        "How priority works\n\nFor every connection Bebekon checks rules by number: 1, 2, 3… The first match wins and the rest are skipped. If nothing matches, the ‘Other traffic’ route applies.\n\nExample: ‘youtube.com → VPN’ above ‘Google → Direct’ sends YouTube through VPN and other Google services directly. Swap them and YouTube goes direct too.\n\nRules with WFP system protection (shield icon) are always checked first, so they form a separate group at the top. A rule moves only within its group. Disabled rules are skipped but keep their place.");
     private int sortIndex;
     public int SortIndex { get => sortIndex; set { if (Set(ref sortIndex, value)) RefreshServers(); } }
     public bool ScanOnOpen
@@ -271,6 +277,8 @@ public sealed partial class MainViewModel : Observable, IDisposable
     public ICommand AddRule { get; }
     public ICommand EditRule { get; }
     public ICommand DeleteRule { get; }
+    public ICommand MoveRuleUp { get; }
+    public ICommand MoveRuleDown { get; }
     public ICommand AddPreset { get; }
     public ICommand AddApplication { get; }
     public ICommand AddProfile { get; }
@@ -381,6 +389,8 @@ public sealed partial class MainViewModel : Observable, IDisposable
         DeleteSubscription = Async(async p => { var sub = (Subscription)p!; if (!Dialogs.Confirm(T("Удалить подписку?", "Delete subscription?"), sub.Name)) return; if (Connected && SelectedServer?.SubscriptionId == sub.Id) await DisconnectAsync(); Data.Subscriptions.Remove(sub); foreach (var s in Data.Servers.Where(s => s.SubscriptionId == sub.Id).ToArray()) Data.Servers.Remove(s); if (!Data.Servers.Contains(SelectedServer!)) SelectedServer = Data.Servers.FirstOrDefault(); Save(); RefreshServers(); Notify(nameof(NoSubscriptions)); });
         AddRule = new Command(_ => { var rule = Dialogs.Rule(null, Data.Servers, draft => Dialogs.RouteCheck(this, draft), NetBirdEnabled); if (rule is not null) { ActiveProfile.Rules.Add(rule); RulesChanged(); } });
         EditRule = new Command(p => { var rule = (RoutingRule)p!; var edit = Dialogs.Rule(rule, Data.Servers, draft => Dialogs.RouteCheck(this, draft), NetBirdEnabled); if (edit is null) return; var i = ActiveProfile.Rules.IndexOf(rule); rule.PropertyChanged -= OnRuleChanged; ActiveProfile.Rules[i] = edit; RulesChanged(); });
+        MoveRuleUp = new Command(p => { if (p is RoutingRule rule) MoveRule(rule, -1); });
+        MoveRuleDown = new Command(p => { if (p is RoutingRule rule) MoveRule(rule, 1); });
         DeleteRule = new Command(p => { var rule = (RoutingRule)p!; rule.PropertyChanged -= OnRuleChanged; ActiveProfile.Rules.Remove(rule); RulesChanged(); });
         AddPreset = new Command(_ => { var preset = Dialogs.Preset(Presets); if (preset is null) return; var count = PresetCatalog.Apply(preset, ActiveProfile); RulesChanged(); Banner = count == 0 ? T("Этот набор уже добавлен.", "This preset has already been added.") : T($"Добавлено правил: {count}.", $"Added {count} rules."); });
         AddApplication = Async(async _ => { var app = await Dialogs.ApplicationAsync(); if (app is null) return; ActiveProfile.Rules.Add(new() { CreatedAt = DateTimeOffset.UtcNow, Kind = RuleKind.Application, Name = app.Name, Values = [app.Path] }); RulesChanged(); });
@@ -583,12 +593,53 @@ public sealed partial class MainViewModel : Observable, IDisposable
         // Auto mode follows refreshed or hidden subscriptions; latency changes alone don't reconnect.
         if (Settings.AutoServer && desiredConnected && spec?.AutoServers is { } running && AutoKey(running) != AutoKey(DisplayServers)) QueueApply();
     }
-    private void RefreshRules() { VisibleRules.Clear(); var rules = ActiveProfile.Rules.Where(r => r.Name.Contains(RuleSearch, StringComparison.OrdinalIgnoreCase) || r.Description.Contains(RuleSearch, StringComparison.OrdinalIgnoreCase)); if (RuleSortIndex == 0) rules = rules.OrderByDescending(r => r.CreatedAt); foreach (var r in rules) VisibleRules.Add(r); Notify(nameof(RuleCount)); Notify(nameof(NoRules)); }
+    /// <summary>System-protected rules are evaluated before ordinary ones; user order applies within each group.</summary>
+    private static int RuleGroup(RoutingRule rule) => rule.SystemProtection ? 0 : 1;
+    private List<RoutingRule> PriorityOrder() => ActiveProfile.Rules.Select((rule, index) => (rule, index)).OrderBy(x => RuleGroup(x.rule)).ThenBy(x => x.index).Select(x => x.rule).ToList();
+    private void RefreshRules()
+    {
+        var ordered = PriorityOrder();
+        for (var i = 0; i < ordered.Count; i++)
+        {
+            var rule = ordered[i];
+            rule.Priority = i + 1;
+            rule.CanMoveUp = i > 0 && RuleGroup(ordered[i - 1]) == RuleGroup(rule);
+            rule.CanMoveDown = i + 1 < ordered.Count && RuleGroup(ordered[i + 1]) == RuleGroup(rule);
+        }
+        var rules = (RuleSortIndex == 0 ? ActiveProfile.Rules.OrderByDescending(r => r.CreatedAt) : ordered.AsEnumerable())
+            .Where(r => r.Name.Contains(RuleSearch, StringComparison.OrdinalIgnoreCase) || r.Description.Contains(RuleSearch, StringComparison.OrdinalIgnoreCase)).ToList();
+        // Move rows in place instead of rebuilding the list, so a reorder keeps the scroll position.
+        for (var i = 0; i < rules.Count; i++)
+        {
+            if (i < VisibleRules.Count && ReferenceEquals(VisibleRules[i], rules[i])) continue;
+            var existing = VisibleRules.IndexOf(rules[i]);
+            if (existing >= 0) VisibleRules.Move(existing, i); else VisibleRules.Insert(i, rules[i]);
+        }
+        while (VisibleRules.Count > rules.Count) VisibleRules.RemoveAt(VisibleRules.Count - 1);
+        Notify(nameof(RuleCount)); Notify(nameof(NoRules));
+    }
+    /// <summary>Moves a rule one step within its precedence group.</summary>
+    internal void MoveRule(RoutingRule rule, int direction)
+    {
+        var ordered = PriorityOrder(); var i = ordered.IndexOf(rule); var j = i + Math.Sign(direction);
+        if (i < 0 || j < 0 || j >= ordered.Count || RuleGroup(ordered[j]) != RuleGroup(rule)) return;
+        ActiveProfile.Rules.Move(ActiveProfile.Rules.IndexOf(rule), ActiveProfile.Rules.IndexOf(ordered[j])); RulesChanged();
+    }
+    internal bool CanDrop(RoutingRule source, RoutingRule target) => PriorityView && !ReferenceEquals(source, target) && RuleGroup(source) == RuleGroup(target);
     private void AttachProfile() { foreach (var r in ActiveProfile.Rules) { r.PropertyChanged -= OnRuleChanged; r.PropertyChanged += OnRuleChanged; } }
     private void DetachProfile(Profile p) { foreach (var r in p.Rules) r.PropertyChanged -= OnRuleChanged; }
     private void OnRuleChanged(object? sender, PropertyChangedEventArgs e) { if (e.PropertyName is nameof(RoutingRule.Target) or nameof(RoutingRule.Enabled)) { Notify(nameof(ProtectedRuleCount)); Save(); QueueApply(); } }
     internal void RulesChanged() { AttachProfile(); RefreshRules(); Notify(nameof(ProtectedRuleCount)); Save(); QueueApply(); }
-    public void Reorder(RoutingRule source, RoutingRule target) { var a = ActiveProfile.Rules.IndexOf(source); var b = ActiveProfile.Rules.IndexOf(target); if (a < 0 || b < 0 || a == b) return; ActiveProfile.Rules.Move(a, b); RulesChanged(); }
+    /// <summary>Places <paramref name="source"/> directly before or after <paramref name="target"/> within the same group.</summary>
+    public void Reorder(RoutingRule source, RoutingRule target, bool after = false)
+    {
+        if (!CanDrop(source, target) || !ActiveProfile.Rules.Contains(source) || !ActiveProfile.Rules.Contains(target)) return;
+        var from = ActiveProfile.Rules.IndexOf(source);
+        var to = ActiveProfile.Rules.IndexOf(target) + (after ? 1 : 0);
+        if (to > from) to--;
+        if (to == from) return;
+        ActiveProfile.Rules.Move(from, to); RulesChanged();
+    }
     private void QueueApply()
     {
         configurationVersion++;

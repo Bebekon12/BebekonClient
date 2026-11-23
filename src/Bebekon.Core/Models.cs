@@ -103,6 +103,12 @@ public sealed class RoutingRule : Observable
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public DateTimeOffset? CreatedAt { get; set; }
     public string Name { get; set; } = "";
+    private int priority;
+    private bool canMoveUp, canMoveDown;
+    /// <summary>1-based position in the order the core checks rules; 0 when not shown.</summary>
+    [JsonIgnore] public int Priority { get => priority; set => Set(ref priority, value); }
+    [JsonIgnore] public bool CanMoveUp { get => canMoveUp; set => Set(ref canMoveUp, value); }
+    [JsonIgnore] public bool CanMoveDown { get => canMoveDown; set => Set(ref canMoveDown, value); }
     public RuleKind Kind { get; set; }
     public List<string> Values { get; set; } = [];
     public string? ServerId { get; set; }

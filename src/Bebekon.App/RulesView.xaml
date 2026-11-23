@@ -19,48 +19,74 @@
     <StackPanel Grid.Column="4"><TextBlock Text="{DynamicResource Unmatched}" Style="{StaticResource Eyebrow}" Margin="3,0,0,2"/><ComboBox ItemsSource="{Binding RouteChoices}" DisplayMemberPath="Label" SelectedValuePath="Target" SelectedValue="{Binding DefaultDirection}" AutomationProperties.Name="{DynamicResource DefaultDirection}"/></StackPanel>
    </Grid>
   </StackPanel>
-  <StackPanel Grid.Row="4" Margin="0,8,0,6"><Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="168"/></Grid.ColumnDefinitions><TextBox Tag="{DynamicResource SearchRules}" Text="{Binding RuleSearch, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource SearchBox}" Margin="0,0,8,0"/><ComboBox Grid.Column="1" SelectedIndex="{Binding RuleSortIndex}"><ComboBoxItem Content="{DynamicResource NewestFirst}"/><ComboBoxItem Content="{DynamicResource ByPriority}"/></ComboBox></Grid><TextBlock Text="{Binding RulesOrderHint}" Style="{StaticResource Subtitle}" FontSize="11" Margin="2,6,0,0" TextWrapping="Wrap"/></StackPanel>
+  <StackPanel Grid.Row="4" Margin="0,8,0,6"><Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="168"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBox Tag="{DynamicResource SearchRules}" Text="{Binding RuleSearch, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource SearchBox}" Margin="0,0,8,0"/><ComboBox Grid.Column="1" SelectedIndex="{Binding RuleSortIndex}" AutomationProperties.Name="{DynamicResource ByPriority}"><ComboBoxItem Content="{DynamicResource NewestFirst}"/><ComboBoxItem Content="{DynamicResource ByPriority}"/></ComboBox>
+    <Border x:Name="PriorityInfo" Grid.Column="2" Width="34" Height="34" Margin="6,0,0,0" CornerRadius="10" Background="{DynamicResource CardHover}" Focusable="True" AutomationProperties.Name="{Binding PriorityHelp}" ToolTipService.InitialShowDelay="100" ToolTipService.ShowDuration="60000" ToolTipService.Placement="Bottom">
+     <Border.ToolTip><ToolTip MaxWidth="420"><TextBlock Text="{Binding PriorityHelp}" TextWrapping="Wrap" LineHeight="18"/></ToolTip></Border.ToolTip>
+     <local:IconView Icon="Info" Width="17" Height="17" Foreground="{DynamicResource Accent}"/>
+    </Border></Grid><TextBlock Text="{Binding RulesOrderHint}" Style="{StaticResource Subtitle}" FontSize="11" Margin="2,6,0,0" TextWrapping="Wrap"/></StackPanel>
   <ListBox x:Name="RulesList" Grid.Row="5" ItemsSource="{Binding VisibleRules}" AllowDrop="True"
-      PreviewMouseLeftButtonDown="BeginDrag" PreviewMouseMove="MoveDrag" Drop="DropRule">
+      PreviewMouseLeftButtonDown="BeginDrag" PreviewMouseMove="MoveDrag" DragOver="DragOverRule" DragLeave="DragLeaveRule" Drop="DropRule">
    <ListBox.ItemContainerStyle>
     <Style TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}"><Setter Property="Margin" Value="0"/></Style>
    </ListBox.ItemContainerStyle>
    <ListBox.ItemTemplate>
     <DataTemplate>
-     <Border x:Name="RuleRow" BorderBrush="{DynamicResource Border}" BorderThickness="0,0,0,1" Padding="6,11" MinHeight="64">
+     <Grid>
+     <Border x:Name="RuleRow" BorderBrush="{DynamicResource Border}" BorderThickness="0,0,0,1" Padding="2,11,6,11" MinHeight="64">
       <Grid>
        <Grid.ColumnDefinitions>
-        <ColumnDefinition Width="14"/><ColumnDefinition Width="34"/><ColumnDefinition/>
-        <ColumnDefinition Width="110"/><ColumnDefinition Width="123"/><ColumnDefinition Width="32"/><ColumnDefinition Width="32"/>
+        <ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="34"/><ColumnDefinition/>
+        <ColumnDefinition Width="110"/><ColumnDefinition Width="123"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="32"/><ColumnDefinition Width="32"/>
        </Grid.ColumnDefinitions>
-       <local:IconView Icon="Grip" Width="12" Height="18" Foreground="{DynamicResource Muted}" Opacity="0.45" VerticalAlignment="Center"/>
-       <Border Grid.Column="1" Style="{StaticResource IconBadge}" Width="32" Height="32" VerticalAlignment="Center">
+       <Border x:Name="DragHandle" Tag="DragHandle" Width="24" Margin="0,-4,4,-4" CornerRadius="7" Cursor="SizeAll" ToolTip="{DynamicResource DragToReorder}" Visibility="{Binding DataContext.PriorityView, RelativeSource={RelativeSource AncestorType=UserControl}, Converter={StaticResource BoolVisibility}}">
+        <Border.Style><Style TargetType="Border"><Setter Property="Background" Value="Transparent"/><Style.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter Property="Background" Value="{DynamicResource CardHover}"/></Trigger></Style.Triggers></Style></Border.Style>
+        <local:IconView Icon="Grip" Width="16" Height="22" Foreground="{DynamicResource Muted}" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+       </Border>
+       <Border Grid.Column="1" MinWidth="26" Height="22" Margin="0,0,8,0" Padding="6,0" CornerRadius="11" Background="{DynamicResource CardHover}" VerticalAlignment="Center" ToolTip="{DynamicResource PriorityNumber}" Visibility="{Binding DataContext.PriorityView, RelativeSource={RelativeSource AncestorType=UserControl}, Converter={StaticResource BoolVisibility}}">
+        <TextBlock Text="{Binding Priority}" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource Muted}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+       </Border>
+       <Border Grid.Column="2" Style="{StaticResource IconBadge}" Width="32" Height="32" VerticalAlignment="Center">
         <local:IconView Icon="{Binding Kind}" Width="17" Height="17" Foreground="{DynamicResource Accent}"/>
        </Border>
-       <StackPanel Grid.Column="2" Margin="11,0,10,0" VerticalAlignment="Center">
+       <StackPanel Grid.Column="3" Margin="11,0,10,0" VerticalAlignment="Center">
         <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="14" TextTrimming="CharacterEllipsis"/>
         <TextBlock Text="{Binding Description}" Style="{StaticResource Subtitle}" FontSize="12" TextTrimming="CharacterEllipsis" Margin="0,3,0,0"/>
        </StackPanel>
-       <Border x:Name="RouteBadge" Grid.Column="3" Background="{DynamicResource CardHover}" CornerRadius="13" Padding="9,5" VerticalAlignment="Center" HorizontalAlignment="Center">
+       <Border x:Name="RouteBadge" Grid.Column="4" Background="{DynamicResource CardHover}" CornerRadius="13" Padding="9,5" VerticalAlignment="Center" HorizontalAlignment="Center">
         <StackPanel Orientation="Horizontal">
          <local:IconView Icon="Shield" Width="12" Height="12" Margin="0,0,4,0" ToolTip="{DynamicResource WfpScopeHelp}"
               Visibility="{Binding SystemProtection, Converter={StaticResource BoolVisibility}}"/>
          <TextBlock x:Name="RouteLabel" Text="{Binding RouteLabel}" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource Muted}"/>
         </StackPanel>
        </Border>
-       <StackPanel Grid.Column="4" Orientation="Horizontal" VerticalAlignment="Center">
+       <StackPanel Grid.Column="5" Orientation="Horizontal" VerticalAlignment="Center">
         <CheckBox IsChecked="{Binding Enabled}" Style="{StaticResource Switch}" ToolTip="{DynamicResource RuleEnabled}" AutomationProperties.Name="{Binding Name, StringFormat=Правило {0}}"/>
         <TextBlock x:Name="Activity" Text="{DynamicResource RuleOn}" Style="{StaticResource Subtitle}" FontSize="11" VerticalAlignment="Center" Margin="5,0,0,0"/>
        </StackPanel>
-       <Button Grid.Column="5" Command="{Binding DataContext.EditRule, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" Style="{StaticResource QuietIconButton}" ToolTip="{DynamicResource Edit}">
+       <StackPanel Grid.Column="6" Width="28" Margin="0,0,4,0" VerticalAlignment="Center" Visibility="{Binding DataContext.PriorityView, RelativeSource={RelativeSource AncestorType=UserControl}, Converter={StaticResource BoolVisibility}}">
+        <Button Command="{Binding DataContext.MoveRuleUp, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" IsEnabled="{Binding CanMoveUp}" Style="{StaticResource QuietIconButton}" Width="28" Height="21" MinHeight="21" Padding="0" ToolTip="{DynamicResource MoveUp}" AutomationProperties.Name="{DynamicResource MoveUp}">
+         <local:IconView Icon="Up" Width="13" Height="13"/>
+        </Button>
+        <Button Command="{Binding DataContext.MoveRuleDown, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" IsEnabled="{Binding CanMoveDown}" Style="{StaticResource QuietIconButton}" Width="28" Height="21" MinHeight="21" Padding="0" ToolTip="{DynamicResource MoveDown}" AutomationProperties.Name="{DynamicResource MoveDown}">
+         <local:IconView Icon="Down" Width="13" Height="13"/>
+        </Button>
+       </StackPanel>
+       <Button Grid.Column="7" Command="{Binding DataContext.EditRule, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" Style="{StaticResource QuietIconButton}" ToolTip="{DynamicResource Edit}">
         <local:IconView Icon="Edit" Width="15" Height="15"/>
        </Button>
-       <Button Grid.Column="6" Command="{Binding DataContext.DeleteRule, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" Style="{StaticResource QuietIconButton}" ToolTip="{DynamicResource Delete}">
+       <Button Grid.Column="8" Command="{Binding DataContext.DeleteRule, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" Style="{StaticResource QuietIconButton}" ToolTip="{DynamicResource Delete}">
         <local:IconView Icon="Trash" Width="15" Height="15"/>
        </Button>
       </Grid>
      </Border>
+     <!-- Insertion line while dragging: set by RulesView through ListBoxItem.Tag. -->
+     <Border x:Name="DropBefore" Height="3" CornerRadius="1.5" Background="{DynamicResource Accent}" VerticalAlignment="Top" Margin="0,-1,0,0" Visibility="Collapsed" IsHitTestVisible="False"/>
+     <Border x:Name="DropAfter" Height="3" CornerRadius="1.5" Background="{DynamicResource Accent}" VerticalAlignment="Bottom" Margin="0,0,0,-1" Visibility="Collapsed" IsHitTestVisible="False"/>
+     </Grid>
      <DataTemplate.Triggers>
+      <DataTrigger Binding="{Binding Tag, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="before"><Setter TargetName="DropBefore" Property="Visibility" Value="Visible"/></DataTrigger>
+      <DataTrigger Binding="{Binding Tag, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="after"><Setter TargetName="DropAfter" Property="Visibility" Value="Visible"/></DataTrigger>
+      <DataTrigger Binding="{Binding Tag, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="source"><Setter TargetName="RuleRow" Property="Opacity" Value="0.45"/></DataTrigger>
       <DataTrigger Binding="{Binding Target}" Value="Vpn"><Setter TargetName="RouteLabel" Property="Foreground" Value="{DynamicResource Accent}"/><Setter TargetName="RouteBadge" Property="Background" Value="{DynamicResource AccentSoft}"/></DataTrigger>
       <DataTrigger Binding="{Binding Target}" Value="NetBird"><Setter TargetName="RouteLabel" Property="Foreground" Value="#BEA7FF"/><Setter TargetName="RouteBadge" Property="Background" Value="#35274F"/></DataTrigger>
       <DataTrigger Binding="{Binding Target}" Value="Block"><Setter TargetName="RouteLabel" Property="Foreground" Value="{DynamicResource Danger}"/><Setter TargetName="RouteBadge" Property="Background" Value="#44252E"/></DataTrigger>
