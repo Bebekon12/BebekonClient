@@ -282,6 +282,11 @@ public sealed class Settings
     public bool MapLocation { get; set; } = true;
     public string ObhodFolder { get; set; } = "";
     public string ObhodProfile { get; set; } = "";
+    /// <summary>Run the imported zapret profile through the helper while Bebekon runs.</summary>
+    public bool ZapretEnabled { get; set; }
+    public string ZapretProfile { get; set; } = "general.bat";
+    /// <summary>Sites the automatic profile search must open directly.</summary>
+    public string ZapretSites { get; set; } = "youtube.com, i.ytimg.com, discord.com";
     public bool ScanOnOpen { get; set; }
     /// <summary>sing-box urltest across the visible servers instead of the selected one.</summary>
     public bool AutoServer { get; set; }

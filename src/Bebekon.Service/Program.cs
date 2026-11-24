@@ -22,6 +22,23 @@ internal static class Program
             KillSwitch.ClearPersistent();
             return;
         }
+        if (args is ["--import-zapret", var source])
+        {
+            // Elevated by the app through UAC: an administrator copies zapret into protected storage once.
+            var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "BebekonVPN");
+            try
+            {
+                ProtectedServiceStorage.Validate(root);
+                if (!Directory.Exists(root)) throw new UserError("Служба Bebekon ещё не запускалась.");
+                ZapretRunner.Import(root, source);
+            }
+            catch (Exception e) when (e is UserError or IOException or UnauthorizedAccessException)
+            {
+                File.WriteAllText(Path.Combine(Path.GetTempPath(), "bebekon-zapret-import.txt"), e is UserError ? e.Message : "Не удалось скопировать папку zapret.");
+                Environment.ExitCode = 1;
+            }
+            return;
+        }
         if (args is ["--test-wfp"])
         {
             using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
@@ -102,6 +119,7 @@ internal sealed class VpnService : ServiceBase
     private CoreSession? core;
     private KillSwitch? killSwitch;
     private readonly DestinationPolicy destinations;
+    private readonly ZapretRunner zapret;
     private CoreTraffic? traffic;
     private ConnectSpec? last;
     private volatile ConnectionState state;
@@ -135,10 +153,11 @@ internal sealed class VpnService : ServiceBase
         }
         destinations = new(root);
         log = new(root, "service"); coreLog = new(root, "core");
+        zapret = new(root, log);
     }
     protected override void OnStart(string[] args) { _ = ServeAsync(lifetime.Token); _ = IdleStopAsync(lifetime.Token); log.Write("Service started."); }
     public void RunConsole() { OnStart([]); Console.WriteLine("Bebekon helper; Ctrl+C to stop."); using var done = new ManualResetEventSlim(); Console.CancelKeyPress += (_, e) => { e.Cancel = true; done.Set(); }; done.Wait(); OnStop(); }
-    protected override void OnStop() { lifetime.Cancel(); gate.Wait(); try { StopCore(); } finally { gate.Release(); } log.Write("Service stopped."); }
+    protected override void OnStop() { lifetime.Cancel(); gate.Wait(); try { StopCore(); zapret.Stop(); } finally { gate.Release(); } log.Write("Service stopped."); }
     protected override void OnShutdown() => OnStop();
     private ServiceStatus Status()
     {
@@ -197,6 +216,7 @@ internal sealed class VpnService : ServiceBase
                     WfpTestResult[]? test = null;
                     WfpBlockEvent[]? blockEvents = null;
                     RecentDestination[]? recent = null;
+                    ZapretStatus? zapretStatus = null;
                     switch (request.Operation)
                     {
                         case "GetStatus": break;
@@ -229,6 +249,15 @@ internal sealed class VpnService : ServiceBase
                             test = await KillSwitch.TestInstalledRuleAsync(request.TestRule ?? throw new UserError("Выберите защищённое правило."), timeout.Token);
                             break;
                         case "ProtectionEvents": blockEvents = KillSwitch.RecentPolicyBlocks(killSwitch); break;
+                        case "ZapretStatus": zapretStatus = zapret.Status(); break;
+                        case "ZapretStart":
+                            if (console) throw new UserError("Для zapret нужна установленная служба.");
+                            await zapret.StartAsync(request.Zapret ?? throw new UserError("Выберите профиль zapret."), (request.ZapretHosts ?? []).Concat(last is null ? [] : VpnHosts(last)), timeout.Token);
+                            zapretStatus = zapret.Status(); break;
+                        case "ZapretStop": zapret.Stop(); zapretStatus = zapret.Status(); break;
+                        case "ZapretReadList":
+                            result = new(true, Status(), string.Join("\n", zapret.ReadList(request.Zapret ?? ""))); await PipeProtocol.WriteAsync(pipe, result, timeout.Token); continue;
+                        case "ZapretSaveList": zapret.SaveList(request.Zapret ?? "", request.ZapretList ?? []); zapretStatus = zapret.Status(); break;
                         case "RecentDestinations": recent = state == ConnectionState.Connected ? traffic?.Recent.Snapshot() ?? [] : []; break;
                         case "ApplyStoredProtection":
                             await ApplyStoredProtectionAsync(request.Protection ?? throw new UserError("Не указана политика WFP."), timeout.Token);
@@ -240,14 +269,15 @@ internal sealed class VpnService : ServiceBase
                         case "GetLogs": var lines = Directory.GetFiles(root, "*.log").SelectMany(File.ReadLines).TakeLast(120); result = new(true, Status(), string.Join(Environment.NewLine, lines)); await PipeProtocol.WriteAsync(pipe, result, timeout.Token); continue;
                         default: throw new UserError("Неизвестная команда службы.");
                     }
-                    result = new(true, Status(), WfpTest: test, BlockEvents: blockEvents, Recent: recent);
+                    result = new(true, Status(), WfpTest: test, BlockEvents: blockEvents, Recent: recent, Zapret: zapretStatus);
                 }
                 catch (Exception e)
                 {
                     var message = e is UserError ? e.Message : "Не удалось выполнить команду службы. Проверьте параметры подключения.";
                     if (request.Operation is ("StartCore" or "RestartCore") && (state != ConnectionState.Connected || core?.Running != true))
                     { StopCore(keepBlocking: true); state = ConnectionState.Error; error = message; }
-                    log.Write("Command failed: " + request.Operation + "; " + e.GetType().Name); result = new(false, Status(), message);
+                    log.Write("Command failed: " + request.Operation + "; " + e.GetType().Name);
+                    result = new(false, Status(), message, Zapret: request.Operation.StartsWith("Zapret", StringComparison.Ordinal) ? zapret.Status() : null);
                 }
                 finally { gate.Release(); }
                 await PipeProtocol.WriteAsync(pipe, result, timeout.Token);
@@ -304,6 +334,9 @@ internal sealed class VpnService : ServiceBase
             KillSwitch.ApplyDestinationFilters(spec.Guard.FilterNetworks, true);
         }
         traffic.Start(); last = spec; connectedAt = DateTimeOffset.UtcNow; state = ConnectionState.Connected;
+        // zapret must never touch the tunnel's own connections to the VPN servers.
+        try { if (await zapret.EnsureExcludedAsync(VpnHosts(spec), ct)) log.Write("zapret exclusions updated for VPN servers."); }
+        catch (UserError) { log.Write("zapret could not be restarted with VPN exclusions."); }
     }
     private async Task OnCoreExitAsync(CoreSession exited, string path)
     {
@@ -324,6 +357,10 @@ internal sealed class VpnService : ServiceBase
         catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
         catch (Exception e) { log.Write("Unexpected exit cleanup failed: " + e.GetType().Name); }
     }
+    /// <summary>Every address the tunnel itself dials: selected, rule, auto and TrustTunnel endpoints.</summary>
+    private static IEnumerable<string> VpnHosts(ConnectSpec spec) =>
+        new[] { spec.Server }.Concat(spec.RuleServers ?? []).Concat(spec.AutoServers ?? [])
+            .SelectMany(s => new[] { s.Host }.Concat((s.TrustTunnel?.Addresses ?? []).Select(a => a.Contains("]:") ? a[1..a.IndexOf(']')] : a.Contains(':') && a.Count(c => c == ':') == 1 ? a[..a.IndexOf(':')] : a)));
     private void ApplyProtection(ConnectSpec spec, bool persistent, bool tunnelReady)
     {
         var transports = KillSwitch.TrustedTransports(Path.Combine(AppContext.BaseDirectory, "core"), spec.UseNetBirdIntegration);
@@ -378,7 +415,7 @@ internal sealed class VpnService : ServiceBase
     }
     private async Task IdleStopAsync(CancellationToken ct)
     {
-        try { while (!ct.IsCancellationRequested) { await Task.Delay(TimeSpan.FromSeconds(15), ct); if (!console && killSwitch is null && state != ConnectionState.Connected && state != ConnectionState.Connecting && DateTimeOffset.UtcNow - lastCommand > TimeSpan.FromSeconds(45)) { Stop(); return; } } }
+        try { while (!ct.IsCancellationRequested) { await Task.Delay(TimeSpan.FromSeconds(15), ct); if (!console && killSwitch is null && !zapret.Running && state != ConnectionState.Connected && state != ConnectionState.Connecting && DateTimeOffset.UtcNow - lastCommand > TimeSpan.FromSeconds(45)) { Stop(); return; } } }
         catch (OperationCanceledException) { }
     }
 }

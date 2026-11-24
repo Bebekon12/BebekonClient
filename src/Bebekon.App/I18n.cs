@@ -9,6 +9,7 @@ public static class I18n
         ("CorporateConnection","Корпоративная сеть · NetBird","Corporate network · NetBird"),
         ("CorporateAddress","Адрес в рабочей сети","Work network address"),
         ("ScanMethod","Метод проверки","Probe method"),("ScanServers","Проверить список","Check list"),("ScanStop","Остановить","Stop"),
+        ("ZapretTitle","Zapret · обход блокировок без VPN","Zapret · bypass blocks without VPN"),
         ("ObhodDetail","Внешние профили TCP и UDP/QUIC, списки сайтов, сетей и исключений.","External TCP and UDP/QUIC profiles, sites, networks and exclusions."),
         ("ConfigureObhod","Настроить","Configure"),
         ("DestinationGuardTitle","Блокировать выбранные адреса без VPN","Block selected destinations outside VPN"),

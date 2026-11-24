@@ -427,7 +427,7 @@ public sealed partial class MainViewModel : Observable, IDisposable
         _ = RefreshMapOriginAsync();
         WarnSubscription();
         _ = AutoRefreshAsync();
-        if (liveEnvironment) { _ = MonitorNetBirdAsync(); RefreshConnections.Execute(null); _ = AutoPingAsync(); _ = AutoConnectNetBirdAsync(); _ = AutoRefreshDomainSetsAsync(); }
+        if (liveEnvironment) { _ = MonitorNetBirdAsync(); RefreshConnections.Execute(null); _ = AutoPingAsync(); _ = AutoConnectNetBirdAsync(); _ = AutoRefreshDomainSetsAsync(); _ = StartZapretAtLaunchAsync(); }
         if (Settings.AutoConnect && !Connected && SelectedServer is not null) await AutoConnectAsync(systemStartup);
     }
     private readonly Dictionary<string, DateTimeOffset> refreshAttempts = [];

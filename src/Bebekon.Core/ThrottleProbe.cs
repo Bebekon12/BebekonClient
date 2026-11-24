@@ -39,6 +39,31 @@ public static class ThrottleProbe
         return [.. results];
     }
 
+    /// <summary>
+    /// Opens each site once directly from the uplink without any splitting by Bebekon. Used with zapret
+    /// running: its WinDivert driver works on the network adapter, so these connections pass through it.
+    /// Stops at the first site that fails.
+    /// </summary>
+    public static async Task<(bool Works, long? MedianMs, string? Failed)> TestSitesAsync(string singBox, IReadOnlyList<string> hosts, IPAddress? uplink, CancellationToken ct)
+    {
+        var root = Path.Combine(Paths.UserRoot, "runtime", "zapret-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var times = new List<long>();
+            foreach (var raw in hosts)
+            {
+                var host = RuleValidation.SiteHost(raw.Trim()).ToLowerInvariant();
+                var result = await TestOneAsync(singBox, host, uplink, null, 1, root, ct);
+                if (!result.Works) return (false, null, host);
+                times.Add(result.MedianMs ?? 0);
+            }
+            times.Sort();
+            return (true, times.Count == 0 ? null : times[times.Count / 2], null);
+        }
+        finally { try { Directory.Delete(root, true); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
+    }
+
     /// <summary>The fastest method that always worked, or null when the site opens without splitting (or never).</summary>
     public static FragmentMethod? Recommend(IReadOnlyList<ThrottleResult> results)
     {

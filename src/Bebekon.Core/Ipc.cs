@@ -8,11 +8,12 @@ namespace Bebekon.Core;
 /// <param name="KeepBlocking">StopCore for a reconnect: leak protection stays on until the next StartCore.</param>
 public sealed record StoredProtectionSpec(Profile Profile, bool Global, string? NetBirdPeer, bool NetBirdEnabled = true);
 public sealed record ServiceRequest(string Operation, ConnectSpec? Spec = null, bool KeepBlocking = false,
-    StoredProtectionSpec? Protection = null, RoutingRule? TestRule = null, string[]? GuardTargets = null, bool EnableGuard = true);
+    StoredProtectionSpec? Protection = null, RoutingRule? TestRule = null, string[]? GuardTargets = null, bool EnableGuard = true,
+    string? Zapret = null, string[]? ZapretHosts = null, string[]? ZapretList = null);
 public sealed record ProtectionStatus(int Filters, int PersistentFilters, string? Error = null, string[]? GuardTargets = null, int DestinationFilters = 0, bool DestinationGuardEnabled = false);
 public sealed record ServiceStatus(ConnectionState State, string? Error = null, DateTimeOffset? ConnectedAt = null, int? CorePid = null,
     TrafficSnapshot? Traffic = null, ProtectionStatus? Protection = null, string? NetBirdInterface = null, bool HasHealthyFallback = false);
-public sealed record ServiceResponse(bool Ok, ServiceStatus Status, string? Message = null, WfpTestResult[]? WfpTest = null, WfpBlockEvent[]? BlockEvents = null, RecentDestination[]? Recent = null);
+public sealed record ServiceResponse(bool Ok, ServiceStatus Status, string? Message = null, WfpTestResult[]? WfpTest = null, WfpBlockEvent[]? BlockEvents = null, RecentDestination[]? Recent = null, ZapretStatus? Zapret = null);
 public static class PipeProtocol
 {
     public const string ServiceName = "BebekonVPN";

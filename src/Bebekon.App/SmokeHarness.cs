@@ -255,6 +255,7 @@ internal static class SmokeHarness
             dialogName = "AddToGroup"; Dialogs.AddToGroup(["www.youtube.com"], vm.SuggestRelated(["git.hai.example"]));
             dialogName = "ImportLink"; Dialogs.DomainSetImport(DomainSets.ToLink(fixtureSet));
             dialogName = "PickFromRules"; Dialogs.PickFromRules(keywords: true);
+            dialogName = "Zapret"; Dialogs.ZapretSettings(vm);
             dialogName = "DirectPolicy"; Dialogs.DirectPolicyEditor(new() { Include = ["example.org"] }, "");
             vm.SetRecentDomainsForTest([]);
             vm.DeleteDomainSet(fixtureSet);

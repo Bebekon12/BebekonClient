@@ -11,6 +11,8 @@ public static class ServiceInstaller
     private static readonly SemaphoreSlim installationGate = new(1);
     public static bool IsInstalled => Registry.GetValue(
         @"HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\BebekonVPN", "ImagePath", null) is string;
+    /// <summary>The registered helper executable (Program Files), or null when the helper is not installed.</summary>
+    public static string? HelperExecutable => (Registry.GetValue(@"HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\BebekonVPN", "ImagePath", null) as string)?.Trim().Trim('"') is { Length: > 0 } image && File.Exists(image) ? image : null;
     private static bool CurrentHelperInstalled
     {
         get
