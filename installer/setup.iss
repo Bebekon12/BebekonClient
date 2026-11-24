@@ -137,6 +137,12 @@ begin
     for I := 1 to Length(Sid) do if not ((Sid[I] = 'S') or (Sid[I] = '-') or ((Sid[I] >= '0') and (Sid[I] <= '9'))) then RaiseException('Некорректный SID.');
     OwnerArg := ' -OwnerSid "' + Sid + '"';
   end;
+  { The app is closed by now. Stop the helper again: a running app may have reconnected and
+    restarted it after PrepareToInstall, which would keep its files locked. }
+  if (CurStep = ssInstall) and FileExists(ExpandConstant('{app}\Bebekon.Service.exe')) then begin
+    ExtractTemporaryFile('stop-service.ps1');
+    Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{tmp}\stop-service.ps1') + '"', '', SW_HIDE, ewWaitUntilTerminated, Code);
+  end;
   if CurStep = ssPostInstall then begin
     if not Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\scripts\install-service.ps1') + '"' + OwnerArg + StartupArg, '', SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then
       RaiseException('Не удалось установить службу VPN. Запустите scripts\install-service.ps1 от администратора.');
