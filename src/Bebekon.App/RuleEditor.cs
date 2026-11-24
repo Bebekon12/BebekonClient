@@ -39,7 +39,9 @@ internal sealed class RuleEditor : StackPanel
     private readonly Dictionary<RouteTarget, CheckBox> allowed = [];
     private RouteTarget Direction => direction.SelectedValue is RouteTarget target ? target : RouteTarget.Vpn;
 
-    public RuleEditor(RoutingRule? old, IEnumerable<Server> servers, bool netBirdEnabled = true)
+    private readonly ComboBox folder = new() { MinHeight = 44 };
+    private sealed record FolderChoice(string? Id, string Name) { public override string ToString() => Name; }
+    public RuleEditor(RoutingRule? old, IEnumerable<Server> servers, bool netBirdEnabled = true, IReadOnlyList<RuleFolder>? folders = null, string? folderId = null)
     {
         direction.ItemsSource = RouteChoice.Options.Where(option => netBirdEnabled || option.Target != RouteTarget.NetBird || old?.Target == RouteTarget.NetBird).ToArray();
         original = old; Kind = old?.Kind ?? RuleKind.Application;
@@ -75,6 +77,16 @@ internal sealed class RuleEditor : StackPanel
         Children.Add(valueRow);
         Children.Add(Label(I18n.T("Название (необязательно)", "Name (optional)")));
         NameField.Tag = I18n.T("Заполнится автоматически", "Filled automatically"); Children.Add(NameField);
+        if (folders is { Count: > 0 })
+        {
+            // A folder only groups rules visually; the route below still decides where traffic goes.
+            Children.Add(Label(I18n.T("Папка", "Folder")));
+            var folderChoices = new List<FolderChoice> { new(null, I18n.T("Без папки", "No folder")) };
+            folderChoices.AddRange(folders.Select(f => new FolderChoice(f.Id, "📁 " + f.Name)));
+            folder.ItemsSource = folderChoices;
+            folder.SelectedItem = folderChoices.FirstOrDefault(c => c.Id == (folderId ?? old?.FolderId)) ?? folderChoices[0];
+            Children.Add(folder);
+        }
         Children.Add(Label(I18n.T("Маршрут", "Route")));
         Children.Add(direction);
         Children.Add(Label(I18n.T("Через сервер", "Through server")));
@@ -211,7 +223,8 @@ internal sealed class RuleEditor : StackPanel
             SystemProtection = protection.IsChecked == true,
             ProtectedExecutables = RuleValidation.IsDomainRule(Kind) && Paths() is { Length: > 0 } paths ? [.. paths] : null,
             Transport = transport.SelectedIndex <= 0 ? null : (RuleTransport)(transport.SelectedIndex - 1),
-            Port = destinationPort
+            Port = destinationPort,
+            FolderId = folder.ItemsSource is null ? original?.FolderId : (folder.SelectedItem as FolderChoice)?.Id
         };
         RuleValidation.Validate(result); return result;
     }

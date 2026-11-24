@@ -61,7 +61,7 @@ public partial class ConnectionsView : UserControl
     private void AddRecentToGroup(object sender, RoutedEventArgs e)
     {
         if (DataContext is not MainViewModel vm) return;
-        try { vm.AddDomainsToGroup(RecentList.SelectedItems.OfType<RecentRow>().Select(row => row.Entry).ToList()); }
+        try { vm.AddRuleForDomains(RecentList.SelectedItems.OfType<RecentRow>().Select(row => row.Entry).ToList()); }
         catch (UserError error) { vm.Banner = error.Message; }
     }
 }
@@ -104,14 +104,31 @@ public partial class RulesView : UserControl
     {
         if (DataContext is not MainViewModel vm) return;
         var selected = SelectedRules();
-        MergeMenu.IsEnabled = vm.CanMergeIntoGroup(selected);
-        MergeMenu.Header = I18n.T(selected.Length > 1 ? $"Объединить {selected.Length} правил в группу…" : "Сделать группу из правила…",
-            selected.Length > 1 ? $"Combine {selected.Length} rules into a group…" : "Make a group from this rule…");
+        if (selected.Length == 0) { e.Handled = true; return; }
+        MoveMenu.Items.Clear();
+        void Item(string header, string icon, RuleFolder? folder)
+        {
+            var item = new MenuItem { Header = header, Icon = new IconView { Icon = icon, Width = 14, Height = 14 } };
+            item.Click += (_, _) => { foreach (var rule in SelectedRules()) vm.MoveToFolder(rule, folder); };
+            MoveMenu.Items.Add(item);
+        }
+        foreach (var folder in vm.Folders) Item(folder.Name, folder.Icon, folder);
+        if (selected.Any(r => r.FolderId is not null)) Item(I18n.T("Убрать из папки", "Remove from folder"), "Close", null);
+        MoveMenu.IsEnabled = MoveMenu.Items.Count > 0;
+        NewFolderMenu.Header = I18n.T(selected.Length > 1 ? $"Новая папка из {selected.Length} правил…" : "Новая папка с этим правилом…",
+            selected.Length > 1 ? $"New folder with {selected.Length} rules…" : "New folder with this rule…");
     }
-    private void MergeIntoGroup(object sender, RoutedEventArgs e)
+    private void NewFolderFromSelection(object sender, RoutedEventArgs e)
     {
         if (DataContext is not MainViewModel vm) return;
-        try { vm.MergeIntoGroup(SelectedRules()); } catch (UserError error) { vm.Banner = error.Message; }
+        var selected = SelectedRules();
+        if (Dialogs.FolderEditor(null, selected) is not { } result) return;
+        try
+        {
+            if (result.Imported is { } imported) vm.ImportFolder(imported.Folder, imported.Rules);
+            else vm.CreateFolder(result.Name, result.Color, result.Icon, result.Rules);
+        }
+        catch (UserError error) { vm.Banner = error.Message; }
     }
     /// <summary>Dragging starts only from the ⋮⋮ handle, so clicks on the row, switch and buttons never start it.</summary>
     private void BeginDrag(object sender, MouseButtonEventArgs e)
@@ -140,10 +157,23 @@ public partial class RulesView : UserControl
         if (element is not ListBoxItem { DataContext: RoutingRule target } item) return null;
         return (item, target, e.GetPosition(item).Y > item.ActualHeight / 2);
     }
+    /// <summary>The folder header under the pointer, when a rule is dropped onto a folder.</summary>
+    private (ListBoxItem Item, FolderRow Folder)? FolderDrop(System.Windows.DragEventArgs e)
+    {
+        var element = e.OriginalSource as DependencyObject;
+        while (element is not null && element is not ListBoxItem) element = VisualTreeHelper.GetParent(element);
+        return element is ListBoxItem { DataContext: FolderRow folder } item ? (item, folder) : null;
+    }
     private void DragOverRule(object sender, System.Windows.DragEventArgs e)
     {
         e.Handled = true; e.Effects = DragDropEffects.None;
         AutoScroll(e);
+        if (FolderDrop(e) is { } into && e.Data.GetData(typeof(RoutingRule)) is RoutingRule moving && moving.FolderId != into.Folder.Folder.Id && DataContext is MainViewModel { PriorityView: true })
+        {
+            e.Effects = DragDropEffects.Move;
+            foreach (var item in Containers()) if (!ReferenceEquals(item, into.Item) && item.Tag is "before" or "after" or "into") item.Tag = null;
+            into.Item.Tag = "into"; return;
+        }
         var point = DropPoint(e);
         if (point is not { } p || e.Data.GetData(typeof(RoutingRule)) is not RoutingRule origin || DataContext is not MainViewModel vm || !vm.CanDrop(origin, p.Target))
         { ClearDropMarks(keepSource: true); return; }
@@ -159,8 +189,10 @@ public partial class RulesView : UserControl
     }
     private void DropRule(object sender, System.Windows.DragEventArgs e)
     {
+        var folder = FolderDrop(e);
         var point = DropPoint(e);
         ClearDropMarks();
+        if (folder is { } f && e.Data.GetData(typeof(RoutingRule)) is RoutingRule moved && DataContext is MainViewModel host) { host.MoveToFolder(moved, f.Folder.Folder); return; }
         if (point is { } p && e.Data.GetData(typeof(RoutingRule)) is RoutingRule origin && DataContext is MainViewModel vm) vm.Reorder(origin, p.Target, p.After);
     }
     /// <summary>Scrolls a long list while the pointer is held near its top or bottom edge.</summary>

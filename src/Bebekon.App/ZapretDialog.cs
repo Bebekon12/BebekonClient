@@ -122,7 +122,7 @@ public static partial class Dialogs
                         ? I18n.T("Пустой ipset-all.txt означает «все IP». Адреса ваших VPN-серверов Bebekon исключает сам.", "An empty ipset-all.txt means all IPs. Bebekon excludes your VPN servers itself.")
                         : I18n.T("По одной записи в строке. Изменения применятся сразу.", "One entry per line. Changes apply right away.");
                     var edited = Lines(label, description, current, entries => Zapret.ValidateList(file, entries), 4 * 1024 * 1024,
-                        file.StartsWith("list-", StringComparison.Ordinal) ? () => PickFromRules(keywords: false)?.Where(e => DomainSets.KindOf(e) == RuleKind.Site).ToList() : null);
+                        file.StartsWith("list-", StringComparison.Ordinal) ? () => PickFromRules(vm.ActiveProfile.Rules, vm.ActiveProfile.Folders, keywords: false)?.Where(e => DomainSets.KindOf(e) == RuleKind.Site).ToList() : null);
                     if (edited is not null) await vm.SaveZapretListAsync(file, edited);
                 }
                 catch (UserError e) { error.Text = e.Message; }

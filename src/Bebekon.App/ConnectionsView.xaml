@@ -23,8 +23,7 @@
     <DockPanel>
      <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Top">
       <Button Command="{Binding RefreshRecent}" Style="{StaticResource IconButton}" ToolTip="{DynamicResource Update}" Margin="0,0,8,0"><local:IconView Icon="Refresh" Width="17" Height="17"/></Button>
-      <Button Command="{Binding OpenGroups}" Style="{StaticResource IconButton}" ToolTip="{DynamicResource MyGroupsHint}" Margin="0,0,8,0"><local:IconView Icon="Folder" Width="17" Height="17"/></Button>
-      <Button Click="AddRecentToGroup" Style="{StaticResource AccentButton}"><StackPanel Orientation="Horizontal"><local:IconView Icon="Plus" Width="15" Height="15" Margin="0,0,7,0"/><TextBlock Text="{DynamicResource AddToGroup}" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" FontWeight="SemiBold"/></StackPanel></Button>
+      <Button Click="AddRecentToGroup" Style="{StaticResource AccentButton}"><StackPanel Orientation="Horizontal"><local:IconView Icon="Plus" Width="15" Height="15" Margin="0,0,7,0"/><TextBlock Text="{DynamicResource CreateRuleFromRecent}" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" FontWeight="SemiBold"/></StackPanel></Button>
      </StackPanel>
      <StackPanel Orientation="Horizontal"><Border Style="{StaticResource IconBadge}" Width="32" Height="32" Margin="0,0,10,0"><local:IconView Icon="Site" Width="17" Height="17" Foreground="{DynamicResource Accent}"/></Border>
       <StackPanel VerticalAlignment="Center"><TextBlock Text="{DynamicResource RecentDomains}" FontSize="16" FontWeight="SemiBold"/><TextBlock Text="{Binding RecentSummary}" Style="{StaticResource Subtitle}" TextWrapping="Wrap" MaxWidth="420" Margin="0,2,0,0"/></StackPanel></StackPanel>

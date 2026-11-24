@@ -63,24 +63,25 @@ internal static class ConnectionChecks
         await vm.ConnectAsync(); Require(vm.Connected && service.Last?.Server.Transport == "xhttp", "XHTTP reaches helper without premature sing-box-only generation");
         await vm.DisconnectAsync();
         vm.SelectedServer!.Transport = "tcp";
-        await DomainSetAsync(vm, service);
+        await FolderAsync(vm, service);
         await StabilityAsync(vm, service, subscription);
     }
-    /// <summary>A user set reaches the helper only as ordinary site rules, and editing it re-applies the tunnel.</summary>
-    private static async Task DomainSetAsync(MainViewModel vm, FakeService service)
+    /// <summary>A folder is only a wrapper: its rules reach the helper unchanged with their own routes.</summary>
+    private static async Task FolderAsync(MainViewModel vm, FakeService service)
     {
-        var set = DomainSets.Normalize("hai", ["portal.hai.example"]); vm.SaveDomainSet(null, set);
-        var rule = new RoutingRule { Name = "Work set", Kind = RuleKind.GeoSite, Values = ["my:hai"], UseVpn = true };
-        RuleValidation.Validate(rule);
-        vm.ActiveProfile.Rules.Add(rule); vm.RulesChanged();
+        var vpn = new RoutingRule { Name = "Work VPN", Values = ["portal.work.example"], UseVpn = true };
+        var direct = new RoutingRule { Name = "Work direct", Values = ["git.work.example"], UseVpn = false };
+        vm.ActiveProfile.Rules.Add(vpn); vm.ActiveProfile.Rules.Add(direct); vm.RulesChanged();
+        var folder = vm.CreateFolder("Работа", "Violet", "Briefcase", [vpn, direct]);
         await vm.ConnectAsync(); var starts = service.Starts;
-        Require(service.Last!.Profile.Rules.Any(r => r.Kind == RuleKind.Site && r.Values.SequenceEqual(["portal.hai.example"])) &&
-            !service.Last.Profile.Rules.Any(r => r.Values.Any(DomainSets.IsReference)), "Helper receives expanded site rules, never my: references");
-        vm.SaveDomainSet(set, DomainSets.Normalize("hai-work", ["portal.hai.example", "git.hai.example"], set.Id));
+        var sent = service.Last!.Profile.Rules;
+        Require(sent.Single(r => r.Name == "Work VPN").Target == RouteTarget.Vpn && sent.Single(r => r.Name == "Work direct").Target == RouteTarget.Direct &&
+            sent.All(r => r.Name is not ("Work VPN" or "Work direct") || r.FolderId == folder.Id), "Folder rules keep their own routes and reach the helper as they are");
+        folder.Collapsed = true; vm.ToggleFolder.Execute(vm.VisibleRules.OfType<FolderRow>().Single()); await Task.Delay(900);
+        Require(service.Starts == starts, "Collapsing a folder is visual and must not restart the tunnel");
+        vm.ActiveProfile.Rules.Remove(vpn); vm.ActiveProfile.Rules.Remove(direct); vm.ActiveProfile.Folders.Remove(folder); vm.RulesChanged();
         await Until(() => service.Starts == starts + 1 && vm.Connected);
-        Require(rule.Values.SequenceEqual(["my:hai-work"]) && service.Last!.Profile.Rules.Any(r => r.Values.Contains("git.hai.example")), "Renaming and editing a set updates rules and re-applies");
-        vm.ActiveProfile.Rules.Remove(rule); vm.RulesChanged(); await Until(() => service.Starts == starts + 2 && vm.Connected);
-        vm.DeleteDomainSet(vm.DomainSetList.Single()); await vm.DisconnectAsync();
+        await vm.DisconnectAsync();
     }
     /// <summary>Unattended drops: the user asked to stay connected, so the client must come back by itself.</summary>
     private static async Task StabilityAsync(MainViewModel vm, FakeService service, Subscription subscription)

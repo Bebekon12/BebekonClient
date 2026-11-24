@@ -245,20 +245,27 @@ internal static class SmokeHarness
             dialogName = "Application"; await Dialogs.ApplicationAsync();
             dialogName = "Confirm"; Dialogs.Confirm("Удалить правило?", "UI test fixture");
             dialogName = "TrustTunnel"; Dialogs.TrustTunnelTransport("http3");
-            vm.AttachDomainSets(); var fixtureSet = DomainSets.Normalize("hai", ["portal.hai.example", "git.hai.example"]); vm.SaveDomainSet(null, fixtureSet);
+            var folderRule = new RoutingRule { Name = "Fixture folder rule", Values = ["folder.example"], UseVpn = true };
+            vm.ActiveProfile.Rules.Add(folderRule); vm.RulesChanged();
+            var fixtureFolder = vm.CreateFolder("Работа", "Violet", "Briefcase", [folderRule]);
+            var directInFolder = new RoutingRule { Name = "Fixture direct in folder", Values = ["git.folder.example"], UseVpn = false, FolderId = fixtureFolder.Id };
+            vm.InsertRule(directInFolder);
+            vm.CreateFolder("Пустая папка", "Emerald", "Star");
+            vm.Go("Rules"); await Task.Delay(250); window.UpdateLayout(); Capture(window, "Rules-Folders");
+            vm.RemoveFolder(vm.ActiveProfile.Folders.Single(f => f.Name == "Пустая папка"), deleteRules: false);
+            vm.ActiveProfile.Rules.Remove(directInFolder); vm.RulesChanged();
             dialogName = "GeoSet"; Dialogs.GeoSet(RuleKind.GeoSite);
-            dialogName = "DomainSetEditor"; Dialogs.DomainSetEditor(fixtureSet);
-            dialogName = "DomainSetExport"; Dialogs.DomainSetExport(fixtureSet);
-            vm.SetRecentDomainsForTest([new("git.hai.example", 443, "chrome.exe", "NetBird", DateTimeOffset.UtcNow, 2), new("cdn.hai.example", 443, "chrome.exe", "NetBird", DateTimeOffset.UtcNow, 1), new("www.youtube.com", 443, "chrome.exe", "VPN", DateTimeOffset.UtcNow, 5)]);
-            fixtureSet = DomainSets.Normalize("hai", fixtureSet.Domains, fixtureSet.Id, new() { Color = "Violet", Icon = "Briefcase" }); vm.SaveDomainSet(vm.DomainSetList.Single(), fixtureSet);
-            dialogName = "DomainGroups"; Dialogs.DomainGroups(fixtureSet);
-            dialogName = "AddToGroup"; Dialogs.AddToGroup(["www.youtube.com"], vm.SuggestRelated(["git.hai.example"]));
-            dialogName = "ImportLink"; Dialogs.DomainSetImport(DomainSets.ToLink(fixtureSet));
-            dialogName = "PickFromRules"; Dialogs.PickFromRules(keywords: true);
+            dialogName = "FolderEditor"; Dialogs.FolderEditor(fixtureFolder, vm.ActiveProfile.Rules.ToList());
+            dialogName = "FolderNew"; Dialogs.FolderEditor(null, vm.ActiveProfile.Rules.ToList(), RuleFolders.ToLink(fixtureFolder, [folderRule]));
+            dialogName = "FolderShare"; Dialogs.FolderShare(fixtureFolder, [folderRule]);
+            dialogName = "FolderDelete"; Dialogs.DeleteFolderChoice(fixtureFolder.Name, 1);
+            vm.SetRecentDomainsForTest([new("git.hai.example", 443, "chrome.exe", "NetBird", DateTimeOffset.UtcNow, 2), new("www.youtube.com", 443, "chrome.exe", "VPN", DateTimeOffset.UtcNow, 5)]);
+            dialogName = "PickFromRules"; Dialogs.PickFromRules(vm.ActiveProfile.Rules, vm.ActiveProfile.Folders, keywords: true);
+            dialogName = "AddressList"; Dialogs.AddressList("Защита выбранных адресов", "Домены и IP/CIDR", ["chatgpt.com", "203.0.113.0/24"], lines => DestinationGuard.Parse(lines).Entries, () => null);
             dialogName = "Zapret"; Dialogs.ZapretSettings(vm);
             dialogName = "DirectPolicy"; Dialogs.DirectPolicyEditor(new() { Include = ["example.org"] }, "");
             vm.SetRecentDomainsForTest([]);
-            vm.DeleteDomainSet(fixtureSet);
+            vm.ActiveProfile.Rules.Remove(folderRule); vm.ActiveProfile.Folders.Remove(fixtureFolder); vm.RulesChanged();
         }
         finally { Dialogs.RenderObserver = null; }
         if (renderFailure is not null) throw renderFailure;
@@ -672,27 +679,31 @@ internal static class SmokeHarness
         }
         finally { Dialogs.RenderObserver = null; root.Delete(true); }
     }
-    /// <summary>Two site rules with the same route become one group rule at the first one's place.</summary>
+    /// <summary>Folders keep their rules together, move as a block, and leave the rules when removed.</summary>
     private static void CheckMergeIntoGroup(MainViewModel vm)
     {
-        Dialogs.RenderObserver = dialog => dialog.Dispatcher.BeginInvoke(new Action(() => Descendants(dialog).OfType<Button>().Single(b => b.IsDefault).RaiseEvent(new RoutedEventArgs(Button.ClickEvent))));
-        var before = new RoutingRule { Name = "before", Values = ["before.example"] };
-        var a = new RoutingRule { Name = "corp", Values = ["a.corp.example"], UseVpn = true };
-        var b = new RoutingRule { Name = "corp-two", Values = ["b.corp.example"], UseVpn = true };
-        try
-        {
-            foreach (var rule in new[] { before, a, b }) vm.ActiveProfile.Rules.Add(rule);
-            vm.RulesChanged(); var position = vm.ActiveProfile.Rules.IndexOf(a);
-            vm.MergeIntoGroup([b, a]);
-            var set = vm.DomainSetList.SingleOrDefault(s => s.Name == "corp") ?? throw new InvalidOperationException("Merging must create a group named after the first rule.");
-            var merged = vm.ActiveProfile.Rules.ElementAtOrDefault(position);
-            if (!set.Domains.SequenceEqual(["a.corp.example", "b.corp.example"]) || merged is not { Kind: RuleKind.GeoSite, Target: RouteTarget.Vpn } || !merged.Values.SequenceEqual(["my:corp"]) ||
-                vm.ActiveProfile.Rules.Contains(a) || vm.ActiveProfile.Rules.Contains(b))
-                throw new InvalidOperationException("Merged rules must become one group rule at the first rule's position.");
-            if (vm.ExpandedProfile.Rules.Count(r => r.Values.Contains("b.corp.example")) != 1) throw new InvalidOperationException("The group rule must expand for the helper.");
-            vm.ActiveProfile.Rules.Remove(merged); vm.ActiveProfile.Rules.Remove(before); vm.RulesChanged(); vm.DeleteDomainSet(set);
-        }
-        finally { Dialogs.RenderObserver = null; }
+        var top = new RoutingRule { Name = "top", Values = ["top.example"] };
+        var a = new RoutingRule { Name = "a", Values = ["a.example"], UseVpn = true };
+        var b = new RoutingRule { Name = "b", Values = ["b.example"], UseVpn = false };
+        var bottom = new RoutingRule { Name = "bottom", Values = ["bottom.example"] };
+        var count = vm.ActiveProfile.Rules.Count;
+        foreach (var rule in new[] { top, a, bottom, b }) vm.ActiveProfile.Rules.Add(rule);
+        vm.RulesChanged();
+        var folder = vm.CreateFolder("Fixture", "Rose", "Star", [a, b]);
+        int At(RoutingRule rule) => vm.ActiveProfile.Rules.IndexOf(rule);
+        if (At(b) != At(a) + 1 || b.Target != RouteTarget.Direct || a.Target != RouteTarget.Vpn) throw new InvalidOperationException("Folder rules must stay together and keep their routes.");
+        var header = vm.VisibleRules.OfType<FolderRow>().Single(r => r.Folder == folder);
+        if (vm.VisibleRules.IndexOf(header) + 1 != vm.VisibleRules.IndexOf(a) || !a.Nested) throw new InvalidOperationException("Folder rules must be shown under their folder.");
+        vm.MoveFolder(folder, -1);
+        if (At(a) != count || At(top) != count + 2) throw new InvalidOperationException("A folder must move as one block.");
+        vm.MoveToFolder(bottom, folder);
+        if (bottom.FolderId != folder.Id || At(bottom) != At(b) + 1) throw new InvalidOperationException("A rule moved into a folder must join its end.");
+        folder.Collapsed = true; vm.RulesChanged();
+        if (vm.VisibleRules.Contains(a)) throw new InvalidOperationException("A collapsed folder must hide its rules.");
+        vm.RemoveFolder(folder, deleteRules: false);
+        if (a.FolderId is not null || !vm.ActiveProfile.Rules.Contains(a)) throw new InvalidOperationException("Removing a folder must keep its rules.");
+        foreach (var rule in new[] { top, a, b, bottom }) vm.ActiveProfile.Rules.Remove(rule);
+        vm.RulesChanged();
     }
     private static void CheckNewestRules(MainViewModel vm, List<string> report)
     {
@@ -715,7 +726,7 @@ internal static class SmokeHarness
         if (At(newest) != At(first) + 1) throw new InvalidOperationException("Dropping below a rule must place it right after that rule.");
         var guarded = new RoutingRule { Name = "Protected fixture", Kind = RuleKind.Application, Values = ["fixture.exe"], SystemProtection = true };
         vm.ActiveProfile.Rules.Add(guarded); vm.RulesChanged();
-        if (!ReferenceEquals(vm.VisibleRules[0], guarded) || guarded.CanMoveDown && vm.VisibleRules[1].SystemProtection == false) throw new InvalidOperationException("Protected rules must form the first group.");
+        if (!ReferenceEquals(vm.VisibleRules[0], guarded) || guarded.CanMoveDown && ((RoutingRule)vm.VisibleRules[1]).SystemProtection == false) throw new InvalidOperationException("Protected rules must form the first group.");
         var before = vm.ActiveProfile.Rules.ToArray(); vm.Reorder(guarded, newest, after: true);
         if (!vm.ActiveProfile.Rules.SequenceEqual(before)) throw new InvalidOperationException("A rule must not move across precedence groups.");
         vm.ActiveProfile.Rules.Remove(guarded); vm.RulesChanged();

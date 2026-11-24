@@ -103,6 +103,11 @@ public sealed class RoutingRule : Observable
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public DateTimeOffset? CreatedAt { get; set; }
     public string Name { get; set; } = "";
+    /// <summary>The folder the rule is shown in, if any. Purely visual; routing ignores it.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public string? FolderId { get; set; }
+    private bool nested;
+    /// <summary>Shown indented under its folder.</summary>
+    [JsonIgnore] public bool Nested { get => nested; set => Set(ref nested, value); }
     private int priority;
     private bool canMoveUp, canMoveDown;
     /// <summary>1-based position in the order the core checks rules; 0 when not shown.</summary>
@@ -182,6 +187,8 @@ public sealed class Profile : Observable
     private RouteTarget defaultRoute = RouteTarget.Direct;
     public RouteTarget DefaultRoute { get => defaultRoute; set => Set(ref defaultRoute, value); }
     public ObservableCollection<RoutingRule> Rules { get; set; } = [];
+    /// <summary>Visual folders for rules; a rule's <see cref="RoutingRule.FolderId"/> points here.</summary>
+    public List<RuleFolder> Folders { get; set; } = [];
     [JsonIgnore] public IEnumerable<RoutingRule> ActiveRules => Rules.Where(rule => rule.Enabled);
     [JsonIgnore] public IEnumerable<RoutingRule> SystemRules => ActiveRules.Where(rule => rule.SystemProtection).Select(rule => rule.SystemScope());
     [JsonIgnore] public IEnumerable<RoutingRule> RulesByPrecedence => SystemRules.Concat(ActiveRules.Where(rule => !rule.SystemProtection || rule.HasApplicationScope));

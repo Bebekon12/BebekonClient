@@ -124,10 +124,10 @@ public sealed partial class MainViewModel
         var state = await service.SendAsync(new("GetStatus"), true, lifetime.Token);
         if (!state.Ok || state.Status.Protection?.GuardTargets is not { } prior)
             throw new UserError(T("Обновите службу Bebekon для защиты выбранных адресов.", "Update the Bebekon helper for destination protection."));
-        var entries = edit ? Dialogs.Lines(T("Защита выбранных адресов","Protected destinations"),
+        var entries = edit ? Dialogs.AddressList(T("Защита выбранных адресов","Protected destinations"),
             T("Домен с поддоменами, IP или CIDR — по одному в строке. Сохранение включает защиту. Домены используют DNS Windows; для собственного DNS приложения и уже известных реальных адресов добавьте IP/CIDR.",
               "Enter one domain (including subdomains), IP or CIDR per line. Saving enables protection. Domains use Windows DNS; add IPs for applications with private DNS or previously cached real addresses."),
-            prior, lines => DestinationGuard.Parse(lines).Entries, pick: () => Dialogs.PickFromRules(keywords: false)) : prior;
+            prior, lines => DestinationGuard.Parse(lines).Entries, () => Dialogs.PickFromRules(ActiveProfile.Rules, ActiveProfile.Folders, keywords: false)) : prior;
         if (entries == null) return;
         var enable = entries.Length > 0 && (edit || !state.Status.Protection.DestinationGuardEnabled);
         await connectionGate.WaitAsync(lifetime.Token);
