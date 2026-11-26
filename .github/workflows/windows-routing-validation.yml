@@ -4,10 +4,24 @@ on:
   push:
     branches: [codex/windows-routing-validation]
   workflow_dispatch:
+    inputs:
+      windows_run_id:
+        description: 'Run containing the Windows release package'
+        type: string
+        required: false
+      source_ref:
+        description: 'Git commit or tag to test'
+        type: string
+        required: false
   workflow_call:
+    inputs:
+      windows_run_id:
+        type: string
+        required: true
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   wfp:
@@ -17,9 +31,39 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+          ref: ${{ inputs.source_ref || github.sha }}
       - uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
+      - uses: actions/download-artifact@v4
+        if: inputs.windows_run_id != ''
+        with:
+          name: windows
+          path: artifacts/wfp-package
+          run-id: ${{ inputs.windows_run_id }}
+          github-token: ${{ github.token }}
+      - name: Stage sing-box for the core crash test
+        shell: pwsh
+        env:
+          WINDOWS_RUN_ID: ${{ inputs.windows_run_id }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:WINDOWS_RUN_ID) {
+            $zip = 'artifacts/wfp-package/BebekonVPN-Portable-x64.zip'
+            $entry = 'core/sing-box.exe'
+          } else {
+            $pin = Get-Content core/version.json -Raw | ConvertFrom-Json
+            $zip = Join-Path $env:RUNNER_TEMP $pin.archive
+            Invoke-WebRequest "https://github.com/SagerNet/sing-box/releases/download/v$($pin.version)/$($pin.archive)" -OutFile $zip
+            if ((Get-FileHash $zip).Hash -ne $pin.sha256) { throw 'sing-box archive checksum mismatch.' }
+            $entry = "sing-box-$($pin.version)-windows-amd64/sing-box.exe"
+          }
+          $archive = [IO.Compression.ZipFile]::OpenRead((Resolve-Path $zip))
+          try {
+            $core = @($archive.Entries | Where-Object { $_.FullName.Replace('\','/') -eq $entry })
+            if ($core.Count -ne 1) { throw 'Expected one sing-box executable in the package.' }
+            [IO.Compression.ZipFileExtensions]::ExtractToFile($core[0], (Join-Path $PWD 'core/sing-box.exe'), $true)
+          } finally { $archive.Dispose() }
       - name: Verify WFP in the disposable Windows runner
         shell: pwsh
         env:

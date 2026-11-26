@@ -162,8 +162,13 @@ jobs:
 
   wfp:
     if: needs.plan.outputs.release == 'true'
-    needs: [plan]
+    needs: [plan, windows]
+    permissions:
+      contents: read
+      actions: read
     uses: ./.github/workflows/windows-routing-validation.yml
+    with:
+      windows_run_id: ${{ github.run_id }}
 
   release:
     if: needs.plan.outputs.release == 'true'
