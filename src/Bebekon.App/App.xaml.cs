@@ -12,6 +12,11 @@ public partial class App : Application
         // Use the WPF software pipeline for this small 2D dashboard and its dialogs.
         System.Windows.Media.RenderOptions.ProcessRenderMode = System.Windows.Interop.RenderMode.SoftwareOnly;
         base.OnStartup(e);
+        if (e.Args is ["--restore-owned-proxy"])
+        {
+            Shutdown(SystemProxy.Restore(onlyIfOwned: true) ? 0 : 1);
+            return;
+        }
         var smoke = e.Args.Contains("--smoke");
         var instance = @"Local\BebekonVPN." + System.Security.Principal.WindowsIdentity.GetCurrent().User!.Value + (smoke ? ".Smoke" : "");
         // bebekon:// links from a provider's page (registered by the installer).

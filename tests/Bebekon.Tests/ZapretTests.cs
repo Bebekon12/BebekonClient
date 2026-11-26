@@ -56,7 +56,32 @@ public sealed class ZapretTests
         Assert.Equal(["# mine", "youtube.com", "^exact.example"], Zapret.ValidateList("list-general-user.txt", ["# mine", "youtube.com", "^exact.example"]));
         Assert.Equal(["203.0.113.0/24"], Zapret.ValidateList("ipset-exclude-user.txt", ["203.0.113.0/24"]));
         Assert.Throws<UserError>(() => Zapret.ValidateList("ipset-exclude-user.txt", ["not-an-ip"]));
+        Assert.Throws<UserError>(() => Zapret.ValidateList("ipset-exclude-user.txt", ["192.0.2.0/64"]));
+        Assert.Throws<UserError>(() => Zapret.ValidateList("ipset-exclude-user.txt", ["192.0.2.0/24/8"]));
         Assert.Throws<UserError>(() => Zapret.ValidateList("general.bat", ["x"]));
         Assert.Throws<UserError>(() => Zapret.ValidateList("list-general-user.txt", ["bad host/"]));
+    }
+
+    [Theory]
+    [InlineData("zapret")]
+    [InlineData("zapret.new")]
+    [InlineData("zapret.old")]
+    public void StorageVisitsTheEntireImportBeforeTrustingIt(string name)
+    {
+        var root = Directory.CreateTempSubdirectory("Bebekon-storage-");
+        try
+        {
+            var package = root.CreateSubdirectory(name);
+            foreach (var part in new[] { "bin", "lists", "profiles" })
+                File.WriteAllText(Path.Combine(package.CreateSubdirectory(part).FullName, "fixture"), "");
+            var entries = ProtectedServiceStorage.EnumerateEntries(root).Select(item => item.FullName).ToArray();
+            Assert.Equal(7, entries.Length);
+            Assert.Equal(package.FullName, entries[0]);
+            foreach (var part in new[] { "bin", "lists", "profiles" })
+                Assert.Contains(Path.Combine(package.FullName, part, "fixture"), entries);
+            package.CreateSubdirectory("foreign");
+            Assert.Throws<InvalidOperationException>(() => ProtectedServiceStorage.EnumerateEntries(root).ToArray());
+        }
+        finally { root.Delete(true); }
     }
 }

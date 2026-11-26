@@ -125,7 +125,7 @@ public static partial class Zapret
         foreach (var raw in lines.Select(l => l.Trim()))
         {
             if (raw.Length == 0 || raw.StartsWith('#')) { result.Add(raw); continue; }
-            var ok = networks ? System.Net.IPAddress.TryParse(raw.Split('/')[0], out _) && (!raw.Contains('/') || int.TryParse(raw.Split('/')[1], out var p) && p is >= 0 and <= 128)
+            var ok = networks ? System.Net.IPAddress.TryParse(raw, out _) || System.Net.IPNetwork.TryParse(raw, out _)
                 : Uri.CheckHostName(raw.TrimStart('^')) == UriHostNameType.Dns;
             if (!ok) throw new UserError("Проверьте запись: " + raw);
             result.Add(raw);

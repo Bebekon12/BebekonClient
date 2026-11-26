@@ -29,16 +29,23 @@ public static class SystemProxy
         }
         key.SetValue("ProxyEnable", 1); key.SetValue("ProxyServer", "127.0.0.1:17890"); key.SetValue("ProxyOverride", "<local>"); key.SetValue("AutoDetect", 0); key.DeleteValue("AutoConfigURL", false); Refresh();
     }
-    public static void Restore()
+    public static bool Restore(bool onlyIfOwned = false)
     {
-        if (!File.Exists(BackupFile)) return;
+        if (!File.Exists(BackupFile)) return true;
         try
         {
+            using var key = Registry.CurrentUser.CreateSubKey(KeyPath);
+            if (onlyIfOwned && !Equals(key.GetValue("ProxyServer"), "127.0.0.1:17890"))
+            {
+                File.Delete(BackupFile);
+                return true;
+            }
             var data = ProtectedData.Unprotect(File.ReadAllBytes(BackupFile), null, DataProtectionScope.CurrentUser); var b = JsonSerializer.Deserialize<Backup>(data)!;
-            using var key = Registry.CurrentUser.CreateSubKey(KeyPath); key.SetValue("ProxyEnable", b.Enabled); key.SetValue("ProxyServer", b.Server); key.SetValue("ProxyOverride", b.Override); key.SetValue("AutoDetect", b.AutoDetect);
+            key.SetValue("ProxyEnable", b.Enabled); key.SetValue("ProxyServer", b.Server); key.SetValue("ProxyOverride", b.Override); key.SetValue("AutoDetect", b.AutoDetect);
             if (b.AutoConfig.Length > 0) key.SetValue("AutoConfigURL", b.AutoConfig); else key.DeleteValue("AutoConfigURL", false); Refresh(); File.Delete(BackupFile);
         }
-        catch { /* Keep encrypted backup for recovery; never overwrite it. */ }
+        catch { return false; }
+        return true;
     }
     private static void Refresh() { InternetSetOption(IntPtr.Zero, 39, IntPtr.Zero, 0); InternetSetOption(IntPtr.Zero, 37, IntPtr.Zero, 0); }
     [DllImport("wininet.dll")] private static extern bool InternetSetOption(IntPtr handle, int option, IntPtr buffer, int length);

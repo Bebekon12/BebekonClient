@@ -50,8 +50,8 @@ public sealed partial class MainViewModel
         {
             if (Settings.ZapretEnabled)
             {
-                if (TlsFragmentEnabled) { TlsFragmentEnabled = false; Banner = T("Обход замедления Bebekon выключен: zapret делает это сам и лучше.", "Bebekon's own splitting is off: zapret does this better."); }
                 await ZapretCommandAsync(new("ZapretStart", Zapret: Settings.ZapretProfile, ZapretHosts: [.. VpnServerHosts]));
+                if (TlsFragmentEnabled) { TlsFragmentEnabled = false; Banner = T("Zapret запущен. Обход замедления Bebekon выключен.", "Zapret started. Bebekon's own splitting is off."); }
             }
             else await ZapretCommandAsync(new("ZapretStop"));
         }
@@ -60,28 +60,39 @@ public sealed partial class MainViewModel
             Banner = "zapret: " + e.Message;
         }
     }
-    internal Task StartZapretAtLaunchAsync() => Settings.ZapretEnabled ? ApplyZapretAsync() : RefreshZapretAsync();
+    internal Task StartZapretAtLaunchAsync() => Settings.ZapretEnabled ? ApplyZapretAsync() : Task.CompletedTask;
 
     /// <summary>One UAC prompt: an administrator copies the folder into the helper's protected storage.</summary>
     internal async Task ImportZapretAsync(string folder)
     {
-        await EnsureServiceAsync();
-        try { await service.SendAsync(new("ZapretStop"), true, lifetime.Token); } catch (Exception e) when (e is not OperationCanceledException) { }
+        await ZapretCommandAsync(new("ZapretStop"));
+        try
+        {
+            await RunImportAsync(folder);
+            Settings.ObhodFolder = folder; Save();
+            await RefreshZapretAsync();
+        }
+        finally
+        {
+            if (Settings.ZapretEnabled && !lifetime.IsCancellationRequested) await ApplyZapretAsync();
+        }
+    }
+
+    private async Task RunImportAsync(string folder)
+    {
         var helper = ServiceInstaller.HelperExecutable ?? throw new UserError(T("Служба Bebekon не установлена.", "The Bebekon helper is not installed."));
-        var report = Path.Combine(Path.GetTempPath(), "bebekon-zapret-import.txt");
-        File.Delete(report);
         var info = new ProcessStartInfo(helper) { UseShellExecute = true, Verb = "runas", WindowStyle = ProcessWindowStyle.Hidden };
         info.ArgumentList.Add("--import-zapret"); info.ArgumentList.Add(folder);
         Process? process;
         try { process = Process.Start(info); }
         catch (System.ComponentModel.Win32Exception) { throw new UserError(T("Импорт отменён: нужны права администратора.", "Import cancelled: administrator rights are required.")); }
         if (process is null) throw new UserError(T("Не удалось запустить импорт.", "Could not start the import."));
-        using (process) await process.WaitForExitAsync(lifetime.Token);
-        if (process.ExitCode != 0)
-            throw new UserError(File.Exists(report) ? File.ReadAllText(report) : T("Импорт zapret не удался.", "zapret import failed."));
-        Settings.ObhodFolder = folder; Save();
-        await RefreshZapretAsync();
-        if (Settings.ZapretEnabled) await ApplyZapretAsync();
+        using (process)
+        {
+            await process.WaitForExitAsync(lifetime.Token);
+            if (process.ExitCode == 2) throw new UserError(T("Проверьте папки bin, lists и профили general*.bat в выбранной сборке zapret.", "Check the bin, lists and general*.bat profiles in the selected zapret package."));
+            if (process.ExitCode != 0) throw new UserError(T("Не удалось обновить защищённую копию zapret. Закройте подбор профиля и повторите импорт.", "Could not update the protected zapret copy. Close the profile search and retry."));
+        }
     }
 
     internal sealed record ZapretTrial(string Profile, bool Works, long? MedianMs, string? Failed);

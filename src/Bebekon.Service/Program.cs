@@ -13,6 +13,28 @@ internal static class Program
 {
     public static void Main(string[] args)
     {
+        if (args is ["--uninstall-runtime"])
+        {
+            // Network policy outlives both the service registration and its files.
+            try
+            {
+                DestinationPolicy.ClearSystemPolicyAsync(CancellationToken.None).GetAwaiter().GetResult();
+                KillSwitch.ClearPersistent();
+            }
+            catch (Exception e) { Console.Error.WriteLine(e.Message); Environment.ExitCode = 21; return; }
+            var path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "BebekonVPN");
+            try
+            {
+                ProtectedServiceStorage.Validate(path);
+                if (Directory.Exists(path))
+                {
+                    using var lease = ZapretRunner.LockImport(path);
+                    ProtectedServiceStorage.RemoveRuntime(path);
+                }
+            }
+            catch (Exception e) { Console.Error.WriteLine(e.Message); Environment.ExitCode = 22; }
+            return;
+        }
         if (args is ["--clear-leak-protection"])
         {
             var path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "BebekonVPN");
@@ -32,10 +54,10 @@ internal static class Program
                 if (!Directory.Exists(root)) throw new UserError("Служба Bebekon ещё не запускалась.");
                 ZapretRunner.Import(root, source);
             }
-            catch (Exception e) when (e is UserError or IOException or UnauthorizedAccessException)
+            catch (Exception e) when (e is UserError or IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
             {
-                File.WriteAllText(Path.Combine(Path.GetTempPath(), "bebekon-zapret-import.txt"), e is UserError ? e.Message : "Не удалось скопировать папку zapret.");
-                Environment.ExitCode = 1;
+                Console.Error.WriteLine(e.Message);
+                Environment.ExitCode = e is UserError ? 2 : 1;
             }
             return;
         }
@@ -151,13 +173,21 @@ internal sealed class VpnService : ServiceBase
             if (console) fileSecurity.AddAccessRule(new(owner, FileSystemRights.FullControl, AccessControlType.Allow));
             new FileInfo(file).SetAccessControl(fileSecurity);
         }
+        if (!console) ZapretRunner.RecoverImport(root);
         destinations = new(root);
         log = new(root, "service"); coreLog = new(root, "core");
         zapret = new(root, log);
     }
     protected override void OnStart(string[] args) { _ = ServeAsync(lifetime.Token); _ = IdleStopAsync(lifetime.Token); log.Write("Service started."); }
     public void RunConsole() { OnStart([]); Console.WriteLine("Bebekon helper; Ctrl+C to stop."); using var done = new ManualResetEventSlim(); Console.CancelKeyPress += (_, e) => { e.Cancel = true; done.Set(); }; done.Wait(); OnStop(); }
-    protected override void OnStop() { lifetime.Cancel(); gate.Wait(); try { StopCore(); zapret.Stop(); } finally { gate.Release(); } log.Write("Service stopped."); }
+    protected override void OnStop()
+    {
+        lifetime.Cancel();
+        gate.Wait();
+        try { try { StopCore(); } finally { zapret.Stop(); } }
+        finally { gate.Release(); }
+        log.Write("Service stopped.");
+    }
     protected override void OnShutdown() => OnStop();
     private ServiceStatus Status()
     {

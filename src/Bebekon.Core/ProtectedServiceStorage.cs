@@ -15,19 +15,57 @@ public static class ProtectedServiceStorage
     {
         var directory = new DirectoryInfo(Path.GetFullPath(root));
         for (var current = directory; current is not null; current = current.Parent)
-            if (current.Exists && (current.Attributes & FileAttributes.ReparsePoint) != 0)
+        {
+            FileAttributes attributes;
+            try { attributes = File.GetAttributes(current.FullName); }
+            catch (FileNotFoundException) { continue; }
+            catch (DirectoryNotFoundException) { continue; }
+            if ((attributes & FileAttributes.ReparsePoint) != 0 || (attributes & FileAttributes.Directory) == 0)
                 throw new InvalidOperationException("Reparse points are forbidden in service storage and its ancestors.");
+        }
         if (!directory.Exists) return;
         ValidateItem(directory);
-        // Runtime storage contains only our own files. Refuse foreign directories,
-        // links and handles obtained through an earlier user-writable file ACL.
+        foreach (var item in EnumerateEntries(directory))
+            ValidateItem(item);
+    }
+
+    // Yield each directory for the ACL check before descending into it.
+    internal static IEnumerable<FileSystemInfo> EnumerateEntries(DirectoryInfo directory, int depth = 0)
+    {
         foreach (var item in directory.EnumerateFileSystemInfos())
         {
-            if (item is DirectoryInfo || (item.Attributes & FileAttributes.ReparsePoint) != 0)
+            if ((item.Attributes & FileAttributes.ReparsePoint) != 0)
                 throw new InvalidOperationException("Unexpected entries in service storage. Reinstall into protected storage.");
-            ValidateItem(item);
+            if (item is DirectoryInfo && !(depth switch {
+                0 => item.Name.ToLowerInvariant() is "zapret" or "zapret.new" or "zapret.old",
+                1 => item.Name.ToLowerInvariant() is "bin" or "lists" or "profiles",
+                _ => false
+            }))
+                throw new InvalidOperationException("Unexpected directory in service storage: " + item.Name);
+            yield return item;
+            if (item is DirectoryInfo child)
+                foreach (var descendant in EnumerateEntries(child, depth + 1))
+                    yield return descendant;
         }
     }
+    public static void RemoveRuntime(string path)
+    {
+        var expected = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "BebekonVPN");
+        if (!string.Equals(Path.GetFullPath(path), expected, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Unexpected service storage path.");
+        DeleteValidatedTree(new DirectoryInfo(path));
+    }
+
+    internal static void DeleteValidatedTree(DirectoryInfo root)
+    {
+        Validate(root.FullName);
+        if (!root.Exists) return;
+        // Older imports may have inherited a read-only attribute from the source archive.
+        foreach (var file in EnumerateEntries(root).OfType<FileInfo>())
+            if (file.IsReadOnly) file.IsReadOnly = false;
+        root.Delete(true);
+    }
+
     private static void ValidateItem(FileSystemInfo item)
     {
         FileSystemSecurity acl = item is DirectoryInfo directory ? directory.GetAccessControl() : ((FileInfo)item).GetAccessControl();

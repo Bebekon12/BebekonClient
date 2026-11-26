@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><OutputType>Exe</OutputType></PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="Bebekon.Tests" />
     <EmbeddedResource Include="DestinationDns.ps1" LogicalName="Bebekon.DestinationDns" />
     <ProjectReference Include="../Bebekon.Core/Bebekon.Core.csproj" />
     <Content Include="../../core/xray.exe" Link="core/xray.exe" CopyToOutputDirectory="PreserveNewest" />

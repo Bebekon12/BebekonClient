@@ -71,9 +71,14 @@ internal sealed class DestinationPolicy(string root)
 
     public static async Task RemoveAsync(string root, CancellationToken ct)
     {
+        await ClearSystemPolicyAsync(ct);
+        File.Delete(Path.Combine(root,"destination-guard.json"));
+    }
+
+    internal static async Task ClearSystemPolicyAsync(CancellationToken ct)
+    {
         await SetDnsAsync([], ct);
         KillSwitch.ClearDestinationFilters();
-        File.Delete(Path.Combine(root,"destination-guard.json"));
     }
 
     private static async Task SetDnsAsync(string[] domains, CancellationToken ct)

@@ -46,7 +46,17 @@ public sealed class ServiceClient : IServiceClient
         if (startService) await Task.Run(() =>
         {
             try { using var service = new ServiceController(PipeProtocol.ServiceName); if (service.Status == ServiceControllerStatus.StopPending) service.WaitForStatus(ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(15)); service.Refresh(); if (service.Status == ServiceControllerStatus.Stopped) service.Start(); service.WaitForStatus(ServiceControllerStatus.Running, TimeSpan.FromSeconds(10)); }
-            catch (Exception) { throw new UserError("Служба VPN недоступна. Переустановите Setup или scripts/install-service.ps1 от администратора для вашей учётной записи Windows."); }
+            catch (System.ServiceProcess.TimeoutException) { throw new UserError("Служба BebekonVPN не успела запуститься. Проверьте событие Bebekon.Service в журнале Windows «Приложение»."); }
+            catch (Exception e) when (e.GetBaseException() is System.ComponentModel.Win32Exception)
+            {
+                var code = ((System.ComponentModel.Win32Exception)e.GetBaseException()).NativeErrorCode;
+                throw new UserError(code switch {
+                    5 => "Windows отказала в доступе к службе BebekonVPN (5). Проверьте владельца службы.",
+                    1060 => "Служба BebekonVPN не установлена (1060). Восстановите установку через Setup.",
+                    1053 or 1067 => $"Сбой запуска BebekonVPN ({code}). Проверьте событие Bebekon.Service в журнале Windows «Приложение».",
+                    _ => $"Windows не запустила службу BebekonVPN. Код {code}."
+                });
+            }
         }, ct);
         using var pipe = new NamedPipeClientStream(".", PipeProtocol.PipeName, PipeDirection.InOut, PipeOptions.Asynchronous, TokenImpersonationLevel.Impersonation);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct); timeout.CancelAfter(TimeSpan.FromSeconds(!startService ? 4 : PipeProtocol.LongRunning(request.Operation) ? 80 : 25));

@@ -7,7 +7,7 @@
 [Setup]
 AppId={{31857247-067C-4DC1-BA47-44F01A87B70D}
 AppName=Bebekon VPN
-AppVersion=0.1.34
+AppVersion=0.1.35
 AppPublisher=Bebekon
 DefaultDirName={autopf}\Bebekon VPN
 DefaultGroupName=Bebekon VPN
@@ -162,12 +162,27 @@ end;
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var Root: String; Code: Integer;
 begin
-  if CurUninstallStep = usUninstall then
-    if not Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\scripts\uninstall-service.ps1') + '"', '', SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then
-      RaiseException('Не удалось снять защиту WFP и удалить службу VPN.');
+  if CurUninstallStep = usUninstall then begin
+    if not Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\scripts\uninstall-service.ps1') + '"', '', SW_HIDE, ewWaitUntilTerminated, Code) then
+      RaiseException('Не удалось запустить удаление службы. Код Windows ' + IntToStr(Code));
+    case Code of
+      0: Log('Bebekon service and network cleanup complete.');
+      10: RaiseException('Выберите «Выход» в меню Bebekon в трее и повторите удаление.');
+      11: RaiseException('Windows не остановила службу BebekonVPN. Перезагрузите компьютер и повторите удаление.');
+      12: RaiseException('Откройте Bebekon под учётной записью владельца, отключите прокси и выйдите из приложения через трей. Затем повторите удаление.');
+      20: RaiseException('Не удалось запустить модуль очистки. Установите текущую версию Setup поверх приложения и повторите удаление.');
+      21: RaiseException('Windows не подтвердила очистку DNS или фильтров WFP. Проверьте службы DNS-клиент и Base Filtering Engine и повторите удаление.');
+      22: RaiseException('Сетевые правила сняты. Не удалось очистить ProgramData\BebekonVPN. Проверьте права и занятые файлы, перезагрузите компьютер и повторите удаление.');
+      23: RaiseException('Windows не удалила службу BebekonVPN. Повторите удаление после перезагрузки.');
+      24: RaiseException('Не удалось удалить автозапуск или файлы службы. Повторите удаление.');
+    else
+      RaiseException('Сценарий удаления завершился с кодом ' + IntToStr(Code) + '. Если файлы программы удалены вручную, восстановите их через Setup.');
+    end;
+  end;
   if CurUninstallStep = usPostUninstall then
-    if (OwnerDataRoot <> '') and (MsgBox('Удалить подписки, правила и настройки владельца VPN?', mbConfirmation, MB_YESNO) = IDYES) then begin
+    if (OwnerDataRoot <> '') and DirExists(OwnerDataRoot) and (SuppressibleMsgBox('Удалить подписки, правила и настройки владельца VPN?', mbConfirmation, MB_YESNO or MB_DEFBUTTON2, IDNO) = IDYES) then begin
       Root := OwnerDataRoot;
-      DelTree(Root, True, True, True);
+      if not DelTree(Root, True, True, True) then
+        MsgBox('Windows не удалила все данные владельца VPN из ' + Root, mbError, MB_OK);
     end;
 end;
