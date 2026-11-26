@@ -64,6 +64,26 @@ jobs:
             if ($core.Count -ne 1) { throw 'Expected one sing-box executable in the package.' }
             [IO.Compression.ZipFileExtensions]::ExtractToFile($core[0], (Join-Path $PWD 'core/sing-box.exe'), $true)
           } finally { $archive.Dispose() }
+      - name: Provide a reachable IPv6 destination on the disposable runner
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $address = [Net.IPAddress]::Parse('2001:db8::87')
+          $loopback = Get-NetIPAddress -AddressFamily IPv6 -IPAddress '::1'
+          New-NetIPAddress -InterfaceIndex $loopback.InterfaceIndex -IPAddress $address.IPAddressToString -PrefixLength 128 -PolicyStore ActiveStore | Out-Null
+          for ($attempt = 0; $attempt -lt 20; $attempt++) {
+            if ((Get-NetIPAddress -IPAddress $address.IPAddressToString).AddressState -eq 'Preferred') { break }
+            Start-Sleep -Milliseconds 250
+          }
+          $receiver = [Net.Sockets.TcpListener]::new($address, 0)
+          try {
+            $receiver.Start()
+            $client = [Net.Sockets.TcpClient]::new([Net.Sockets.AddressFamily]::InterNetworkV6)
+            try {
+              $client.Connect($address, $receiver.LocalEndpoint.Port)
+              $receiver.AcceptTcpClient().Dispose()
+            } finally { $client.Dispose() }
+          } finally { $receiver.Stop() }
       - name: Verify WFP in the disposable Windows runner
         shell: pwsh
         env:
